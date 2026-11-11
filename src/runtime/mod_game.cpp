@@ -487,3 +487,8 @@ namespace mirage::mods
 		}
 	}
 }
+
+namespace mirage::mods::ui
+{
+	bool MenuVisible() { return gui::visible; }
+}

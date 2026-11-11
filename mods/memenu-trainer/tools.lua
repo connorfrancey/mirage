@@ -74,6 +74,11 @@ tool {
     description = "Arm while wall climbing: turns around (or sidesteps) at full climb speed",
     order = 20,
     on_enable = function() beamer_started = false end,
+    on_panel = function()       -- Only what the chosen beamer uses
+        local sidestep = BeamerSidestep:get()
+        BeamerAuto:set_visible(sidestep)
+        BeamerDirection:set_visible(sidestep and BeamerAuto:get())
+    end,
     on_disable = beamer_release,        -- A key event is fine from any thread
     step = function(pawn, pc)
         if pawn.MovementState ~= MOVE.WallClimbing then
@@ -206,6 +211,10 @@ akg = mirage.module {
     description = "Jumps on the landing frame after every wallrun kick you do",
     order = 12,
     every_tick = true,          -- The landing frame is one tick
+    on_panel = function()
+        AkgWindow:set_visible(AkgBuffer:get())
+        AkgOnMiss:set_visible(AkgBuffer:get())
+    end,
     on_tick = function()
         if not akg:enabled() then return end
         buffer.on = AkgBuffer:get() and hooked

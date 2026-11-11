@@ -353,6 +353,14 @@ paths); every one of today's self-test checks passes with the features loaded as
   `menu_open`, `input_key` (a real key event), `share_set` / `share_get` (values for other mods and the menu's tests:
   the kick buffer's counts, "flight"), `MIRAGE_MODULE_EVERY_TICK` (never deferred). Frame Rate Limit lost its "Back to 62" button and warning line (no buttons or text in a
   module's column yet: the UI layer below).
+- **The UI layer:** `api->ui()` returns `MirageUi`, a second append-only table: the menu's ImGui through C (windows,
+  children, layout, text, buttons, checkboxes, sliders, drags, inputs, multiline text, combos, selectables, colors,
+  progress bars, plots, trees, tables, tooltips, popups, scrolling, drawing in a window, keys). Mirage's flag and color
+  numbers are its own, translated to ImGui's, so an ImGui update never changes a mod. Windows come from on_render;
+  `MirageModuleDesc.on_panel` (appended) draws in the module's settings panel; `setting_set_visible` hides a setting
+  that doesn't apply. The runtime wraps every mod render callback in ImGui's error recovery: a window or color the mod
+  left open is closed for it. Lua: `mirage.ui.*` (edited values come back: `changed, v = ui.slider_float(...)`).
+  Self-test "Mirage UI layer" (tests/mods/ui-lua) draws most widgets and leaves a window open on purpose.
 - **API-only, enforced:** Lua mods reach the game through `mirage.*` alone. For native parts, `EmbedMods.cmake`
   fails the build when a first-party mod's source has a quoted `#include` other than `"mirage/..."` or its own files.
   No first-party native mod exists yet: when the TAS or the collision view moves, it is built as its own project

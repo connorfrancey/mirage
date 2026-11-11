@@ -1,0 +1,8 @@
+id = "ui-lua"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): the UI layer, a window and a module panel with most widgets"
+
+[settings.note]
+type = "bool"
+name = "Shown setting"
+default = false

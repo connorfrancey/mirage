@@ -7,6 +7,7 @@
 #include "runtime/content.h"
 #include "runtime/manifest.h"
 #include "runtime/mod_lua.h"
+#include "runtime/mod_ui.h"
 #include "runtime/resolve.h"
 
 #include <imgui.h>
@@ -222,7 +223,21 @@ namespace mirage::mods
 		void OnEnable() override { Call(desc_.on_enable, "on_enable"); }
 		void OnDisable() override { Call(desc_.on_disable, "on_disable"); }
 		void OnTick() override { Call(desc_.on_tick, "on_tick"); }
-		void OnRender() override { Call(desc_.on_render, "on_render"); }
+		void OnRender() override
+		{
+			ui::Guard guard;		// What the mod left open in ImGui is closed after it
+			Call(desc_.on_render, "on_render");
+		}
+		void DrawPanel(float) override
+		{
+			if (!desc_.on_panel) return;
+			ui::Guard guard;
+			ImGui::PushID(this);
+			ImGui::BeginGroup();
+			Call(desc_.on_panel, "on_panel");
+			ImGui::EndGroup();
+			ImGui::PopID();
+		}
 		void OnTrigger() override { Call(desc_.on_trigger, "on_trigger"); }
 
 		MirageMod* Mod() const { return mod_; }
@@ -669,6 +684,44 @@ namespace mirage::mods
 			return MIRAGE_SETTING_UNKNOWN;
 		}
 
+		const MirageUi* MIRAGE_CALL Ui() { return ui::Table(); }
+
+		void MIRAGE_CALL SettingSetVisible(MirageSetting* h, int32_t visible)
+		{
+			ctl::Setting* s = SettingOf(h);
+			if (!s) return;
+			auto flag = std::make_shared<std::atomic<bool>>(visible != 0);
+			s->VisibleIf([flag] { return flag->load(); });
+		}
+
+		void MIRAGE_CALL DrawTextSized(float x, float y, uint32_t color, float size, const char* text)
+		{
+			ImDrawList* dl = DrawList();
+			if (!dl || !text) return;
+			dl->AddText(nullptr, size > 0.f ? size : ImGui::GetFontSize(), {x, y}, color, text);
+		}
+		void MIRAGE_CALL TextSizeSized(const char* text, float size, float* w, float* h)
+		{
+			ImVec2 s{};
+			if (ImGui::GetCurrentContext() && text) {
+				ImFont* font = ImGui::GetFont();
+				s = font->CalcTextSizeA(size > 0.f ? size : ImGui::GetFontSize(), FLT_MAX, 0.f, text);
+			}
+			if (w) *w = s.x;
+			if (h) *h = s.y;
+		}
+		void MIRAGE_CALL DrawRectRounded(float x1, float y1, float x2, float y2, uint32_t color, float rounding, float thickness)
+		{
+			ImDrawList* dl = DrawList();
+			if (!dl) return;
+			if (thickness <= 0.f) dl->AddRectFilled({x1, y1}, {x2, y2}, color, rounding);
+			else dl->AddRect({x1, y1}, {x2, y2}, color, rounding, 0, thickness);
+		}
+		void MIRAGE_CALL DrawTriangleFilled(float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color)
+		{
+			if (ImDrawList* dl = DrawList()) dl->AddTriangleFilled({x1, y1}, {x2, y2}, {x3, y3}, color);
+		}
+
 		// A notification on screen (the menu's toasts), prefixed with nothing: the mod writes what the player reads
 		void MIRAGE_CALL Notify(MirageMod* mod, const char* text)
 		{
@@ -697,6 +750,7 @@ namespace mirage::mods
 			Notify, DrawCircle, DrawCircleFilled, FrameRate, SettingColor,
 			game_api::ObjectsOfClass, game_api::EventSkip, game_api::MenuOpen, game_api::InputKey, game_api::ShareSet,
 			game_api::ShareGet,
+			Ui, SettingSetVisible, DrawTextSized, TextSizeSized, DrawRectRounded, DrawTriangleFilled,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

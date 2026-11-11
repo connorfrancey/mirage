@@ -53,7 +53,8 @@ public:
 	virtual void OnDisable() {}					// Also on unload: undo every change you made. May be on any thread, hand work for the game to game::RunOnGameThread
 	virtual void OnTick() {}					// Game thread, every engine tick while enabled
 	virtual void OnRender() {}					// Render thread, inside the ImGui frame, while enabled (HUD, overlays)
-	virtual void OnTrigger() {}					// Action modules: clicked, or its key was pressed
+	virtual void OnTrigger() {}
+	virtual void DrawPanel(float /*width*/) {}		// Render thread: more in the settings panel, below the settings					// Action modules: clicked, or its key was pressed
 	
 	// ---- Scheduling (core/scheduler.h) ------------------------------------------------------------------------------------
 	// When OnTick runs: interval, priority, dependencies. Set it in the constructor. The default runs every tick.

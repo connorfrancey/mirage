@@ -7,6 +7,7 @@
 #include "runtime/mod_lua.h"
 
 #include "runtime/lua_vm.h"
+#include "runtime/mod_lua_ui.h"
 
 #include <lauxlib.h>
 #include <lua.h>
@@ -46,8 +47,8 @@ namespace mirage::mods
 			MirageSetting* handle;
 			SettingKind kind;
 		};
-		enum Hook { kEnable, kDisable, kTick, kRender, kTrigger, kHooks };
-		const char* const kHookNames[kHooks] = {"on_enable", "on_disable", "on_tick", "on_render", "on_trigger"};
+		enum Hook { kEnable, kDisable, kTick, kRender, kTrigger, kPanel, kHooks };
+		const char* const kHookNames[kHooks] = {"on_enable", "on_disable", "on_tick", "on_render", "on_trigger", "on_panel"};
 	}
 
 	class LuaMod
@@ -58,7 +59,7 @@ namespace mirage::mods
 			LuaMod* owner = nullptr;
 			MirageModule* handle = nullptr;
 			std::string name;
-			int refs[kHooks] = {LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
+			int refs[kHooks] = {LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF, LUA_NOREF};
 			bool failed = false;
 		};
 
@@ -133,6 +134,11 @@ namespace mirage::mods
 		static int DrawCircle(lua_State* L);
 		static int DrawCircleFilled(lua_State* L);
 		static int FrameRate(lua_State* L);
+		static int DrawTextSized(lua_State* L);
+		static int TextSizeSized(lua_State* L);
+		static int DrawRectRounded(lua_State* L);
+		static int DrawTriangle(lua_State* L);
+		static int SettingSetVisible(lua_State* L);
 		static int All(lua_State* L);
 		static int MenuOpen(lua_State* L);
 		static int InputKey(lua_State* L);
@@ -279,6 +285,7 @@ namespace mirage::mods
 		d.on_tick = &Invoke<kTick>;
 		d.on_render = &Invoke<kRender>;
 		d.on_trigger = &Invoke<kTrigger>;
+		d.on_panel = refs->refs[kPanel] != LUA_NOREF ? &Invoke<kPanel> : nullptr;
 		refs->handle = self.api_->module_register(self.mod_, &d);
 		if (!refs->handle) {
 			for (int ref : refs->refs) luaL_unref(L, LUA_REGISTRYINDEX, ref);
@@ -434,6 +441,40 @@ namespace mirage::mods
 			return static_cast<uint32_t>(luaL_optinteger(L, index, 0xFFFFFFFF));
 		}
 		float Num(lua_State* L, int index) { return static_cast<float>(luaL_checknumber(L, index)); }
+	}
+
+	// mirage.draw.text_sized(x, y, color, size, text); text_size_sized(text, size) -> w, h
+	int LuaMod::DrawTextSized(lua_State* L)
+	{
+		Self(L).api_->draw_text_sized(Num(L, 1), Num(L, 2), Color(L, 3), Num(L, 4), luaL_checkstring(L, 5));
+		return 0;
+	}
+	int LuaMod::TextSizeSized(lua_State* L)
+	{
+		float w = 0.f, h = 0.f;
+		Self(L).api_->text_size_sized(luaL_checkstring(L, 1), Num(L, 2), &w, &h);
+		lua_pushnumber(L, w);
+		lua_pushnumber(L, h);
+		return 2;
+	}
+	// mirage.draw.rect_rounded(x1, y1, x2, y2, color, rounding, thickness (0: filled))
+	int LuaMod::DrawRectRounded(lua_State* L)
+	{
+		Self(L).api_->draw_rect_rounded(Num(L, 1), Num(L, 2), Num(L, 3), Num(L, 4), Color(L, 5),
+										static_cast<float>(luaL_optnumber(L, 6, 0.0)), static_cast<float>(luaL_optnumber(L, 7, 0.0)));
+		return 0;
+	}
+	int LuaMod::DrawTriangle(lua_State* L)
+	{
+		Self(L).api_->draw_triangle_filled(Num(L, 1), Num(L, 2), Num(L, 3), Num(L, 4), Num(L, 5), Num(L, 6), Color(L, 7));
+		return 0;
+	}
+	// setting:set_visible(bool)
+	int LuaMod::SettingSetVisible(lua_State* L)
+	{
+		const auto* box = static_cast<SettingBox*>(luaL_checkudata(L, 1, kSettingMeta));
+		Self(L).api_->setting_set_visible(box->handle, lua_toboolean(L, 2));
+		return 0;
 	}
 
 	int LuaMod::DrawText(lua_State* L)
@@ -1267,7 +1308,8 @@ namespace mirage::mods
 
 		luaL_newmetatable(L, kSettingMeta);
 		lua_newtable(L);
-		const luaL_Reg settingFns[] = {{"get", SettingGet}, {"set", SettingSet}, {"down", SettingDown}, {nullptr, nullptr}};
+		const luaL_Reg settingFns[] = {{"get", SettingGet}, {"set", SettingSet}, {"down", SettingDown}, {"set_visible", SettingSetVisible},
+			{nullptr, nullptr}};
 		set(settingFns);
 		lua_setfield(L, -2, "__index");
 		lua_pop(L, 1);
@@ -1325,9 +1367,14 @@ namespace mirage::mods
 		lua_newtable(L);
 		const luaL_Reg drawFns[] = {{"text", DrawText}, {"line", DrawLine}, {"rect", DrawRect},
 			{"rect_filled", DrawRectFilled}, {"circle", DrawCircle}, {"circle_filled", DrawCircleFilled},
-			{"screen_size", ScreenSize}, {"text_size", TextSize}, {nullptr, nullptr}};
+			{"screen_size", ScreenSize}, {"text_size", TextSize}, {"text_sized", DrawTextSized},
+			{"text_size_sized", TextSizeSized}, {"rect_rounded", DrawRectRounded}, {"triangle", DrawTriangle},
+			{nullptr, nullptr}};
 		set(drawFns);
 		lua_setfield(L, -2, "draw");
+
+		lua_ui::Push(L, api_->ui());
+		lua_setfield(L, -2, "ui");
 
 		lua_newtable(L);
 		const luaL_Reg scriptLib[] = {{"open", ScriptOpen}, {"restore", ScriptRestore}, {nullptr, nullptr}};

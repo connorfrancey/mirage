@@ -94,6 +94,9 @@ typedef struct MirageModuleDesc {
     MirageCallback on_tick;         /* Game thread, every tick while on */
     MirageCallback on_render;       /* Render thread, every frame while on */
     MirageCallback on_trigger;      /* Action modules: clicked or key pressed */
+    /* Appended in step 9 (a mod built before has a smaller `size`: the runtime doesn't read these) */
+    MirageCallback on_panel;        /* Render thread: draws (with api->ui()) in the module's settings panel, below its
+                                       settings, while the panel is open. The panel's width: ui->content_width() */
 } MirageModuleDesc;
 
 /* ---- Game objects, events and function hooks (step 6) -------------------------------------------------------------- */
@@ -173,6 +176,166 @@ typedef struct MirageToken {
     uint32_t memory_offset;     /* Where it was in the code when opened (read only; 0 for an added token) */
     char text[256];             /* StringConst / UnicodeStringConst, UTF-8 */
 } MirageToken;
+
+/* ---- The UI layer (step 9): windows and widgets, immediate mode (they are made again every frame) ------------------
+ * The menu's own ImGui, through a C table, so a mod never links ImGui (any version, any compiler). Call these only on
+ * the render thread: in on_render (windows of the mod's own: window_begin / window_end) or in on_panel (widgets in the
+ * module's settings panel). Every window_begin and child_begin has its end; table_begin, tree_node and popup_begin
+ * too when they returned 1. Widgets are told apart by their label: two with the same label in one window need an
+ * id_push or a "##suffix" ("Delete##3" shows "Delete"). Sizes are pixels; 0 means "fit". Colors are 0xAABBGGRR. */
+typedef struct MirageUi MirageUi;
+
+/* window_begin flags (ImGui's ImGuiWindowFlags) */
+#define MIRAGE_WINDOW_NO_TITLE 0x1u
+#define MIRAGE_WINDOW_NO_RESIZE 0x2u
+#define MIRAGE_WINDOW_NO_MOVE 0x4u
+#define MIRAGE_WINDOW_NO_SCROLLBAR 0x8u
+#define MIRAGE_WINDOW_NO_COLLAPSE 0x20u
+#define MIRAGE_WINDOW_AUTO_SIZE 0x40u
+#define MIRAGE_WINDOW_NO_BACKGROUND 0x80u
+#define MIRAGE_WINDOW_NO_INPUTS 0xC0200u        /* Click-through: an overlay */
+#define MIRAGE_WINDOW_MENU_ONLY 0x80000000u     /* Mirage: shown only while the menu is open */
+/* input_text flags */
+#define MIRAGE_INPUT_ENTER_RETURNS 0x20u        /* Returns 1 when Enter is pressed, not on every change */
+#define MIRAGE_INPUT_READ_ONLY 0x4000u
+#define MIRAGE_INPUT_PASSWORD 0x8000u
+#define MIRAGE_INPUT_MULTILINE 0x40000000u      /* Mirage: a text box of several lines (`height` tall) */
+/* table_begin flags (ImGuiTableFlags) */
+#define MIRAGE_TABLE_RESIZABLE 0x1u
+#define MIRAGE_TABLE_ROW_BG 0x40u
+#define MIRAGE_TABLE_BORDERS 0x780u
+#define MIRAGE_TABLE_SIZING_FIXED 0x2000u
+#define MIRAGE_TABLE_SCROLL_Y 0x2000000u        /* Rows scroll inside the given height */
+/* table_column flags (ImGuiTableColumnFlags) */
+#define MIRAGE_COLUMN_STRETCH 0x8u              /* Shares what is left */
+#define MIRAGE_COLUMN_FIXED 0x10u               /* `width` pixels wide */
+/* color_push: what is colored (ImGuiCol) */
+#define MIRAGE_COLOR_TEXT 0
+#define MIRAGE_COLOR_TEXT_DISABLED 1
+#define MIRAGE_COLOR_WINDOW_BG 2
+#define MIRAGE_COLOR_CHILD_BG 3
+#define MIRAGE_COLOR_BORDER 5
+#define MIRAGE_COLOR_FRAME_BG 7
+#define MIRAGE_COLOR_BUTTON 21
+#define MIRAGE_COLOR_BUTTON_HOVERED 22
+#define MIRAGE_COLOR_BUTTON_ACTIVE 23
+#define MIRAGE_COLOR_HEADER 24
+#define MIRAGE_COLOR_PLOT_LINES 40
+#define MIRAGE_COLOR_PLOT_HISTOGRAM 42
+
+struct MirageUi {
+    uint32_t size;                  /* sizeof(MirageUi) of the runtime: like MirageApi, it only grows */
+
+    /* Windows. Always call window_end after window_begin, whatever it returned (0: collapsed or hidden, draw nothing
+     * in it). `open` (may be NULL) gets a close button and is set to 0 when it's clicked. window_next_pos / _size go
+     * before window_begin; unless `always`, only the first time the window is seen (the menu remembers where the
+     * player put it). x or y < 0: centered on the screen. */
+    int32_t(MIRAGE_CALL* window_begin)(const char* title, int32_t* open, uint32_t flags);
+    void(MIRAGE_CALL* window_end)(void);
+    void(MIRAGE_CALL* window_next_pos)(float x, float y, int32_t always);
+    void(MIRAGE_CALL* window_next_size)(float width, float height, int32_t always);
+    void(MIRAGE_CALL* window_next_bg_alpha)(float alpha);
+    int32_t(MIRAGE_CALL* child_begin)(const char* id, float width, float height, int32_t border);  /* Always child_end */
+    void(MIRAGE_CALL* child_end)(void);
+
+    /* Layout */
+    void(MIRAGE_CALL* same_line)(float offset, float spacing);       /* Next widget on this line (0, -1: the defaults) */
+    void(MIRAGE_CALL* separator)(void);
+    void(MIRAGE_CALL* spacing)(void);
+    void(MIRAGE_CALL* indent)(float width);                          /* 0: the default; unindent by the same */
+    void(MIRAGE_CALL* unindent)(float width);
+    void(MIRAGE_CALL* next_width)(float width);                      /* The next widget's width; < 0: leave that much */
+    float(MIRAGE_CALL* content_width)(void);                         /* Room left on this line */
+    float(MIRAGE_CALL* content_height)(void);
+    float(MIRAGE_CALL* line_height)(void);                           /* A line of text, with its spacing */
+    void(MIRAGE_CALL* cursor_screen_pos)(float* x, float* y);        /* Where the next widget goes, screen pixels */
+    void(MIRAGE_CALL* dummy)(float width, float height);             /* Empty space */
+    void(MIRAGE_CALL* id_push)(const char* id);
+    void(MIRAGE_CALL* id_push_int)(int32_t id);
+    void(MIRAGE_CALL* id_pop)(void);
+    void(MIRAGE_CALL* disabled_begin)(int32_t disabled);            /* Always disabled_end */
+    void(MIRAGE_CALL* disabled_end)(void);
+    void(MIRAGE_CALL* color_push)(int32_t what, uint32_t color);     /* MIRAGE_COLOR_*: pop as many as pushed */
+    void(MIRAGE_CALL* color_pop)(int32_t count);
+    void(MIRAGE_CALL* font_scale)(float scale);                     /* The current window's text size (1: normal) */
+
+    /* Text */
+    void(MIRAGE_CALL* text)(const char* text);
+    void(MIRAGE_CALL* text_colored)(uint32_t color, const char* text);
+    void(MIRAGE_CALL* text_disabled)(const char* text);
+    void(MIRAGE_CALL* text_wrapped)(const char* text);
+    void(MIRAGE_CALL* label_text)(const char* label, const char* text);     /* "text   label", aligned like a widget */
+    void(MIRAGE_CALL* bullet_text)(const char* text);
+
+    /* Widgets: 1 when the player used it this frame (clicked it, changed the value) */
+    int32_t(MIRAGE_CALL* button)(const char* label, float width, float height);
+    int32_t(MIRAGE_CALL* small_button)(const char* label);
+    int32_t(MIRAGE_CALL* checkbox)(const char* label, int32_t* value);
+    int32_t(MIRAGE_CALL* radio)(const char* label, int32_t active);
+    int32_t(MIRAGE_CALL* slider_float)(const char* label, float* value, float min, float max, const char* format);
+    int32_t(MIRAGE_CALL* slider_int)(const char* label, int32_t* value, int32_t min, int32_t max, const char* format);
+    int32_t(MIRAGE_CALL* drag_float)(const char* label, float* value, float speed, float min, float max, const char* format);
+    int32_t(MIRAGE_CALL* drag_int)(const char* label, int32_t* value, float speed, int32_t min, int32_t max);
+    int32_t(MIRAGE_CALL* input_int)(const char* label, int32_t* value, int32_t step);
+    int32_t(MIRAGE_CALL* input_float)(const char* label, float* value, float step, const char* format);
+    /* Edits the text in `buffer` (`capacity` bytes, with the terminator). MIRAGE_INPUT_MULTILINE: `height` tall. */
+    int32_t(MIRAGE_CALL* input_text)(const char* label, char* buffer, uint32_t capacity, uint32_t flags, float height);
+    /* `items`: the choices, each ended by a zero byte, the list by one more. *current: the chosen index */
+    int32_t(MIRAGE_CALL* combo)(const char* label, int32_t* current, const char* items);
+    int32_t(MIRAGE_CALL* selectable)(const char* label, int32_t selected, float width, float height);
+    int32_t(MIRAGE_CALL* color_edit)(const char* label, uint32_t* rgba);
+    void(MIRAGE_CALL* progress_bar)(float fraction, float width, float height, const char* overlay);   /* overlay: NULL */
+    /* A chart of `count` values; min == max: from the values */
+    void(MIRAGE_CALL* plot_lines)(const char* label, const float* values, int32_t count, float min, float max,
+                                   float width, float height, const char* overlay);
+    void(MIRAGE_CALL* plot_histogram)(const char* label, const float* values, int32_t count, float min, float max,
+                                       float width, float height, const char* overlay);
+
+    /* Trees: tree_node returns 1 when open (then tree_pop); a collapsing header has no pop */
+    int32_t(MIRAGE_CALL* tree_node)(const char* label, int32_t default_open);
+    void(MIRAGE_CALL* tree_pop)(void);
+    int32_t(MIRAGE_CALL* collapsing_header)(const char* label, int32_t default_open);
+
+    /* Tables: table_begin returns 1 when shown (then table_end). The columns first, then row by row. */
+    int32_t(MIRAGE_CALL* table_begin)(const char* id, int32_t columns, uint32_t flags, float width, float height);
+    void(MIRAGE_CALL* table_column)(const char* name, uint32_t flags, float width);
+    void(MIRAGE_CALL* table_headers)(void);                          /* A row with the columns' names */
+    void(MIRAGE_CALL* table_next_row)(void);
+    int32_t(MIRAGE_CALL* table_next_column)(void);                   /* 1: that column is visible */
+    void(MIRAGE_CALL* table_end)(void);
+
+    /* The last widget, and popups */
+    int32_t(MIRAGE_CALL* item_hovered)(void);
+    int32_t(MIRAGE_CALL* item_clicked)(int32_t button);              /* 0 left, 1 right, 2 middle */
+    int32_t(MIRAGE_CALL* item_active)(void);                         /* Held down, or being edited */
+    void(MIRAGE_CALL* item_rect)(float* x1, float* y1, float* x2, float* y2);   /* Its box, screen pixels */
+    void(MIRAGE_CALL* tooltip)(const char* text);                    /* Shown now (call it when item_hovered) */
+    void(MIRAGE_CALL* popup_open)(const char* id);
+    int32_t(MIRAGE_CALL* popup_begin)(const char* id);               /* 1: open, draw it, then popup_end */
+    int32_t(MIRAGE_CALL* popup_context_item)(const char* id);        /* Right-click on the last widget; 1: popup_end */
+    void(MIRAGE_CALL* popup_end)(void);
+    void(MIRAGE_CALL* popup_close)(void);                            /* The popup being drawn */
+    void(MIRAGE_CALL* focus_keyboard)(void);                         /* The next widget gets the keyboard */
+
+    /* Scrolling of the current window */
+    float(MIRAGE_CALL* scroll_y)(void);
+    float(MIRAGE_CALL* scroll_max_y)(void);
+    void(MIRAGE_CALL* scroll_to_bottom)(void);
+
+    /* Drawing in the current window (over its widgets), screen pixels like draw_* */
+    void(MIRAGE_CALL* window_draw_rect)(float x1, float y1, float x2, float y2, uint32_t color, float rounding,
+                                         float thickness);          /* thickness 0: filled */
+    void(MIRAGE_CALL* window_draw_text)(float x, float y, uint32_t color, const char* text);
+    void(MIRAGE_CALL* window_draw_line)(float x1, float y1, float x2, float y2, uint32_t color, float thickness);
+    void(MIRAGE_CALL* window_draw_circle)(float x, float y, float radius, uint32_t color, float thickness);  /* 0: filled */
+
+    /* Input as the menu's ImGui sees it */
+    int32_t(MIRAGE_CALL* key_pressed)(int32_t vk);                   /* Went down this frame (repeats when held) */
+    int32_t(MIRAGE_CALL* wants_keyboard)(void);                      /* A text box has the keyboard */
+    void(MIRAGE_CALL* mouse_pos)(float* x, float* y);
+    float(MIRAGE_CALL* time)(void);                                  /* Seconds the menu has run */
+    float(MIRAGE_CALL* delta_time)(void);                            /* Seconds since the last frame */
+};
 
 /* The runtime's functions. Only grows; `size` says how much of it this runtime has. */
 typedef struct MirageApi {
@@ -328,6 +491,17 @@ typedef struct MirageApi {
      * share_get copies up to `capacity` bytes and returns the full length (0, "" when not set). */
     void(MIRAGE_CALL* share_set)(MirageMod* mod, const char* key, const char* value);
     uint32_t(MIRAGE_CALL* share_get)(const char* mod_id, const char* key, char* buffer, uint32_t capacity);
+
+    /* ---- The UI layer (step 9; see MirageUi) ------------------------------------------------------------------------ */
+    const MirageUi*(MIRAGE_CALL* ui)(void);
+    /* Shows or hides a setting in its module's panel (one that only matters while another is on). Any thread. */
+    void(MIRAGE_CALL* setting_set_visible)(MirageSetting* setting, int32_t visible);
+    /* More drawing (on_render, like draw_*): text `size` pixels tall (0: the menu's), rounded rectangles, triangles */
+    void(MIRAGE_CALL* draw_text_sized)(float x, float y, uint32_t color, float size, const char* text);
+    void(MIRAGE_CALL* text_size_sized)(const char* text, float size, float* width, float* height);
+    void(MIRAGE_CALL* draw_rect_rounded)(float x1, float y1, float x2, float y2, uint32_t color, float rounding,
+                                         float thickness);          /* thickness 0: filled */
+    void(MIRAGE_CALL* draw_triangle_filled)(float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

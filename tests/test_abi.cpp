@@ -14,7 +14,7 @@ static_assert(MIRAGE_ABI_VERSION >= 1);
 static_assert(MIRAGE_LOG_DEBUG == 0 && MIRAGE_LOG_INFO == 1 && MIRAGE_LOG_WARN == 2 && MIRAGE_LOG_ERROR == 3);
 static_assert(MIRAGE_MODULE_ACTION == 0x1u && MIRAGE_MODULE_ENABLED_BY_DEFAULT == 0x2u);
 
-static_assert(sizeof(MirageModuleDesc) == 52);
+static_assert(sizeof(MirageModuleDesc) >= 52);   // 52 in the first ABI v1 (a mod with that size still works)
 static_assert(offsetof(MirageModuleDesc, size) == 0);
 static_assert(offsetof(MirageModuleDesc, name) == 4);
 static_assert(offsetof(MirageModuleDesc, tab) == 8);
@@ -112,6 +112,21 @@ MIRAGE_AT(menu_open, 304);
 MIRAGE_AT(input_key, 308);
 MIRAGE_AT(share_set, 312);
 MIRAGE_AT(share_get, 316);
+MIRAGE_AT(ui, 320);
+MIRAGE_AT(setting_set_visible, 324);
+MIRAGE_AT(draw_text_sized, 328);
+MIRAGE_AT(text_size_sized, 332);
+MIRAGE_AT(draw_rect_rounded, 336);
+MIRAGE_AT(draw_triangle_filled, 340);
+static_assert(offsetof(MirageModuleDesc, on_panel) == 52, "MirageModuleDesc moved");
+// MirageUi: its own append-only table
+#define MIRAGE_UI_AT(field, offset) static_assert(offsetof(MirageUi, field) == (offset), #field " moved")
+MIRAGE_UI_AT(window_begin, 4);
+MIRAGE_UI_AT(text, 108);
+MIRAGE_UI_AT(button, 132);
+MIRAGE_UI_AT(table_begin, 212);
+MIRAGE_UI_AT(item_hovered, 236);
+MIRAGE_UI_AT(delta_time, 324);
 static_assert(sizeof(MirageToken) == 384 && offsetof(MirageToken, name) == 48 && offsetof(MirageToken, target) == 120 &&
               offsetof(MirageToken, text) == 128, "MirageToken moved");
 // Size of ABI v1's table: a later version only makes it larger

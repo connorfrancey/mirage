@@ -43,6 +43,9 @@ namespace
         const float itemW = w - 20.f;
         for (ctl::Setting* s : m.Settings())
             if (s->Visible()) s->Show(itemW);
+        ImGui::PushItemWidth(itemW);
+        m.DrawPanel(itemW);
+        ImGui::PopItemWidth();
 
         keybinds::Button(m.IsAction() ? "Hotkey" : "Toggle key", m.key, itemW);
 

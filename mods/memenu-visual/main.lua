@@ -145,6 +145,19 @@ frame_rate = mirage.module {
             if e.MinSmoothedFrameRate > max then e.MinSmoothedFrameRate = max end
         end
     end,
+    on_panel = function()
+        local ui = mirage.ui
+        Cap:set_visible(not Uncapped:get())
+        if ui.button("Back to 62", ui.content_width(), 0) then
+            Cap:set(62)
+            Uncapped:set(false)
+        end
+        if Uncapped:get() or math.abs(Cap:get() - 62) > 0.01 then
+            ui.color_push(ui.COLOR_TEXT, mirage.rgba(255, 191, 77))
+            ui.text_wrapped("Not 62: the game moves differently at other frame rates. Not for speedruns")
+            ui.color_pop(1)
+        end
+    end,
     on_disable = function()
         later.run(function()
             local e = game_engine()

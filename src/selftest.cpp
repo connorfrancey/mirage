@@ -2200,6 +2200,48 @@ void TestEngineStateHook()
     End(s);
 }
 
+// Mirage step 9's UI layer, with tests/mods/ui-lua: its window (most widgets, every frame), its module panel, and a
+// window and a color it leaves open on purpose, which the runtime closes for it: frames keep coming, and the menu's
+// own windows still draw after it.
+void TestMirageUi()
+{
+    Step& s = Begin("Mirage UI layer");
+    Probe p(s);
+    Module* m = modules::Find("UI test (Lua)");
+    if (!m) {
+        p.Problem("the ui-lua test mod's module was not found (is tests/mods deployed?)");
+        p.Check(1, false);
+        End(s);
+        return;
+    }
+    const auto shared = [](const char* key) {
+        char v[32]{};
+        mirage::mods::game_api::ShareGet("ui-lua", key, v, sizeof v);
+        return std::atoi(v);
+    };
+    gui::OpenColumnForTest(m->Tab().c_str());
+    const bool expandedWas = m->expanded, visibleWas = gui::visible;
+    OnRenderThread([&] {
+        gui::visible = true;        // The panel draws in the menu
+        m->expanded = true;
+        m->SetEnabled(true);
+    });
+    const int framesBefore = shared("frames"), panelBefore = shared("panel_frames");
+    const bool drew = WaitFor(5.0, [&] { return shared("frames") >= framesBefore + 20 && shared("panel_frames") >= panelBefore + 20; });
+    const int frames = shared("frames") - framesBefore, panel = shared("panel_frames") - panelBefore;
+    OnRenderThread([&] {
+        m->SetEnabled(false);
+        m->expanded = expandedWas;
+        gui::visible = visibleWas;
+    });
+    gui::OpenColumnForTest("");
+    WaitTicks(3);
+    s.notes.push_back("window drawn " + std::to_string(frames) + " frames, panel " + std::to_string(panel));
+    if (!drew) p.Problem("the mod's window or panel did not keep drawing (an unclosed window broke the frame?)");
+    p.Check(1, false);
+    End(s);
+}
+
 std::atomic<int> g_tickBefore{0}, g_tickAfter{0};
 std::atomic<bool> g_blockTick{false};
 
@@ -4204,6 +4246,7 @@ const Named* FeatureList()
         {"Mirage mods", &TestMirageMods, false},
         {"Mirage lifecycle", &TestMirageLifecycle, false},
         {"Mirage hooks from mods", &TestMirageModHooks, false},
+        {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Mirage content", &TestMirageContent, false},
         {"Mirage textures", &TestMirageTextures, false},
