@@ -241,3 +241,19 @@ TEST(Manifest, ReportsSettingMistakes)
 	EXPECT_TRUE(HasMessage(warn.warnings, "unknown key 'colour'"));
 	EXPECT_TRUE(HasMessage(warn.warnings, "min and max are for int and float"));
 }
+
+// The mod manager's off list: written and read back; an empty folder has none; garbage reads as none
+TEST(Manifest, DisabledListRoundTrip)
+{
+	const auto dir = std::filesystem::temp_directory_path() / "memenu_test_disabled";
+	std::filesystem::create_directories(dir);
+	std::filesystem::remove(dir / "disabled.toml");
+	EXPECT_TRUE(ReadDisabled(dir).empty());
+	ASSERT_TRUE(WriteDisabled(dir, {"hello", "retexture"}));
+	EXPECT_EQ(ReadDisabled(dir), (std::set<std::string>{"hello", "retexture"}));
+	ASSERT_TRUE(WriteDisabled(dir, {}));
+	EXPECT_TRUE(ReadDisabled(dir).empty());
+	std::ofstream(dir / "disabled.toml") << "off = [ this is not toml";
+	EXPECT_TRUE(ReadDisabled(dir).empty());
+	std::filesystem::remove_all(dir);
+}

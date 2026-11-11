@@ -65,7 +65,20 @@ namespace mirage::mods
 		std::string problem;					// Why it isn't loaded (left out, failed, crashed)
 		std::vector<std::string> modules;		// Names of the modules it registered
 		std::vector<std::string> warnings;
+		// For the mod manager
+		std::string description, authors;
+		std::vector<std::string> required, optional, incompatible;	// "id range" each, as mod.toml says
+		std::vector<std::string> dependents;	// The mods that require this one
+		bool offNextStart = false;				// Switched off in the mod manager (disabled.toml)
+		bool crashed = false;					// In crashes.toml: not loaded until allowed again
 	};
 	// Every mod found, loaded or not, in load order then the rest
 	std::vector<Info> List();
+
+	// ---- The mod manager (step 9) --------------------------------------------------------------------------------------
+	// Loaded at the next start or not (disabled.toml in its mods folder). Switched off, its modules go off now too.
+	// The menu's thread (where modules are switched).
+	bool SetEnabledNextStart(const std::string& id, bool on);
+	// Takes the mod out of crashes.toml: it is tried again at the next start
+	bool ForgetCrash(const std::string& id);
 }

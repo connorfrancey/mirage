@@ -51,6 +51,9 @@
 #if MEMENU_FEATURE_AUTO_KICKGLITCH
 #include "features/trainer/auto_kickglitch.h"
 #endif
+#if MEMENU_FEATURE_MOD_MANAGER
+#include "features/misc/mod_manager.h"
+#endif
 #if MEMENU_FEATURE_KEY_BINDINGS
 #include "features/misc/key_bindings.h"
 #include <shlobj.h>
@@ -477,6 +480,22 @@ Expectation ExpectationFor(Module& m)
                     if (info_lines::EditorFrames() == editorFramesBefore) return std::string("its editor was never drawn");
                     return std::string();
                 }};
+    }
+#endif
+#if MEMENU_FEATURE_MOD_MANAGER
+    if (name == "Mod Manager") {
+        // Its window is drawn while the menu is open, and lists every mod found (the first-party ones at least)
+        static std::uint64_t framesBefore = 0;
+        return {[] { framesBefore = mod_manager::Frames(); },
+                [] {
+                    if (mod_manager::Frames() == framesBefore) return std::string("its window was never drawn");
+                    const std::size_t found = mirage::mods::List().size();
+                    if (found == 0) return std::string("no mods found (the first-party ones are always there)");
+                    if (mod_manager::Rows() != found)
+                        return "it listed " + std::to_string(mod_manager::Rows()) + " mods of " + std::to_string(found);
+                    return std::string();
+                },
+                {}};
     }
 #endif
     if (name == "Save State")

@@ -344,4 +344,35 @@ namespace mirage::mods
 			out.warnings.push_back(Utf8(file) + ": no entry, no Lua and no content: the mod does nothing");
 		return out;
 	}
+
+	std::set<std::string> ReadDisabled(const std::filesystem::path& folder)
+	{
+		std::set<std::string> out;
+		const auto file = folder / "disabled.toml";
+		std::error_code ec;
+		if (!std::filesystem::exists(file, ec)) return out;
+		try {
+			const toml::value root = toml::parse(file);
+			if (root.contains("off") && root.at("off").is_array())
+				for (const auto& v : root.at("off").as_array())
+					if (v.is_string()) out.insert(v.as_string());
+		} catch (const std::exception&) {
+		}
+		return out;
+	}
+
+	bool WriteDisabled(const std::filesystem::path& folder, const std::set<std::string>& ids)
+	{
+		std::ofstream out(folder / "disabled.toml", std::ios::binary | std::ios::trunc);
+		if (!out) return false;
+		out << "# Mods switched off in the mod manager: not loaded at the next start. Remove an id (or switch it on in\n"
+			   "# the menu) to load it again.\n\noff = [";
+		bool first = true;
+		for (const std::string& id : ids) {
+			out << (first ? "" : ", ") << '"' << id << '"';
+			first = false;
+		}
+		out << "]\n";
+		return static_cast<bool>(out);
+	}
 }

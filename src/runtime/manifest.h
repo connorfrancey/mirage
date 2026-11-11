@@ -42,6 +42,7 @@
 #include <array>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -101,4 +102,9 @@ namespace mirage::mods
 	// <dir>/mod.toml: Parse, plus the checks that need the folder (the files it names exist, the id is the folder's
 	// name)
 	Parsed Load(const std::filesystem::path& dir);
+
+	// <mods folder>/disabled.toml: the mods the player switched off in the mod manager, not loaded at the next start
+	//   off = ["hello", "retexture"]
+	std::set<std::string> ReadDisabled(const std::filesystem::path& folder);
+	bool WriteDisabled(const std::filesystem::path& folder, const std::set<std::string>& ids);
 }

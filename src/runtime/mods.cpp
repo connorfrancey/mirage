@@ -125,6 +125,10 @@ namespace mirage::mods
 			return buf;
 		}
 
+		// What the mod manager shows: the mods switched off for the next start, and those that crashed
+		std::mutex g_flagLock;
+		std::set<std::string> g_userOff, g_crashed;
+
 		// ---- Crash records: <mods folder>/crashes.toml, one table per mod ------------------------------------------
 		std::mutex g_crashLock;
 		void RecordCrash(const MirageMod& mod, const std::string& module, const std::string& what, DWORD code,
@@ -151,6 +155,10 @@ namespace mirage::mods
 			entry["exception"] = Hex(code);
 			entry["at"] = where;
 			root[mod.id] = entry;
+			{
+				std::lock_guard flags(g_flagLock);
+				g_crashed.insert(mod.id);
+			}
 			std::ofstream(file, std::ios::binary | std::ios::trunc)
 				<< "# Mods that crashed. A mod listed here isn't loaded: delete its table to try it again.\n\n"
 				<< toml::format(root);
@@ -865,7 +873,16 @@ namespace mirage::mods
 				spdlog::info("Mods: no {} folder", Utf8(folder));
 				continue;
 			}
-			off.merge(ReadCrashes(folder));
+			for (const std::string& id : ReadDisabled(folder)) {
+				off.emplace(id, "switched off in the mod manager");
+				std::lock_guard lock(g_flagLock);
+				g_userOff.insert(id);
+			}
+			for (const auto& [id, why] : ReadCrashes(folder)) {
+				off.emplace(id, why);
+				std::lock_guard lock(g_flagLock);
+				g_crashed.insert(id);
+			}
 			std::vector<std::filesystem::path> dirs;
 			for (const auto& e : std::filesystem::directory_iterator(folder, ec))
 				if (e.is_directory() && std::filesystem::exists(e.path() / "mod.toml")) dirs.push_back(e.path());
@@ -1076,6 +1093,22 @@ namespace mirage::mods
 			for (const ModModule* m : mod.modules)
 				if (m->Bound()) info.modules.push_back(m->Name());
 			info.warnings = mod.warnings;
+			info.description = mod.manifest.description;
+			for (const auto& a : mod.manifest.authors) info.authors += (info.authors.empty() ? "" : ", ") + a;
+			const auto deps = [](const std::vector<Dependency>& list, std::vector<std::string>& to) {
+				for (const auto& d : list) to.push_back(d.id + " " + d.range.Text());
+			};
+			deps(mod.manifest.required, info.required);
+			deps(mod.manifest.optional, info.optional);
+			deps(mod.manifest.incompatible, info.incompatible);
+			for (const auto& other : g_mods)
+				for (const auto& d : other->manifest.required)
+					if (d.id == mod.id) info.dependents.push_back(other->id);
+			{
+				std::lock_guard lock(g_flagLock);
+				info.offNextStart = g_userOff.count(mod.id) != 0;
+				info.crashed = g_crashed.count(mod.id) != 0;
+			}
 			out.push_back(std::move(info));
 		}
 		std::stable_sort(out.begin(), out.end(), [](const Info& a, const Info& b) {
@@ -1084,5 +1117,65 @@ namespace mirage::mods
 		});
 		out.insert(out.end(), g_excluded.begin(), g_excluded.end());
 		return out;
+	}
+
+	namespace
+	{
+		const MirageMod* ModById(const std::string& id)
+		{
+			for (const auto& m : g_mods)
+				if (m->id == id) return m.get();
+			return nullptr;
+		}
+	}
+
+	bool SetEnabledNextStart(const std::string& id, bool on)
+	{
+		const MirageMod* mod = ModById(id);
+		if (!mod) return false;
+		const auto folder = mod->manifest.dir.parent_path();
+		std::set<std::string> off = ReadDisabled(folder);
+		if (on) off.erase(id);
+		else off.insert(id);
+		if (!WriteDisabled(folder, off)) {
+			spdlog::error("Mods: {} can't be written", Utf8(folder / "disabled.toml"));
+			return false;
+		}
+		{
+			std::lock_guard lock(g_flagLock);
+			if (on) g_userOff.erase(id);
+			else g_userOff.insert(id);
+		}
+		if (!on)
+			for (ModModule* m : mod->modules)
+				if (m->Enabled()) m->SetEnabled(false);
+		spdlog::info("Mods: {} switched {} for the next start", id, on ? "on" : "off");
+		return true;
+	}
+
+	bool ForgetCrash(const std::string& id)
+	{
+		const MirageMod* mod = ModById(id);
+		if (!mod) return false;
+		std::lock_guard lock(g_crashLock);
+		const auto file = mod->manifest.dir.parent_path() / "crashes.toml";
+		try {
+			if (!std::filesystem::exists(file)) return false;
+			toml::ordered_value root = toml::parse<toml::ordered_type_config>(file);
+			if (!root.is_table() || !root.contains(id)) return false;
+			root.as_table().erase(id);
+			std::ofstream(file, std::ios::binary | std::ios::trunc)
+				<< "# Mods that crashed. A mod listed here isn't loaded: delete its table to try it again.\n\n"
+				<< toml::format(root);
+		} catch (const std::exception& e) {
+			spdlog::error("Mods: {} can't be changed: {}", Utf8(file), e.what());
+			return false;
+		}
+		{
+			std::lock_guard flags(g_flagLock);
+			g_crashed.erase(id);
+		}
+		spdlog::info("Mods: {} will be tried again at the next start", id);
+		return true;
 	}
 }
