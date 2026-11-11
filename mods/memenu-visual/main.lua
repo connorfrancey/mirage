@@ -4,6 +4,11 @@
 --   Crosshair   a cross, dot or circle in the middle of the screen
 --   Show FPS    the frame rate in a corner
 --   Watermark   the menu's name in the bottom-left corner (Misc tab)
+--   Frame Rate Limit   the game's 62 fps cap (GameEngine.MaxSmoothedFrameRate) set to another value, or off; switched
+--                      off, the engine gets back exactly what it had. Movement depends on the frame rate: runs at
+--                      another cap play differently, speedruns are timed at 62. A TAS session ignores it.
+--   Clear Frame        the console's "set Engine bEnableColorClear true": the frame is cleared before the world is
+--                      drawn, so nothing smears out of bounds ("hall of mirrors"). On the engine and its class default.
 
 local later = require("later")     -- Game-thread work from on_disable
 
@@ -111,3 +116,74 @@ mirage.module {
     end,
 }
 Opacity = mirage.setting("watermark_opacity")
+
+-- ---- Frame Rate Limit ---------------------------------------------------------------------------------------------------
+-- The game engine object lives as long as the game: found once
+local engine
+local function game_engine()
+    if engine == nil then engine = mirage.all("GameEngine")[1] end
+    return engine
+end
+
+local frame_cap = nil       -- What the engine had when the module took over: put back when it is switched off
+local frame_rate
+frame_rate = mirage.module {
+    name = "Frame Rate Limit",
+    tab = "Visual",
+    description = "Change the game's 62 fps cap. Off: the game's own 62. Speedruns are at 62: movement depends on it",
+    order = 15,
+    on_tick = function()
+        if not frame_rate:enabled() then return end
+        local e = game_engine()
+        if not e then return end
+        if not frame_cap then frame_cap = { smooth = e.bSmoothFrameRate, max = e.MaxSmoothedFrameRate } end
+        local smooth = not Uncapped:get()
+        if e.bSmoothFrameRate ~= smooth then e.bSmoothFrameRate = smooth end
+        local max = Cap:get()
+        if smooth and math.abs(e.MaxSmoothedFrameRate - max) > 0.01 then
+            e.MaxSmoothedFrameRate = max
+            if e.MinSmoothedFrameRate > max then e.MinSmoothedFrameRate = max end
+        end
+    end,
+    on_disable = function()
+        later.run(function()
+            local e = game_engine()
+            if e and frame_cap then
+                e.bSmoothFrameRate = frame_cap.smooth
+                e.MaxSmoothedFrameRate = frame_cap.max
+                mirage.info(string.format("Frame Rate Limit: off, the game's cap is back (%s, %.0f fps)",
+                                          frame_cap.smooth and "on" or "off", frame_cap.max))
+            end
+            frame_cap = nil
+        end)
+    end,
+}
+Cap = mirage.setting("frame_rate_cap")
+Uncapped = mirage.setting("frame_rate_uncapped")
+
+-- ---- Clear Frame ----------------------------------------------------------------------------------------------------------
+local cleared = nil         -- { { engine = ..., was = ... } }: the engine objects (class default too), as they were
+local clear_frame
+clear_frame = mirage.module {
+    name = "Clear Frame",
+    tab = "Visual",
+    description = "Clear the screen every frame: no repeating draws out of bounds",
+    order = 30,
+    on_tick = function()
+        if not clear_frame:enabled() then return end
+        if not cleared then
+            cleared = {}
+            for _, e in ipairs(mirage.all("Engine", true)) do
+                cleared[#cleared + 1] = { engine = e, was = e.bEnableColorClear }
+            end
+            mirage.info(string.format("Clear Frame: %d engine object(s)", #cleared))
+        end
+        for _, c in ipairs(cleared) do c.engine.bEnableColorClear = true end
+    end,
+    on_disable = function()
+        later.run(function()
+            for _, c in ipairs(cleared or {}) do c.engine.bEnableColorClear = c.was end
+            cleared = nil
+        end)
+    end,
+}

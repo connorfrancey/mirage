@@ -694,6 +694,7 @@ namespace mirage::mods
 			game_api::ScriptAdd, game_api::ScriptChildren, game_api::ScriptSetChildren, game_api::ScriptApply,
 			game_api::ScriptRestore, game_api::ScriptDump, game_api::ScriptKind, game_api::ScriptKindName,
 			Notify, DrawCircle, DrawCircleFilled, FrameRate, SettingColor,
+			game_api::ObjectsOfClass,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

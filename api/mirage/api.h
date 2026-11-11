@@ -110,7 +110,8 @@ typedef enum MirageValueType {
     MIRAGE_VALUE_INT = 2,       /* i (bytes and enums too) */
     MIRAGE_VALUE_FLOAT = 3,     /* f */
     MIRAGE_VALUE_OBJECT = 4,    /* o (NULL: none) */
-    MIRAGE_VALUE_TEXT = 5,      /* text: a name or a string (written: names only) */
+    MIRAGE_VALUE_TEXT = 5,      /* text: a name or a string (written: names; strings only as a call's parameters,
+                                   in a call the mod makes with call_begin) */
     MIRAGE_VALUE_STRUCT = 6     /* A struct: reach its members with a longer path ("Location" -> "Location.X") */
 } MirageValueType;
 typedef struct MirageValue {
@@ -144,6 +145,9 @@ typedef struct MirageEvent {
     const char* text;           /* Valid during the callback; "" if none */
 } MirageEvent;
 typedef void(MIRAGE_CALL* MirageEventFn)(void* user, const MirageEvent* event);
+
+/* objects_of_class: flags */
+#define MIRAGE_OBJECTS_DEFAULTS 0x1u    /* Class default objects too */
 
 /* ---- Script patching (step 8) ---------------------------------------------------------------------------------------
  * A loaded UnrealScript function's bytecode, opened as a tree of tokens (script_open), edited (script_set, script_add,
@@ -302,6 +306,13 @@ typedef struct MirageApi {
     float(MIRAGE_CALL* frame_rate)(void);       /* Frames per second, averaged over the last second or so */
     /* A color picker; `rgba` packed like the draw colors (0xAABBGGRR). Its value: setting_get_int */
     MirageSetting*(MIRAGE_CALL* setting_color)(MirageModule* module, const char* name, uint32_t rgba, const char* tooltip);
+
+    /* ---- More game objects (step 9). Game thread. ----------------------------------------------------------------
+     * The live objects of a class or its subclasses: `class_name` is a short name ("GameEngine") or a path
+     * ("Engine.GameEngine"). Class default objects ("Default__GameEngine") only with MIRAGE_OBJECTS_DEFAULTS.
+     * Copies up to `capacity` handles into `out` (may be NULL) and returns how many there are; -1 when no such class is
+     * loaded. Like any MirageObject, look them up again rather than keep them across ticks. */
+    int32_t(MIRAGE_CALL* objects_of_class)(const char* class_name, uint32_t flags, MirageObject** out, int32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

@@ -49,6 +49,9 @@ namespace game
 	// The object at `path` ("TdGame.Default__TdPawn", "Engine.Actor.SetLocation"), any class; the first if several
 	Classes::UObject* FindByPath(std::string_view path, Freshness freshness = Freshness::Indexed);
 
+	// The class called `name` ("GameEngine", or by path "Engine.GameEngine"); null if none is loaded
+	Classes::UClass* FindClass(std::string_view name, Freshness freshness = Freshness::Indexed);
+
 	// Actors of `cls` or a subclass in the levels in play, as of this tick
 	std::vector<Classes::AActor*> ActorsOf(Classes::UClass* cls);
 

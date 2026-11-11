@@ -132,6 +132,7 @@ namespace mirage::mods
 		static int DrawCircle(lua_State* L);
 		static int DrawCircleFilled(lua_State* L);
 		static int FrameRate(lua_State* L);
+		static int All(lua_State* L);
 		static int ModuleColor(lua_State* L);
 		static int ScreenSize(lua_State* L);
 		static int TextSize(lua_State* L);
@@ -698,6 +699,26 @@ namespace mirage::mods
 	int LuaMod::World(lua_State* L) { PushObject(L, Self(L).api_->world_info()); return 1; }
 	int LuaMod::Find(lua_State* L) { PushObject(L, Self(L).api_->object_find(luaL_checkstring(L, 1))); return 1; }
 
+	// mirage.all("GameEngine" [, defaults]) -> a list of the live objects of the class (and its subclasses)
+	int LuaMod::All(lua_State* L)
+	{
+		const char* cls = luaL_checkstring(L, 1);
+		const uint32_t flags = lua_toboolean(L, 2) ? MIRAGE_OBJECTS_DEFAULTS : 0u;
+		const MirageApi& api = *Self(L).api_;
+		std::vector<MirageObject*> found(64);
+		int32_t n = api.objects_of_class(cls, flags, found.data(), static_cast<int32_t>(found.size()));
+		if (n > static_cast<int32_t>(found.size())) {
+			found.resize(static_cast<std::size_t>(n));
+			n = std::min<int32_t>(api.objects_of_class(cls, flags, found.data(), n), n);
+		}
+		lua_createtable(L, std::max(n, 0), 0);
+		for (int32_t i = 0; i < n; ++i) {
+			PushObject(L, found[static_cast<std::size_t>(i)]);
+			lua_rawseti(L, -2, i + 1);
+		}
+		return 1;
+	}
+
 	int LuaMod::Name(lua_State* L)
 	{
 		char name[256];
@@ -1237,7 +1258,7 @@ namespace mirage::mods
 			{"setting", FindSetting}, {"rgba", Rgba},
 			{"on", On}, {"hook", HookFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
-			{"frame_rate", FrameRate}, {nullptr, nullptr}};
+			{"frame_rate", FrameRate}, {"all", All}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

@@ -164,8 +164,6 @@ memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module
 # Visual
 memenu_feature(input_overlay     visual STAGE 5 FILES features/visual/input_overlay.cpp features/visual/input_layout.cpp)
 memenu_feature(info_lines        visual GAME STAGE 7 FILES features/visual/info_lines.cpp)
-memenu_feature(frame_rate        visual GAME STAGE 9 FILES features/visual/frame_rate.cpp)
-memenu_feature(clear_frame       visual GAME STAGE 9 FILES features/visual/clear_frame.cpp)
 
 # Debug
 memenu_feature(collision_view    debug GAME STAGE 11 FILES features/debug/collision_view.cpp)
@@ -175,7 +173,6 @@ memenu_feature(self_test         debug      STAGE 4  FILES features/debug/self_t
 
 # Levels
 memenu_feature(level_loader      levels GAME STAGE 8 FILES features/levels/level_loader.cpp)
-memenu_feature(quick_actions     levels GAME STAGE 8 FILES features/levels/quick_actions.cpp)
 memenu_feature(sublevels         levels GAME STAGE 8 FILES features/levels/sublevels.cpp)
 
 # Misc

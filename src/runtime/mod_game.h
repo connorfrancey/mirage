@@ -30,6 +30,7 @@ namespace mirage::mods::game_api
 	uint32_t MIRAGE_CALL ObjectName(MirageObject* object, char* buffer, uint32_t capacity);
 	uint32_t MIRAGE_CALL ObjectClassName(MirageObject* object, char* buffer, uint32_t capacity);
 	int32_t MIRAGE_CALL ObjectIsA(MirageObject* object, const char* className);
+	int32_t MIRAGE_CALL ObjectsOfClass(const char* className, uint32_t flags, MirageObject** out, int32_t capacity);
 	MirageDetour* MIRAGE_CALL DetourCreate(MirageMod* mod, void* target, void* detour, int32_t priority, void** original);
 	void MIRAGE_CALL DetourRemove(MirageDetour* detour);
 	void* MIRAGE_CALL FindPattern(const char* pattern, const char* mask);

@@ -2,6 +2,8 @@
 
 #include "game/game.h"
 #include "game/object_cache.h"
+#include "game/object_query.h"
+#include "game/object_ref.h"
 #include "game/uobject.h"
 #include "runtime/call.h"
 #include "runtime/detours.h"
@@ -11,10 +13,12 @@
 #include "sdk/SDK.hpp"
 
 #include <spdlog/spdlog.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -24,6 +28,7 @@ struct MirageCall
 {
 	mirage::hooks::Call* hook = nullptr;				// A hooked call
 	std::unique_ptr<mirage::call::Params> params;		// A call the mod makes
+	std::list<std::wstring> strings;					// Its string parameters' text (the engine copies what it keeps)
 	Classes::UObject* object = nullptr;
 	std::string function;
 };
@@ -313,7 +318,19 @@ namespace mirage::mods
 			if (!call || !path) return 0;
 			if (call->hook) return Write(call->hook->Param(path), in);
 			if (!call->params) return 0;
-			return Write(reflect::Resolve(reinterpret_cast<Classes::UStruct*>(call->params->Function()), call->params->Data(), path), in);
+			const reflect::Value v = reflect::Resolve(reinterpret_cast<Classes::UStruct*>(call->params->Function()), call->params->Data(), path);
+			if (v && in && in->type == MIRAGE_VALUE_TEXT && v.member->kind == layout::Kind::Str) {
+				// A string parameter: its text lives in the call (the engine copies what it keeps)
+				char text[sizeof in->text + 1]{};
+				std::memcpy(text, in->text, sizeof in->text);
+				const int n = MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0);
+				std::wstring& w = call->strings.emplace_back(static_cast<std::size_t>(n > 0 ? n - 1 : 0), wchar_t{});
+				if (n > 1) MultiByteToWideChar(CP_UTF8, 0, text, -1, w.data(), n);
+				const Classes::FString s(w.c_str());
+				std::memcpy(v.address, &s, sizeof s);
+				return 1;
+			}
+			return Write(v, in);
 		}
 
 		MirageCall* MIRAGE_CALL CallBegin(MirageObject* object, const char* function)
@@ -398,6 +415,20 @@ namespace mirage::mods
 		void* MIRAGE_CALL FindPattern(const char* pattern, const char* mask)
 		{
 			return pattern && mask ? game::FindPattern(pattern, mask) : nullptr;
+		}
+
+		int32_t MIRAGE_CALL ObjectsOfClass(const char* className, uint32_t flags, MirageObject** out, int32_t capacity)
+		{
+			if (!className) return -1;
+			Classes::UClass* cls = game::FindClass(className);
+			if (!cls) return -1;
+			int32_t n = 0;
+			for (Classes::UObject* o : game::ObjectsOf(cls)) {
+				if (!(flags & MIRAGE_OBJECTS_DEFAULTS) && game::IsDefaultObject(o)) continue;
+				if (out && n < capacity) out[n] = Handle(o);
+				++n;
+			}
+			return n;
 		}
 
 		int32_t MIRAGE_CALL ObjectIsA(MirageObject* object, const char* className)

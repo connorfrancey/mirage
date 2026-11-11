@@ -2230,9 +2230,8 @@ void TestEngineScriptEvents()
     End(s);
 }
 
-#if MEMENU_FEATURE_FRAME_RATE
-// Frame Rate Limit: on, the engine's cap is the module's; off, the engine has exactly what it had before (the game's 62,
-// or the test's own uncapped fast mode): normal play is never left at another frame rate.
+// Frame Rate Limit (mods/memenu-visual): on, the engine's cap is the module's; off, the engine has exactly what it had
+// before (the game's 62, or the test's own uncapped fast mode): normal play is never left at another frame rate.
 void TestFrameRate()
 {
     Step& s = Begin("Frame rate limit");
@@ -2300,7 +2299,6 @@ void TestFrameRate()
     p.Check(1, false);
     End(s);
 }
-#endif
 
 // "set" on the engine object, read back from the object itself.
 // Mirage step 1: UnrealLib reads the game's script packages inside the game, and Lua runs, without stopping the game
@@ -4205,9 +4203,7 @@ const Named* FeatureList()
         {"Mirage script patch", &TestMirageScriptPatch, true},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
-#if MEMENU_FEATURE_FRAME_RATE
         {"Frame rate limit", &TestFrameRate, false},
-#endif
         {"Engine console", &TestEngineConsole, false},
         {"Engine death hook", &TestEngineDeath, false},     // Last: it restarts the checkpoint
         {nullptr, nullptr, false},

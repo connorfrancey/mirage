@@ -190,6 +190,28 @@ namespace game
 		return nullptr;
 	}
 
+	Classes::UClass* FindClass(std::string_view name, Freshness freshness)
+	{
+		if (name.empty()) return nullptr;
+		if (name.find('.') != std::string_view::npos) {
+			Classes::UObject* o = FindByPath(name, freshness);
+			return o && o->Class == Classes::UClass::StaticClass() ? static_cast<Classes::UClass*>(o) : nullptr;
+		}
+		const int index = NameIndex(std::string(name).c_str());
+		if (index < 0) return nullptr;
+		Classes::UClass* const meta = Classes::UClass::StaticClass();
+		const auto match = [&](Classes::UObject* o) { return o && o->Name.Index == index && o->Name.Number == 0 && o->Class == meta; };
+		const Index& idx = Current(freshness);
+		const auto& objects = Objects();
+		if (const auto it = idx.byName.find(index); it != idx.byName.end())
+			for (const std::uint32_t slot : it->second)
+				if (slot < objects.Num())
+					if (Classes::UObject* o = objects.GetByIndex(slot); match(o)) return static_cast<Classes::UClass*>(o);
+		for (std::size_t i = idx.scanned; i < objects.Num(); ++i)
+			if (Classes::UObject* o = objects.GetByIndex(i); match(o)) return static_cast<Classes::UClass*>(o);
+		return nullptr;
+	}
+
 	namespace
 	{
 		// ULevel::Actors (a TTransArray: data, count, max, owner) right after UObject

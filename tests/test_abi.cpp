@@ -106,6 +106,7 @@ MIRAGE_AT(draw_circle, 280);
 MIRAGE_AT(draw_circle_filled, 284);
 MIRAGE_AT(frame_rate, 288);
 MIRAGE_AT(setting_color, 292);
+MIRAGE_AT(objects_of_class, 296);
 static_assert(sizeof(MirageToken) == 384 && offsetof(MirageToken, name) == 48 && offsetof(MirageToken, target) == 120 &&
               offsetof(MirageToken, text) == 128, "MirageToken moved");
 // Size of ABI v1's table: a later version only makes it larger
