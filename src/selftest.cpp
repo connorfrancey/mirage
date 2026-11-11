@@ -3863,10 +3863,15 @@ void TestMirageLifecycle()
             OnRenderThread([m] { m->SetEnabled(true); });
             WaitTicks(3);
             std::int64_t memoryAfterFirst = 0;
+            std::int64_t leftBehind = 0;        // By reloads 2..10 themselves (memory::Tally: their own thread, their own work)
             for (int i = 1; i <= 10; ++i) {
                 write(i);
                 std::string result = "timed out";
-                OnGameThread([&] { result = mm::Reload("reload-lua"); }, 10.0);
+                OnGameThread([&] {
+                    mirage::memory::Tally tally;
+                    result = mm::Reload("reload-lua");
+                    if (i > 1) leftBehind += tally.Bytes();
+                }, 10.0);
                 if (i == 1) memoryAfterFirst = mirage::memory::LiveBytes();
                 auto* status = dynamic_cast<ctl::Value<std::string>*>(m->FindSetting("Status"));
                 if (!result.empty()) { p.Problem("reload " + std::to_string(i) + ": " + result); break; }
@@ -3878,9 +3883,11 @@ void TestMirageLifecycle()
                 if (!m->Enabled()) { p.Problem("reload " + std::to_string(i) + ": the module isn't on any more"); break; }
                 if (kept->Get() != "kept across reloads") { p.Problem("reload " + std::to_string(i) + ": the setting was reset"); break; }
             }
+            // The menu's memory as a whole also moves with what else runs meanwhile (scans, caches, the log): only noted
             const std::int64_t grown = mirage::memory::LiveBytes() - memoryAfterFirst;
-            if (grown > 512 * 1024) p.Problem("9 more Lua reloads left " + std::to_string(grown / 1024) + " KB behind");
-            s.notes.push_back("Lua: 10 reloads, memory " + std::to_string(grown / 1024) + " KB after the first");
+            if (leftBehind > 64 * 1024) p.Problem("9 more Lua reloads left " + std::to_string(leftBehind / 1024) + " KB behind");
+            s.notes.push_back("Lua: 10 reloads; reloads 2-10 left " + std::to_string(leftBehind / 1024) + " KB behind (the "
+                              "whole menu's memory: " + std::to_string(grown / 1024) + " KB)");
 
             // The watcher: a changed file reloads it by itself
             const int reloadsBefore = find("reload-lua")->reloads;
