@@ -8,6 +8,7 @@
 #include "runtime/manifest.h"
 #include "runtime/mod_lua.h"
 #include "runtime/mod_ui.h"
+#include "runtime/mod_io.h"
 #include "runtime/resolve.h"
 
 #include <imgui.h>
@@ -752,6 +753,8 @@ namespace mirage::mods
 			game_api::ObjectsOfClass, game_api::EventSkip, game_api::MenuOpen, game_api::InputKey, game_api::ShareSet,
 			game_api::ShareGet,
 			Ui, SettingSetVisible, DrawTextSized, TextSizeSized, DrawRectRounded, DrawTriangleFilled,
+			io::InputKeyState, io::InputMouse, io::InputKps, io::InputNow, io::InputResetCounts, io::TasSession,
+			io::FileRead, io::FileWrite, io::FileList, io::FileStamp, io::FileOpenFolder,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

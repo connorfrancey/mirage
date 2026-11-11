@@ -87,11 +87,7 @@ if(MEMENU_GAME)   # The Mirage runtime (src/runtime/): UnrealLib and Lua, linked
   list(APPEND SOURCE_FILES ${_runtime_sources})
   # The first-party mods (mods/): embedded in the DLL, written to the mods folder at startup (runtime/firstparty.h)
   file(GLOB_RECURSE _firstparty_files CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/mods/*)
-  set(_firstparty_cpp ${CMAKE_BINARY_DIR}/generated/firstparty_mods.cpp)
-  add_custom_command(OUTPUT ${_firstparty_cpp}
-          COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}/mods -DOUT=${_firstparty_cpp} -P ${CMAKE_SOURCE_DIR}/cmake/EmbedMods.cmake
-          DEPENDS ${_firstparty_files} ${CMAKE_SOURCE_DIR}/cmake/EmbedMods.cmake
-          COMMENT "Embedding the first-party mods (mods/)")   # Added to the target below (generated: outside src/)
+  set(_firstparty_cpp ${CMAKE_BINARY_DIR}/generated/firstparty_mods.cpp)   # Its command: after the libraries, below
 endif()
 if(NOT MEMENU_GAME)   # Keep the IDE tree to what is built
   list(FILTER HEADER_FILES EXCLUDE REGEX "/src/(tas|game|runtime)/")
@@ -175,6 +171,27 @@ endif()
 # Libraries
 
 include(cmake/Libraries.cmake)
+
+# The first-party mods (mods/): native ones built as their own DLLs (cmake/FirstPartyMods.cmake), then every mod's
+# files embedded in the DLL, written to the mods folder at startup (runtime/firstparty.h)
+if(MEMENU_GAME)
+  include(cmake/FirstPartyMods.cmake)
+  if(MSVC)
+    enable_language(RC)
+  endif()
+  mirage_native_mods(${PROJECT_NAME} _firstparty_bins)
+  get_property(_native_mods GLOBAL PROPERTY MIRAGE_NATIVE_MODS)
+  set(_native_dlls "")
+  foreach(_id IN LISTS _native_mods)
+    list(APPEND _native_dlls ${MIRAGE_NATIVE_MODS_DIR}/${_id}/${_id}.dll)
+  endforeach()
+  string(REPLACE ";" "," _bins_arg "${_firstparty_bins}")
+  add_custom_command(OUTPUT ${_firstparty_cpp}
+          COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_SOURCE_DIR}/mods -DOUT=${_firstparty_cpp} "-DBINS=${_bins_arg}"
+                  -P ${CMAKE_SOURCE_DIR}/cmake/EmbedMods.cmake
+          DEPENDS ${_firstparty_files} ${CMAKE_SOURCE_DIR}/cmake/EmbedMods.cmake
+          COMMENT "Embedding the first-party mods (mods/)")
+endif()
 
 # The menu's font built into the DLL (hooks.cpp loads it): after the libraries, it comes from imgui's sources
 include(cmake/Fonts.cmake)

@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <Windows.h>
 #include <toml.hpp>
 
 #include <cstring>
@@ -13,6 +14,7 @@
 namespace mirage::firstparty
 {
 	void MigrateKeyBindings(const std::filesystem::path& modsDir);
+	void MigrateInputLayouts(const std::filesystem::path& modsDir);
 
 	namespace
 	{
@@ -26,11 +28,32 @@ namespace mirage::firstparty
 		}
 	}
 
+	// A native mod's DLL from the menu's resources
+	File FromResource(const File& f)
+	{
+		HMODULE self = nullptr;
+		GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+						   reinterpret_cast<LPCWSTR>(&FromResource), &self);
+		File out = f;
+		HRSRC r = FindResourceW(self, MAKEINTRESOURCEW(f.resource), MAKEINTRESOURCEW(10));	// RT_RCDATA
+		HGLOBAL g = r ? LoadResource(self, r) : nullptr;
+		out.data = g ? static_cast<const unsigned char*>(LockResource(g)) : nullptr;
+		out.size = r ? SizeofResource(self, r) : 0;
+		return out;
+	}
+
 	int Install(const std::filesystem::path& modsDir)
 	{
 		int written = 0;
 		std::set<std::string> mods;
-		for (const File& f : Files()) {
+		for (File f : Files()) {
+			if (!f.data && f.resource) {
+				f = FromResource(f);
+				if (!f.data) {
+					spdlog::error("Mods: the first-party file {} is missing from the menu's resources", f.path);
+					continue;
+				}
+			}
 			const std::string path = f.path;
 			mods.insert(path.substr(0, path.find('/')));
 			const auto target = modsDir / std::filesystem::path(std::u8string(path.begin(), path.end()));
@@ -46,6 +69,7 @@ namespace mirage::firstparty
 		}
 		if (written) spdlog::info("Mods: {} first-party mod file(s) written ({} mods)", written, mods.size());
 		MigrateKeyBindings(modsDir);
+		MigrateInputLayouts(modsDir);
 		return written;
 	}
 
@@ -83,5 +107,25 @@ namespace mirage::firstparty
 		out.close();
 		std::filesystem::rename(old, old.parent_path() / "keybindings.json.migrated", ec);
 		spdlog::info("Mods: {} kept key bindings moved into memenu-misc's config", list.size());
+	}
+
+	// Input Overlay was native and read <menu folder>/input_layouts/; it is mods/memenu-input-overlay now, reading its own
+	// input_layouts/. Once: the player's layouts are copied there (the old folder renamed .migrated)
+	void MigrateInputLayouts(const std::filesystem::path& modsDir)
+	{
+		namespace fs = std::filesystem;
+		const fs::path old = modsDir.parent_path() / "input_layouts";
+		std::error_code ec;
+		if (!fs::is_directory(old, ec)) return;
+		const fs::path target = modsDir / "memenu-input-overlay" / "input_layouts";
+		fs::create_directories(target, ec);
+		int moved = 0;
+		for (const auto& e : fs::directory_iterator(old, ec)) {
+			if (!e.is_regular_file(ec) || fs::exists(target / e.path().filename(), ec)) continue;
+			fs::copy_file(e.path(), target / e.path().filename(), ec);
+			if (!ec) ++moved;
+		}
+		fs::rename(old, old.parent_path() / "input_layouts.migrated", ec);
+		spdlog::info("Mods: {} input layout(s) moved into memenu-input-overlay", moved);
 	}
 }

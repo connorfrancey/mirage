@@ -118,6 +118,11 @@ MIRAGE_AT(draw_text_sized, 328);
 MIRAGE_AT(text_size_sized, 332);
 MIRAGE_AT(draw_rect_rounded, 336);
 MIRAGE_AT(draw_triangle_filled, 340);
+MIRAGE_AT(input_key_state, 344);
+MIRAGE_AT(tas_session, 364);
+MIRAGE_AT(file_read, 368);
+MIRAGE_AT(file_open_folder, 384);
+static_assert(sizeof(MirageKeyState) == 32 && offsetof(MirageKeyState, down) == 16);   // doubles: 8-aligned on Windows x86
 static_assert(offsetof(MirageModuleDesc, on_panel) == 52, "MirageModuleDesc moved");
 // MirageUi: its own append-only table
 #define MIRAGE_UI_AT(field, offset) static_assert(offsetof(MirageUi, field) == (offset), #field " moved")

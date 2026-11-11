@@ -35,7 +35,7 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/speedrun/timer.cpp
         ${CMAKE_SOURCE_DIR}/src/tas/history.cpp
         ${CMAKE_SOURCE_DIR}/src/tas/splits.cpp
-        ${CMAKE_SOURCE_DIR}/src/features/visual/input_layout.cpp
+        ${CMAKE_SOURCE_DIR}/mods/memenu-input-overlay/input_layout.cpp   # A native first-party mod's pure part
         # The settings framework and what it needs (test_settings.cpp): no game, no window
         ${CMAKE_SOURCE_DIR}/src/core/setting.cpp
         ${CMAKE_SOURCE_DIR}/src/core/module.cpp
@@ -55,7 +55,7 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/core/hardware.cpp
         ${CMAKE_SOURCE_DIR}/src/core/shell.cpp
         ${CMAKE_SOURCE_DIR}/src/hud/template.cpp)
-target_include_directories(memenu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/api)
+target_include_directories(memenu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/api ${CMAKE_SOURCE_DIR}/mods)
 target_compile_definitions(memenu_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MEMENU_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
 target_link_libraries(memenu_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 minhook magic_enum::magic_enum unordered_dense::unordered_dense)

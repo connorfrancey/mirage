@@ -1,5 +1,5 @@
-// The input overlay's layouts (features/visual/input_layout.h).
-#include "features/visual/input_layout.h"
+// The input overlay's layouts (mods/memenu-input-overlay/input_layout.h).
+#include "memenu-input-overlay/input_layout.h"
 
 #include <gtest/gtest.h>
 

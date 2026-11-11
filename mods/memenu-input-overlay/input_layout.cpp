@@ -1,4 +1,4 @@
-#include "features/visual/input_layout.h"
+#include "input_layout.h"
 
 #include <nlohmann/json.hpp>
 

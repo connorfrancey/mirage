@@ -350,7 +350,26 @@ struct MirageUi {
     void(MIRAGE_CALL* window_rect)(float* x1, float* y1, float* x2, float* y2);  /* The current window's box */
     /* Drawing over every window (the foreground), screen pixels; thickness 0: filled */
     void(MIRAGE_CALL* overlay_rect)(float x1, float y1, float x2, float y2, uint32_t color, float rounding, float thickness);
+    /* Text `size` pixels tall in the current window (0: the window's size) */
+    void(MIRAGE_CALL* window_draw_text_sized)(float x, float y, uint32_t color, float size, const char* text);
+    /* Style of what comes next until style_pop: MIRAGE_STYLE_* (x, and y where it has one) */
+    void(MIRAGE_CALL* style_push)(int32_t what, float x, float y);
+    void(MIRAGE_CALL* style_pop)(int32_t count);
 };
+
+/* style_push: what */
+#define MIRAGE_STYLE_WINDOW_PADDING 0     /* x, y */
+#define MIRAGE_STYLE_WINDOW_BORDER 1      /* x: the border's thickness (0: none) */
+#define MIRAGE_STYLE_ITEM_SPACING 2       /* x, y */
+#define MIRAGE_STYLE_FRAME_PADDING 3      /* x, y */
+
+/* input_key_state: a key as the game gets it */
+typedef struct MirageKeyState {
+    uint32_t size;          /* sizeof(MirageKeyState): set it before the call */
+    int32_t held;
+    uint32_t presses;       /* Since the counts were last reset (input_reset_counts) */
+    double down, up;        /* When it last went down / came up, on input_now()'s clock; < 0: never */
+} MirageKeyState;
 
 /* The runtime's functions. Only grows; `size` says how much of it this runtime has. */
 typedef struct MirageApi {
@@ -517,6 +536,27 @@ typedef struct MirageApi {
     void(MIRAGE_CALL* draw_rect_rounded)(float x1, float y1, float x2, float y2, uint32_t color, float rounding,
                                          float thickness);          /* thickness 0: filled */
     void(MIRAGE_CALL* draw_triangle_filled)(float x1, float y1, float x2, float y2, float x3, float y3, uint32_t color);
+
+    /* ---- The game's input (step 9): what the engine really gets from the keyboard and mouse. The player's own while
+     * they play (not while the menu is open: the game doesn't get it then), a TAS macro's while one records or plays.
+     * Key names are the engine's, any case: "W", "SpaceBar", "LeftMouseButton", "MouseScrollUp", "one". Any thread.
+     * Without the monitor (a build without the TAS engine) input_key_state returns 0: read the keyboard yourself. */
+    int32_t(MIRAGE_CALL* input_key_state)(const char* key, MirageKeyState* out);    /* 1: the monitor has it */
+    void(MIRAGE_CALL* input_mouse)(float window_seconds, float* x, float* y);       /* Movement in the last window */
+    int32_t(MIRAGE_CALL* input_kps)(void);                                          /* Presses in the last second */
+    double(MIRAGE_CALL* input_now)(void);                                           /* The monitor's clock (seconds) */
+    void(MIRAGE_CALL* input_reset_counts)(void);
+    int32_t(MIRAGE_CALL* tas_session)(void);    /* 0: no TAS session; 1 recording; 2 playing back */
+
+    /* ---- Files in the mod's own folder (step 9). `path` is relative to it ("layouts/Movement.json"); "..", drive
+     * letters and absolute paths are refused. Any thread. */
+    /* Copies up to `capacity` bytes and returns the file's size; -1: no such file */
+    int32_t(MIRAGE_CALL* file_read)(MirageMod* mod, const char* path, char* buffer, uint32_t capacity);
+    int32_t(MIRAGE_CALL* file_write)(MirageMod* mod, const char* path, const char* data, uint32_t size);   /* 1: written */
+    /* The names of the files in a folder (`extension` like ".json", or NULL: all), one per line, sorted; full length */
+    uint32_t(MIRAGE_CALL* file_list)(MirageMod* mod, const char* folder, const char* extension, char* buffer, uint32_t capacity);
+    uint64_t(MIRAGE_CALL* file_stamp)(MirageMod* mod, const char* path);            /* Last write; 0: no such file */
+    void(MIRAGE_CALL* file_open_folder)(MirageMod* mod, const char* folder);        /* In Explorer (made first) */
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

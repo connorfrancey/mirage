@@ -1519,7 +1519,7 @@ void TestTasWorkflow()
     End(s);
 }
 
-#if MEMENU_FEATURE_INPUT_OVERLAY
+// Input Overlay is a native first-party mod (mods/memenu-input-overlay); the monitor it reads is the runtime's
 // The input overlay during a TAS playback: a macro holds the forward key for half a second; the input the engine gets
 // (what the overlay draws) must show it held while it plays and let go after. The overlay writes its layouts on first use.
 void TestInputOverlay()
@@ -1578,8 +1578,9 @@ void TestInputOverlay()
                            ", let go after");
 
     std::error_code ec;
-    if (!std::filesystem::exists(paths::Dir() / "input_layouts" / "Movement.json", ec))
-        p.Problem("the layout files were not written (input_layouts\\Movement.json)");
+    // Input Overlay is a native first-party mod: its layouts are in its own folder
+    if (!std::filesystem::exists(paths::Dir() / "mods" / "memenu-input-overlay" / "input_layouts" / "Movement.json", ec))
+        p.Problem("the layout files were not written (mods\\memenu-input-overlay\\input_layouts\\Movement.json)");
 
     tas::WithReplay([&](tas::Replay& r) { r = saved; });
     OnRenderThread([&] {
@@ -1590,7 +1591,6 @@ void TestInputOverlay()
     p.Check(1, true);
     End(s);
 }
-#endif
 
 // Desync prevention and fixing, with a macro that starts at the self-test's checkpoint (only those are checked):
 //   1. the first playback records the reference player states, with the macro's recorded mouse sensitivity set for it
@@ -4224,9 +4224,7 @@ const Named* FeatureList()
         {"TAS workflow", &TestTasWorkflow, false},      // Records and loops in real time
         {"TAS memory survey", &TestTasMemorySurvey, false, true},   // Measurements only: --only
         {"Rendering thread off", &TestRenderingThreadOff, false, true},
-#if MEMENU_FEATURE_INPUT_OVERLAY
         {"Input overlay", &TestInputOverlay, true},
-#endif
 #endif
         {"Kickglitch helper", &TestKickglitchHelper, false},
         {"Auto kickglitch", &TestAutoKickglitch, false},

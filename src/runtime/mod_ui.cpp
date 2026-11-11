@@ -392,6 +392,31 @@ namespace mirage::mods::ui
 			else dl->AddRect({x1, y1}, {x2, y2}, C(c), rounding, 0, thickness);
 		}
 
+		void MIRAGE_CALL WindowDrawTextSized(float x, float y, uint32_t c, float size, const char* t)
+		{
+			if (ImDrawList* dl = WindowList(); dl && t) dl->AddText(nullptr, size > 0.f ? size : ImGui::GetFontSize(), {x, y}, C(c), t);
+		}
+		thread_local int t_styles = 0;
+		void MIRAGE_CALL StylePush(int32_t what, float x, float y)
+		{
+			if (!Ready()) return;
+			switch (what) {
+				case MIRAGE_STYLE_WINDOW_PADDING: ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {x, y}); break;
+				case MIRAGE_STYLE_WINDOW_BORDER: ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, x); break;
+				case MIRAGE_STYLE_ITEM_SPACING: ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {x, y}); break;
+				case MIRAGE_STYLE_FRAME_PADDING: ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {x, y}); break;
+				default: return;
+			}
+			++t_styles;
+		}
+		void MIRAGE_CALL StylePop(int32_t count)
+		{
+			count = std::min(count, t_styles);
+			if (!Ready() || count <= 0) return;
+			ImGui::PopStyleVar(count);
+			t_styles -= count;
+		}
+
 		const MirageUi kUi = {
 			sizeof(MirageUi),
 			WindowBegin, WindowEnd, WindowNextPos, WindowNextSize, WindowNextBgAlpha, ChildBegin, ChildEnd,
@@ -407,7 +432,8 @@ namespace mirage::mods::ui
 			ScrollY, ScrollMaxY, ScrollToBottom,
 			WindowDrawRect, WindowDrawText, WindowDrawLine, WindowDrawCircle,
 			KeyPressed, WantsKeyboard, MousePos, Time, DeltaTime,
-			NextOpen, InputTextHint, AlignTextToFrame, TextSize, FrameHeight, WindowRect, OverlayRect,
+			NextOpen, InputTextHint, AlignTextToFrame, TextSize, FrameHeight, WindowRect, OverlayRect, WindowDrawTextSized, StylePush,
+			StylePop,
 		};
 	}
 
@@ -445,8 +471,10 @@ namespace mirage::mods::ui
 	{
 		windows_ = t_windows;
 		colors_ = t_colors;
+		styles_ = t_styles;
 		t_windows = 0;
 		t_colors = 0;
+		t_styles = 0;
 		if (Ready()) {
 			state_ = new ImGuiErrorRecoveryState;
 			ImGui::ErrorRecoveryStoreState(static_cast<ImGuiErrorRecoveryState*>(state_));
@@ -465,5 +493,6 @@ namespace mirage::mods::ui
 		}
 		t_windows = windows_;
 		t_colors = colors_;
+		t_styles = styles_;
 	}
 }

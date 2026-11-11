@@ -14,8 +14,9 @@ namespace mirage::firstparty
 	struct File
 	{
 		const char* path;					// "<mod id>/main.lua", '/' separated
-		const unsigned char* data;
+		const unsigned char* data;			// nullptr: a native mod's DLL, in the DLL's resources
 		std::size_t size;
+		int resource;						// Its RCDATA id (cmake/FirstPartyMods.cmake)
 	};
 	std::span<const File> Files();			// Generated
 

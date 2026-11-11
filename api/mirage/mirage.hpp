@@ -52,6 +52,38 @@ namespace mirage
 	inline void Error(const std::string& text) { Log(MIRAGE_LOG_ERROR, text); }
 
 	inline std::string Id() { return Api().mod_id(Mod()); }
+
+	// The UI layer (MirageUi): on the render thread, in OnRender (windows) and OnPanel
+	inline const MirageUi& Ui() { return *Api().ui(); }
+
+	// A file in the mod's folder ("layouts/Movement.json"): its bytes, or false when there is none
+	inline bool ReadFile(const std::string& path, std::string& out)
+	{
+		const int32_t n = Api().file_read(Mod(), path.c_str(), nullptr, 0);
+		if (n < 0) return false;
+		out.assign(static_cast<std::size_t>(n), '\0');
+		return Api().file_read(Mod(), path.c_str(), out.data(), static_cast<uint32_t>(out.size())) >= 0;
+	}
+	inline bool WriteFile(const std::string& path, const std::string& data)
+	{
+		return Api().file_write(Mod(), path.c_str(), data.data(), static_cast<uint32_t>(data.size())) != 0;
+	}
+	// The files in a folder of the mod's (extension like ".json", or empty: all), sorted
+	inline std::vector<std::string> ListFiles(const std::string& folder, const std::string& extension = {})
+	{
+		const char* ext = extension.empty() ? nullptr : extension.c_str();
+		const uint32_t n = Api().file_list(Mod(), folder.c_str(), ext, nullptr, 0);
+		std::string all(n + 1, '\0');
+		Api().file_list(Mod(), folder.c_str(), ext, all.data(), n + 1);
+		all.resize(n);
+		std::vector<std::string> names;
+		for (std::size_t at = 0; at < all.size();) {
+			const std::size_t end = all.find('\n', at);
+			names.push_back(all.substr(at, end - at));
+			at = end == std::string::npos ? all.size() : end + 1;
+		}
+		return names;
+	}
 	inline std::string Dir() { return Api().mod_dir(Mod()); }
 
 	// ---- Per-mod config (<mod folder>/config.toml) -----------------------------------------------------------------
@@ -103,6 +135,11 @@ namespace mirage
 		if (auto* s = FindSetting(key)) Api().setting_set_text(s, v.c_str());
 	}
 	inline void Set(const std::string& key, const char* v) { Set(key, std::string(v)); }
+	// Shows or hides a setting declared in mod.toml (one that only matters while another is on)
+	inline void SetVisible(const std::string& key, bool visible)
+	{
+		if (auto* s = FindSetting(key)) Api().setting_set_visible(s, visible ? 1 : 0);
+	}
 
 	// ---- Drawing (OnRender only) ----------------------------------------------------------------------------------
 	inline void ScreenSize(float& w, float& h) { Api().screen_size(&w, &h); }
@@ -150,6 +187,7 @@ namespace mirage
 			d.on_tick = [](void* u) { static_cast<Module*>(u)->OnTick(); };
 			d.on_render = [](void* u) { static_cast<Module*>(u)->OnRender(); };
 			d.on_trigger = [](void* u) { static_cast<Module*>(u)->OnTrigger(); };
+			d.on_panel = [](void* u) { static_cast<Module*>(u)->OnPanel(); };
 			handle_ = Api().module_register(Mod(), &d);
 		}
 		virtual ~Module() = default;
@@ -161,6 +199,7 @@ namespace mirage
 		virtual void OnTick() {}
 		virtual void OnRender() {}
 		virtual void OnTrigger() {}
+		virtual void OnPanel() {}		// Render thread: widgets (mirage::Ui()) in the settings panel, below the settings
 
 		bool Enabled() const { return handle_ && Api().module_enabled(handle_) != 0; }
 		void SetEnabled(bool on) { if (handle_) Api().module_set_enabled(handle_, on ? 1 : 0); }

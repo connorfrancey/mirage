@@ -22,6 +22,6 @@ namespace mirage::mods::ui
 
 	private:
 		void* state_ = nullptr;
-		int windows_ = 0, colors_ = 0;
+		int windows_ = 0, colors_ = 0, styles_ = 0;
 	};
 }

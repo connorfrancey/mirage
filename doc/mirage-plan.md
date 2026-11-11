@@ -364,6 +364,18 @@ paths); every one of today's self-test checks passes with the features loaded as
   Self-test "Mirage UI layer" (tests/mods/ui-lua) draws most widgets and leaves a window open on purpose.
 - **Arrays:** paths index arrays, 0-based ("StreamingLevels[2].PackageName", static "Foo[3]"); an array without an
   index reads as `MIRAGE_VALUE_ARRAY` with its count. Lua: arrays are proxies, 1-based, with `#`.
+- **Native first-party mods:** a mod in `mods/<id>/` with a `CMakeLists.txt` calls `mirage_native_mod()`
+  (`cmake/FirstPartyMods.cmake`): its own DLL target with only `api/` (and allowed header-only libraries: nlohmann/json)
+  on its include path, static CRT, embedded in the menu's DLL as RCDATA and written out by `runtime/firstparty` with the
+  mod's other files. `mods/memenu-input-overlay` is the first (C++). API appended for it: the game's input as the engine
+  gets it (`input_key_state`, `input_mouse`, `input_kps`, `input_now`, `input_reset_counts`), `tas_session`, files in
+  the mod's own folder (`file_read`, `file_write`, `file_list`, `file_stamp`, `file_open_folder`), and in `MirageUi`
+  `window_draw_text_sized`, `style_push` / `style_pop`. The player's old `input_layouts\` and `keybindings.json` are
+  moved into the mods' folders once at startup.
+- **The runtime's own tools stay in the runtime** (decided 2026-11-11): the Mod Manager, the Console (the menu's shell:
+  it drives modules, settings, aliases and scripts), Log Viewer, Performance, Themes, Hotkeys, Config Actions, Game
+  Status (the integration's diagnostics) and the Self Test manage the loader and every mod, like Geode's own mod list
+  and settings. They are not game features, so they are not first-party mods.
 - **API-only, enforced:** Lua mods reach the game through `mirage.*` alone. For native parts, `EmbedMods.cmake`
   fails the build when a first-party mod's source has a quoted `#include` other than `"mirage/..."` or its own files.
   No first-party native mod exists yet: when the TAS or the collision view moves, it is built as its own project

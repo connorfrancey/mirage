@@ -153,7 +153,6 @@ memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module
 # World
 
 # Visual
-memenu_feature(input_overlay     visual STAGE 5 FILES features/visual/input_overlay.cpp features/visual/input_layout.cpp)
 memenu_feature(info_lines        visual GAME STAGE 7 FILES features/visual/info_lines.cpp)
 
 # Debug
