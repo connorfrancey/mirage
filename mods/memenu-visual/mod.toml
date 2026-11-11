@@ -2,8 +2,8 @@
 # is written to memenu\mods\memenu-visual at startup: edit a copy under another id, not this folder.
 id = "memenu-visual"
 name = "Visual"
-version = "1.0.0"
-description = "The menu's simple visual features as a Lua mod: FOV, Crosshair, Show FPS"
+version = "1.1.0"
+description = "The menu's simple visual features as a Lua mod: FOV, Crosshair, Show FPS, Watermark"
 authors = ["Mirror's Edge Menu"]
 mirage = "^0.1"
 
@@ -75,3 +75,12 @@ type = "bool"
 name = "Frametime"
 module = "Show FPS"
 default = false
+
+[settings.watermark_opacity]
+type = "float"
+name = "Opacity"
+module = "Watermark"
+default = 0.6
+min = 0.1
+max = 1.0
+format = "%.2f"

@@ -3,6 +3,7 @@
 --   FOV         the player camera's locked field of view (the engine's own: zoom included), put back when off
 --   Crosshair   a cross, dot or circle in the middle of the screen
 --   Show FPS    the frame rate in a corner
+--   Watermark   the menu's name in the bottom-left corner (Misc tab)
 
 local later = require("later")     -- Game-thread work from on_disable
 
@@ -95,3 +96,18 @@ mirage.module {
 Corner = mirage.setting("fps_corner")
 TextColor = mirage.setting("fps_color")
 Frametime = mirage.setting("fps_frametime")
+
+-- ---- Watermark --------------------------------------------------------------------------------------------------------
+mirage.module {
+    name = "Watermark",
+    tab = "Misc",
+    description = "Small text in the bottom-left corner",
+    order = 10,
+    on_render = function()
+        local text = "Mirror's Edge Menu"
+        local _, th = mirage.draw.text_size(text)
+        local _, h = mirage.draw.screen_size()
+        mirage.draw.text(10, h - th - 10, mirage.rgba(230, 50, 45, math.floor(Opacity:get() * 255)), text)
+    end,
+}
+Opacity = mirage.setting("watermark_opacity")

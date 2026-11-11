@@ -185,7 +185,6 @@ memenu_feature(console           misc GAME STAGE 6 FILES features/misc/console.c
 memenu_feature(key_bindings      misc GAME STAGE 6 FILES features/misc/key_bindings.cpp)
 memenu_feature(hotkeys           misc      STAGE 4 FILES features/misc/hotkeys.cpp)
 memenu_feature(themes            misc      STAGE 4 FILES features/misc/themes.cpp)
-memenu_feature(watermark         misc      STAGE 5 FILES features/misc/watermark.cpp)
 memenu_feature(mod_manager       misc GAME STAGE 9 FILES features/misc/mod_manager.cpp)
 
 # -------------------------------------------------------------------------------------------------

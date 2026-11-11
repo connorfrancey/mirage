@@ -3,6 +3,24 @@
 #   cmake -DROOT=<repo>/mods -DOUT=<build>/generated/firstparty_mods.cpp -P cmake/EmbedMods.cmake
 file(GLOB_RECURSE files RELATIVE "${ROOT}" "${ROOT}/*")
 list(SORT files)
+
+# First-party mods use the public API only (Mirage plan, step 9): Lua reaches the game through mirage.* alone, and a
+# native part may include "mirage/..." (api/) and its own files, never the menu's headers (no runtime include paths).
+foreach(f IN LISTS files)
+    if(NOT f MATCHES "\\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl)$")
+        continue()
+    endif()
+    get_filename_component(dir "${ROOT}/${f}" DIRECTORY)
+    file(STRINGS "${ROOT}/${f}" includes REGEX "^[ \t]*#[ \t]*include[ \t]*\"")
+    foreach(line IN LISTS includes)
+        string(REGEX REPLACE "^[ \t]*#[ \t]*include[ \t]*\"([^\"]+)\".*$" "\\1" header "${line}")
+        if(header MATCHES "^mirage/" OR EXISTS "${dir}/${header}")
+            continue()
+        endif()
+        message(FATAL_ERROR "mods/${f} includes \"${header}\": a first-party mod may include only the public API "
+                            "(\"mirage/...\") and its own files. What it needs from the menu goes into the API.")
+    endforeach()
+endforeach()
 set(arrays "")
 set(entries "")
 set(i 0)

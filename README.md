@@ -739,7 +739,17 @@ MirrorsEdge.exe
    rewritten copies, made the first time the game loads them and cached, so the game's files are never written. See
    [`examples/mods/README.md`](examples/mods/README.md). Self-tests "Mirage content" and "Mirage textures".
 
-**Next:** script-patch mods (bytecode), then moving the menu's features into mods with an in-game mod manager.
+8. **Script mods:** a mod rewrites UnrealScript functions' bytecode (through UnrealLib's encoder), patched live and
+   put back when turned off.
+
+9. **The menu becomes mods** (partly done): the menu's simple features are first-party Lua mods using only the public
+   API (`mods/memenu-trainer`: God Mode, Teleport to Spawn, Game Speed, Kill Bots, Freeze Timer; `mods/memenu-visual`:
+   FOV, Crosshair, Show FPS, Watermark), shipped inside the DLL and written to the mods folder at startup. The **Mod
+   Manager** (Misc tab) lists every mod, loaded or not and why, with its modules, dependencies, warnings and log; it
+   reloads a mod, switches it off or on for the next start, and lets a crashed mod load again. The remaining features
+   wait on API they need (a UI layer above all): see the plan.
+
+**Next:** the API the remaining features need (UI layer, object queries, input), then tooling, docs and distribution.
 
 ### Testing
 

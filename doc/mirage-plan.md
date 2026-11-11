@@ -338,11 +338,39 @@ cover before/after), and patches baked into packages.
 **Milestone:** the first-party mods compile against `api/` headers only (enforced by the build: no runtime include
 paths); every one of today's self-test checks passes with the features loaded as mods.
 
-**Status (2026-11-11): started.** First-party mods live in `mods/`, are embedded in the DLL (`cmake/EmbedMods.cmake`)
-and written to the mods folder at startup (`runtime/firstparty`), so every install has them. `mods/memenu-trainer`
-(Lua) replaces the native God Mode, Teleport to Spawn and Game Speed, with the same names and settings, and the
-self-test's checks pass on it. API: `notify` appended. Measured: a Lua module's tick costs 20-30 us in release (native
-~1 us), worth bringing down before many features move. Next: the mod manager, then more features.
+**Status (2026-11-11): mod manager done; every feature the API can express is a mod; the rest waits on API.**
+
+- First-party mods live in `mods/`, are embedded in the DLL (`cmake/EmbedMods.cmake`) and written to the mods folder
+  at startup (`runtime/firstparty`), so every install has them.
+- `mods/memenu-trainer` (Lua): God Mode, Teleport to Spawn, Game Speed, Kill Bots, Freeze Timer.
+  `mods/memenu-visual` (Lua): FOV, Crosshair, Show FPS, Watermark. Same names and settings as the native modules they
+  replace (removed), and the self-test's checks pass on them. API appended for them: `notify`, `draw_circle`,
+  `draw_circle_filled`, `frame_rate`, `setting_color` (and `color` settings in mod.toml).
+- **API-only, enforced:** Lua mods reach the game through `mirage.*` alone. For native parts, `EmbedMods.cmake`
+  fails the build when a first-party mod's source has a quoted `#include` other than `"mirage/..."` or its own files.
+  No first-party native mod exists yet: when the TAS or the collision view moves, it is built as its own project
+  against `api/` (like `examples/mods/hello`), never with the menu's include paths.
+- **The mod manager** (`features/misc/mod_manager`, Misc tab, its own window): every mod found, loaded or not, and why;
+  details, load order, phase, reloads; its modules with switches; required / optional / incompatible mods and
+  dependents; warnings; its log lines. Reload now, switch off or on for the next start (`disabled.toml`; switching off
+  turns its modules off now), allow a crashed mod again (out of `crashes.toml`), open its folder. Per-mod settings and
+  hotkeys stay in the modules' own columns, where the mod's modules appear. Self-test: the window draws and lists
+  every mod.
+
+**What's left and the API each part needs** (nothing reaches around the API, so these stay native until it exists):
+
+| Features | Missing API |
+| --- | --- |
+| Console, Log Viewer, Info Lines (editor), Performance, Themes, Speedrun Timer, Speedometer, Input Overlay, Key Bindings, Hotkeys, Config Actions, Game Status, Level Loader, Sublevels, Save States (list), Tool Overlay | A UI layer: windows and widgets (text, inputs, tables, trees, plots) beyond the settings in a module's column. The biggest gap: most remaining features are UI. |
+| Clear Frame, Main Menu, Restart Checkpoint | All objects of a class (`object_find` takes a path only), and the engine's own calls that aren't script functions (RestartFromLastCheckpoint goes through `runtime/engine_calls`). |
+| Strang, Kickglitch, Auto Kickglitch, Beamer, Flight, No Clip | Player state change events (the native move state handler, not a script function) and input injection / capture on exact frames. |
+| Frame Rate | Setting the frame rate cap (only reading it exists). |
+| TAS, Save State / Load State, Collision View | Stay native (memory snapshots, the engine's world, 3D drawing): native first-party mods once a native mod can get a 3D draw list and engine-thread scheduling through the API. |
+
+Also measured: a Lua module's tick costs 20-30 us in release (native ~1 us), worth bringing down before many more
+features move. Seen once in a full self-test (and not on the rerun): a crash in the Console step on menu heap memory
+inside a reservation the TAS snapshots released when their session ended. The TAS's session-end release can free memory
+that is no longer the game's: to look into with the TAS (not step 9).
 
 ### 10. Tooling, docs and distribution
 
