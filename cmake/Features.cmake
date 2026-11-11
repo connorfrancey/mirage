@@ -168,7 +168,6 @@ memenu_feature(self_test         debug      STAGE 4  FILES features/debug/self_t
 memenu_feature(config_actions    misc      STAGE 4 FILES features/misc/config_actions.cpp)
 memenu_feature(game_status       misc GAME STAGE 6 FILES features/misc/game_status.cpp)
 memenu_feature(console           misc GAME STAGE 6 FILES features/misc/console.cpp)
-memenu_feature(key_bindings      misc GAME STAGE 6 FILES features/misc/key_bindings.cpp)
 memenu_feature(hotkeys           misc      STAGE 4 FILES features/misc/hotkeys.cpp)
 memenu_feature(themes            misc      STAGE 4 FILES features/misc/themes.cpp)
 memenu_feature(mod_manager       misc GAME STAGE 9 FILES features/misc/mod_manager.cpp)

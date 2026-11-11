@@ -18,6 +18,14 @@ namespace mirage::reflect
 		constexpr int kReference = 0x84;	// BitMask, Struct, PropertyClass, ...
 		constexpr int kMetaClass = 0x88;	// ClassProperty: the class it is limited to
 
+		// Members by name, looked up by a string_view of the path (no string made per lookup)
+		struct NameHash
+		{
+			using is_transparent = void;
+			std::size_t operator()(std::string_view s) const noexcept { return std::hash<std::string_view>{}(s); }
+		};
+		using Members = std::unordered_map<std::string, Member, NameHash, std::equal_to<>>;
+
 		std::uint32_t Dword(const void* p, int at)
 		{
 			std::uint32_t v;
@@ -26,12 +34,12 @@ namespace mirage::reflect
 		}
 
 		// Members by type, built on first use. Game thread only, like everything here.
-		std::unordered_map<const Classes::UStruct*, std::unordered_map<std::string, Member>> g_types;
+		std::unordered_map<const Classes::UStruct*, Members> g_types;
 
-		const std::unordered_map<std::string, Member>& MembersOf(Classes::UStruct* type)
+		const Members& MembersOf(Classes::UStruct* type)
 		{
 			if (auto it = g_types.find(type); it != g_types.end()) return it->second;
-			std::unordered_map<std::string, Member> members;
+			Members members;
 			int depth = 0;
 			for (Classes::UStruct* s = type; s && depth < 64; s = game::SuperOf(s), ++depth) {
 				int count = 0;
@@ -93,7 +101,7 @@ namespace mirage::reflect
 	{
 		if (!type) return nullptr;
 		const auto& members = MembersOf(type);
-		const auto it = members.find(std::string(name));
+		const auto it = members.find(name);
 		return it == members.end() ? nullptr : &it->second;
 	}
 

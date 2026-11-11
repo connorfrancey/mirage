@@ -49,10 +49,7 @@
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
 #endif
-#if MEMENU_FEATURE_KEY_BINDINGS
-#include "features/misc/key_bindings.h"
 #include <shlobj.h>
-#endif
 #if MEMENU_FEATURE_TAS
 #include "features/tas/timeline_view.h"
 #include "tas/input_monitor.h"
@@ -2716,7 +2713,6 @@ void TestEngineDeath()
     End(s);
 }
 
-#if MEMENU_FEATURE_KEY_BINDINGS
 // The game's TdInput.ini (SetBind saves it): kept as it was before the test and written back after.
 std::filesystem::path TdInputIni()
 {
@@ -2752,7 +2748,7 @@ void TestKeepKeyBindings()
 
     // A key nothing is bound to, and the bindings the game has now
     std::string freeKey;
-    nlohmann::json list = nlohmann::json::array();
+    std::string list;       // "Key=Command;..." as the mod keeps them
     OnGameThread([&] {
         auto* pc = game::Controller();
         if (!pc || !pc->PlayerInput) return;
@@ -2764,20 +2760,16 @@ void TestKeepKeyBindings()
             if (b.Control || b.Shift || b.Alt || !b.Command.IsValid()) continue;
             const std::string key = b.Name.GetName(), cmd = b.Command.ToString();
             if (cmd.rfind("GBA_", 0) == 0 && key.rfind("GBA_", 0) != 0 && key.rfind("XboxTypeS_", 0) != 0)
-                list.push_back({{"key", key}, {"command", cmd}});
+                list += key + "=" + cmd + ";";
         }
         for (const char* k : {"NumPadNine", "NumPadEight", "NumPadSeven", "Home", "End", "PageUp"})
             if (!used.count(k)) { freeKey = k; break; }
     });
-    const auto file = paths::Dir() / "selftest-keybindings.json";
     if (freeKey.empty()) p.Problem("no free key to test with");
     else {
-        list.push_back({{"key", freeKey}, {"command", "GBA_Jump"}});
-        {
-            std::ofstream out(file, std::ios::trunc);
-            out << nlohmann::json{{"bindings", list}}.dump(1);
-        }
-        keep_bindings::SetFile(file);
+        // Keep Key Bindings is mods/memenu-misc: it takes this list instead of its own config (and never writes it)
+        list += freeKey + "=GBA_Jump";
+        mirage::mods::Share("keep_bindings.test", list);
         OnRenderThread([&] { keep->SetEnabled(true); });     // A reset moment: what is missing comes back
         const auto bound = [&] {
             bool found = false;
@@ -2796,7 +2788,7 @@ void TestKeepKeyBindings()
 
         // Undo: the module off first (it would put it back), then the binding gone and the game's ini as it was
         OnRenderThread([&] { keep->SetEnabled(false); });
-        keep_bindings::SetFile({});
+        mirage::mods::Share("keep_bindings.test", "");
         // Taken out of the list, not blanked: the game saves TdInput.ini from memory later (on a level load), and a
         // blanked entry ("NumPadNine", Command=) would end up in the player's file. Removing needs no allocation: the
         // entries after it move down one and the count drops (its command string is left to leak, a few bytes).
@@ -2819,13 +2811,10 @@ void TestKeepKeyBindings()
         std::ofstream out(ini, std::ios::binary | std::ios::trunc);
         out << iniWas;
     }
-    std::error_code ec;
-    std::filesystem::remove(file, ec);
     OnRenderThread([&] { keep->SetEnabled(enabledWas); });
     p.Check(1, false);
     End(s);
 }
-#endif
 
 void TestCollisionInspect()
 {
@@ -4242,9 +4231,7 @@ const Named* FeatureList()
         {"Kickglitch helper", &TestKickglitchHelper, false},
         {"Auto kickglitch", &TestAutoKickglitch, false},
         {"Kill bots", &TestKillBots, false},
-#if MEMENU_FEATURE_KEY_BINDINGS
         {"Keep key bindings", &TestKeepKeyBindings, false},
-#endif
 #if MEMENU_FEATURE_COLLISION_VIEW
         {"Collision view inspect", &TestCollisionInspect, false},
         {"Collision view static geometry", &TestCollisionStatic, false},
