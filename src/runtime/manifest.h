@@ -39,6 +39,7 @@
 
 #include "runtime/semver.h"
 
+#include <array>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -52,7 +53,7 @@ namespace mirage::mods
 
 	struct SettingDecl
 	{
-		enum class Type : std::uint8_t { Bool, Int, Float, String, Choice, Key };
+		enum class Type : std::uint8_t { Bool, Int, Float, String, Choice, Key, Color };
 		std::string key, name, description, module, format;
 		Type type = Type::Bool;
 		bool boolDefault = false;
@@ -62,6 +63,7 @@ namespace mirage::mods
 		bool hasRange = false;
 		double min = 0.0, max = 0.0;
 		std::vector<std::string> options;
+		std::array<float, 4> colorDefault{1.f, 1.f, 1.f, 1.f};	// Color: RGBA 0..1 ("#RRGGBB" or "#RRGGBBAA")
 	};
 	const char* SettingTypeName(SettingDecl::Type t);
 

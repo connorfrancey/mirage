@@ -2097,8 +2097,7 @@ void TestAutoKickglitch()
 }
 #endif
 
-#if MEMENU_FEATURE_KILL_BOTS
-// Only checks the kills where the level has enemies (start game-test with --map at one); elsewhere, that it runs.
+// Kill Bots is a first-party mod (mods/memenu-trainer). Only checks the kills where the level has enemies (start game-test with --map at one); elsewhere, that it runs.
 void TestKillBots()
 {
     Step& s = Begin("Kill bots");
@@ -2131,7 +2130,6 @@ void TestKillBots()
     p.Check(1, false);
     End(s);
 }
-#endif
 
 // ---- Engine hooks ---------------------------------------------------------------------------------------------------
 Step& BeginEngine(const char* name, Probe*& probe, std::unique_ptr<Probe>& holder)
@@ -4160,9 +4158,7 @@ const Named* FeatureList()
 #if MEMENU_FEATURE_AUTO_KICKGLITCH
         {"Auto kickglitch", &TestAutoKickglitch, false},
 #endif
-#if MEMENU_FEATURE_KILL_BOTS
         {"Kill bots", &TestKillBots, false},
-#endif
 #if MEMENU_FEATURE_KEY_BINDINGS
         {"Keep key bindings", &TestKeepKeyBindings, false},
 #endif

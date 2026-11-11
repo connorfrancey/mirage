@@ -160,14 +160,9 @@ memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module
                   tas/snapshot.cpp tas/d3d_pins.cpp)
 
 # World
-memenu_feature(freeze_timer      world GAME STAGE 9 FILES features/world/freeze_timer.cpp)
-memenu_feature(kill_bots         world GAME STAGE 9 FILES features/world/kill_bots.cpp)
 
 # Visual
-memenu_feature(crosshair         visual STAGE 5 FILES features/visual/crosshair.cpp)
 memenu_feature(input_overlay     visual STAGE 5 FILES features/visual/input_overlay.cpp features/visual/input_layout.cpp)
-memenu_feature(fov               visual GAME STAGE 9 FILES features/visual/fov.cpp)
-memenu_feature(show_fps          visual STAGE 5 FILES features/visual/show_fps.cpp)
 memenu_feature(info_lines        visual GAME STAGE 7 FILES features/visual/info_lines.cpp)
 memenu_feature(frame_rate        visual GAME STAGE 9 FILES features/visual/frame_rate.cpp)
 memenu_feature(clear_frame       visual GAME STAGE 9 FILES features/visual/clear_frame.cpp)

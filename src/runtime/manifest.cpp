@@ -277,6 +277,22 @@ namespace mirage::mods
 							if (def.is_string()) d.stringDefault = def.as_string();
 							else error(where + ".default must be a string");
 							break;
+						case T::Color: {
+							// "#RRGGBB" or "#RRGGBBAA"
+							const std::string hexText = def.is_string() ? def.as_string() : std::string();
+							const auto hex = [](char c) -> int {
+								return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+							};
+							bool ok = (hexText.size() == 7 || hexText.size() == 9) && hexText[0] == '#';
+							for (std::size_t i = 1; ok && i < hexText.size(); ++i) ok = hex(hexText[i]) >= 0;
+							if (!ok) {
+								error(where + ".default must be a color like \"#E5332E\" or \"#E5332ECC\"");
+								break;
+							}
+							for (std::size_t c = 0; c < 4; ++c)
+								d.colorDefault[c] = c * 2 + 1 < hexText.size() ? (hex(hexText[c * 2 + 1]) * 16 + hex(hexText[c * 2 + 2])) / 255.f : 1.f;
+							break;
+						}
 						case T::Choice: {
 							if (!def.is_string()) {
 								error(where + ".default must be one of the options");

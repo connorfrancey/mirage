@@ -39,7 +39,7 @@ namespace mirage::mods
 			MirageCall* call;		// nullptr once the hook returned
 		};
 
-		enum class SettingKind : std::uint8_t { Checkbox, Slider, SliderInt, Text, Key, Choice };
+		enum class SettingKind : std::uint8_t { Checkbox, Slider, SliderInt, Text, Key, Choice, Color };
 		struct SettingBox
 		{
 			MirageSetting* handle;
@@ -129,6 +129,10 @@ namespace mirage::mods
 		static int DrawLine(lua_State* L);
 		static int DrawRect(lua_State* L);
 		static int DrawRectFilled(lua_State* L);
+		static int DrawCircle(lua_State* L);
+		static int DrawCircleFilled(lua_State* L);
+		static int FrameRate(lua_State* L);
+		static int ModuleColor(lua_State* L);
 		static int ScreenSize(lua_State* L);
 		static int TextSize(lua_State* L);
 		static int Rgba(lua_State* L);
@@ -342,6 +346,7 @@ namespace mirage::mods
 			case MIRAGE_SETTING_FLOAT: kind = SettingKind::Slider; break;
 			case MIRAGE_SETTING_CHOICE: kind = SettingKind::Choice; break;
 			case MIRAGE_SETTING_KEY: kind = SettingKind::Key; break;
+			case MIRAGE_SETTING_COLOR: kind = SettingKind::Color; break;
 			default: break;
 		}
 		return PushSetting(L, h, kind);
@@ -355,6 +360,7 @@ namespace mirage::mods
 			case SettingKind::Checkbox: lua_pushboolean(L, api->setting_get_int(box->handle)); break;
 			case SettingKind::Slider: lua_pushnumber(L, api->setting_get_float(box->handle)); break;
 			case SettingKind::SliderInt: case SettingKind::Key: lua_pushinteger(L, api->setting_get_int(box->handle)); break;
+			case SettingKind::Color: lua_pushinteger(L, static_cast<uint32_t>(api->setting_get_int(box->handle))); break;
 			case SettingKind::Text: case SettingKind::Choice: {
 				const uint32_t n = api->setting_get_text(box->handle, nullptr, 0);
 				std::string s(n + 1, '\0');
@@ -375,6 +381,7 @@ namespace mirage::mods
 			case SettingKind::SliderInt: api->setting_set_int(box->handle, static_cast<int32_t>(luaL_checkinteger(L, 2))); break;
 			case SettingKind::Text: api->setting_set_text(box->handle, luaL_checkstring(L, 2)); break;
 			case SettingKind::Key: return luaL_error(L, "a key setting is set by binding it in the menu");
+			case SettingKind::Color: api->setting_set_int(box->handle, static_cast<int32_t>(static_cast<uint32_t>(luaL_checkinteger(L, 2)))); break;
 			case SettingKind::Choice:
 				if (lua_type(L, 2) == LUA_TNUMBER) api->setting_set_int(box->handle, static_cast<int32_t>(luaL_checkinteger(L, 2)) - 1);
 				else api->setting_set_text(box->handle, luaL_checkstring(L, 2));
@@ -443,6 +450,27 @@ namespace mirage::mods
 	{
 		Self(L).api_->draw_rect_filled(Num(L, 1), Num(L, 2), Num(L, 3), Num(L, 4), Color(L, 5));
 		return 0;
+	}
+	int LuaMod::DrawCircle(lua_State* L)
+	{
+		Self(L).api_->draw_circle(Num(L, 1), Num(L, 2), Num(L, 3), Color(L, 4), static_cast<float>(luaL_optnumber(L, 5, 1.0)));
+		return 0;
+	}
+	int LuaMod::DrawCircleFilled(lua_State* L)
+	{
+		Self(L).api_->draw_circle_filled(Num(L, 1), Num(L, 2), Num(L, 3), Color(L, 4));
+		return 0;
+	}
+	int LuaMod::FrameRate(lua_State* L)
+	{
+		lua_pushnumber(L, Self(L).api_->frame_rate());
+		return 1;
+	}
+	int LuaMod::ModuleColor(lua_State* L)
+	{
+		MirageModule* m = CheckModule(L);
+		const auto rgba = static_cast<uint32_t>(luaL_optinteger(L, 3, 0xFFFFFFFF));
+		return PushSetting(L, Self(L).api_->setting_color(m, luaL_checkstring(L, 2), rgba, OptString(L, 4)), SettingKind::Color);
 	}
 	int LuaMod::ScreenSize(lua_State* L)
 	{
@@ -1164,7 +1192,7 @@ namespace mirage::mods
 		lua_newtable(L);
 		const luaL_Reg moduleFns[] = {{"enabled", ModuleEnabled}, {"set_enabled", ModuleSetEnabled},
 			{"checkbox", ModuleCheckbox}, {"slider", ModuleSlider}, {"slider_int", ModuleSliderInt}, {"text", ModuleText},
-			{"key", ModuleKey}, {nullptr, nullptr}};
+			{"key", ModuleKey}, {"color", ModuleColor}, {nullptr, nullptr}};
 		set(moduleFns);
 		lua_setfield(L, -2, "__index");
 		lua_pop(L, 1);
@@ -1208,7 +1236,8 @@ namespace mirage::mods
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
 			{"on", On}, {"hook", HookFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
-			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify}, {nullptr, nullptr}};
+			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
+			{"frame_rate", FrameRate}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");
@@ -1226,7 +1255,8 @@ namespace mirage::mods
 
 		lua_newtable(L);
 		const luaL_Reg drawFns[] = {{"text", DrawText}, {"line", DrawLine}, {"rect", DrawRect},
-			{"rect_filled", DrawRectFilled}, {"screen_size", ScreenSize}, {"text_size", TextSize}, {nullptr, nullptr}};
+			{"rect_filled", DrawRectFilled}, {"circle", DrawCircle}, {"circle_filled", DrawCircleFilled},
+			{"screen_size", ScreenSize}, {"text_size", TextSize}, {nullptr, nullptr}};
 		set(drawFns);
 		lua_setfield(L, -2, "draw");
 

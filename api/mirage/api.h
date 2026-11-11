@@ -71,6 +71,7 @@ typedef enum MirageSettingType {
     MIRAGE_SETTING_STRING = 3,
     MIRAGE_SETTING_CHOICE = 4,
     MIRAGE_SETTING_KEY = 5,
+    MIRAGE_SETTING_COLOR = 6,   /* setting_get_int: the color packed as the draw functions take it (0xAABBGGRR) */
     MIRAGE_SETTING_UNKNOWN = -1
 } MirageSettingType;
 
@@ -295,6 +296,12 @@ typedef struct MirageApi {
 
     /* ---- The menu (step 9) ---------------------------------------------------------------------------------------- */
     void(MIRAGE_CALL* notify)(MirageMod* mod, const char* text);   /* A notification on screen for a few seconds. Any thread */
+    /* More drawing (on_render only, like the others) */
+    void(MIRAGE_CALL* draw_circle)(float x, float y, float radius, uint32_t color, float thickness);
+    void(MIRAGE_CALL* draw_circle_filled)(float x, float y, float radius, uint32_t color);
+    float(MIRAGE_CALL* frame_rate)(void);       /* Frames per second, averaged over the last second or so */
+    /* A color picker; `rgba` packed like the draw colors (0xAABBGGRR). Its value: setting_get_int */
+    MirageSetting*(MIRAGE_CALL* setting_color)(MirageModule* module, const char* name, uint32_t rgba, const char* tooltip);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

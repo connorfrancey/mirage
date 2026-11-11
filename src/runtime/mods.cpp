@@ -399,6 +399,7 @@ namespace mirage::mods
 														  0.f, d.description);
 						break;
 					case T::String: s = std::make_unique<ctl::Text>(&m, d.name, d.stringDefault, d.description); break;
+					case T::Color: s = std::make_unique<ctl::ColorPick>(&m, d.name, d.colorDefault, d.description); break;
 					case T::Choice:
 						s = std::make_unique<ctl::Combo>(&m, d.name, d.options, static_cast<int>(d.intDefault), d.description);
 						break;
@@ -502,6 +503,7 @@ namespace mirage::mods
 		int32_t MIRAGE_CALL SettingGetInt(MirageSetting* h)
 		{
 			ctl::Setting* s = SettingOf(h);
+			if (auto* c = dynamic_cast<ctl::ColorPick*>(s)) return static_cast<int32_t>(c->Packed());
 			if (auto* b = dynamic_cast<ctl::Value<bool>*>(s)) return b->Get() ? 1 : 0;
 			if (auto* i = dynamic_cast<ctl::Value<int>*>(s)) return i->Get();
 			if (auto* f = dynamic_cast<ctl::Value<float>*>(s)) return static_cast<int32_t>(f->Get());
@@ -518,7 +520,10 @@ namespace mirage::mods
 		void MIRAGE_CALL SettingSetInt(MirageSetting* h, int32_t v)
 		{
 			ctl::Setting* s = SettingOf(h);
-			if (auto* b = dynamic_cast<ctl::Value<bool>*>(s)) b->Set(v != 0);
+			if (auto* c = dynamic_cast<ctl::ColorPick*>(s)) {
+				const auto u = static_cast<uint32_t>(v);
+				c->Set({(u & 0xFF) / 255.f, ((u >> 8) & 0xFF) / 255.f, ((u >> 16) & 0xFF) / 255.f, ((u >> 24) & 0xFF) / 255.f});
+			} else if (auto* b = dynamic_cast<ctl::Value<bool>*>(s)) b->Set(v != 0);
 			else if (auto* i = dynamic_cast<ctl::Value<int>*>(s)) i->Set(v);
 			else if (auto* f = dynamic_cast<ctl::Value<float>*>(s)) f->Set(static_cast<float>(v));
 			else return;
@@ -614,6 +619,21 @@ namespace mirage::mods
 		{
 			if (ImDrawList* dl = DrawList()) dl->AddRectFilled({x1, y1}, {x2, y2}, color);
 		}
+		void MIRAGE_CALL DrawCircle(float x, float y, float radius, uint32_t color, float thickness)
+		{
+			if (ImDrawList* dl = DrawList()) dl->AddCircle({x, y}, radius, color, 0, thickness);
+		}
+		void MIRAGE_CALL DrawCircleFilled(float x, float y, float radius, uint32_t color)
+		{
+			if (ImDrawList* dl = DrawList()) dl->AddCircleFilled({x, y}, radius, color);
+		}
+		float MIRAGE_CALL FrameRate() { return ImGui::GetCurrentContext() ? ImGui::GetIO().Framerate : 0.f; }
+		MirageSetting* MIRAGE_CALL SettingColor(MirageModule* m, const char* name, uint32_t rgba, const char* tooltip)
+		{
+			const std::array<float, 4> c{(rgba & 0xFF) / 255.f, ((rgba >> 8) & 0xFF) / 255.f, ((rgba >> 16) & 0xFF) / 255.f,
+										 ((rgba >> 24) & 0xFF) / 255.f};
+			return MakeSetting<ctl::ColorPick>(m, name, c, std::string(Str(tooltip)));
+		}
 		void MIRAGE_CALL TextSize(const char* text, float* w, float* h)
 		{
 			const ImVec2 s = ImGui::GetCurrentContext() && text ? ImGui::CalcTextSize(text) : ImVec2{};
@@ -630,6 +650,7 @@ namespace mirage::mods
 		{
 			ctl::Setting* s = SettingOf(h);
 			if (!s) return MIRAGE_SETTING_UNKNOWN;
+			if (dynamic_cast<ctl::ColorPick*>(s)) return MIRAGE_SETTING_COLOR;
 			if (dynamic_cast<ctl::Checkbox*>(s)) return MIRAGE_SETTING_BOOL;
 			if (dynamic_cast<ctl::Combo*>(s)) return MIRAGE_SETTING_CHOICE;
 			if (dynamic_cast<ctl::KeyHold*>(s)) return MIRAGE_SETTING_KEY;
@@ -664,7 +685,7 @@ namespace mirage::mods
 			game_api::ScriptOpen, game_api::ScriptClose, game_api::ScriptCount, game_api::ScriptGet, game_api::ScriptSet,
 			game_api::ScriptAdd, game_api::ScriptChildren, game_api::ScriptSetChildren, game_api::ScriptApply,
 			game_api::ScriptRestore, game_api::ScriptDump, game_api::ScriptKind, game_api::ScriptKindName,
-			Notify,
+			Notify, DrawCircle, DrawCircleFilled, FrameRate, SettingColor,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

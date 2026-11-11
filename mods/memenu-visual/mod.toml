@@ -1,0 +1,77 @@
+# A first-party mod: part of the menu, written against the public API only (Lua). It ships inside the menu's DLL and
+# is written to memenu\mods\memenu-visual at startup: edit a copy under another id, not this folder.
+id = "memenu-visual"
+name = "Visual"
+version = "1.0.0"
+description = "The menu's simple visual features as a Lua mod: FOV, Crosshair, Show FPS"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+
+[settings.fov]
+type = "float"
+name = "Degrees"
+module = "FOV"
+default = 90.0
+min = 60.0
+max = 130.0
+format = "%.0f"
+
+[settings.crosshair_style]
+type = "choice"
+name = "Style"
+module = "Crosshair"
+options = ["Cross", "Dot", "Circle"]
+default = "Cross"
+
+[settings.crosshair_size]
+type = "int"
+name = "Size"
+module = "Crosshair"
+default = 8
+min = 2
+max = 40
+
+[settings.crosshair_gap]
+type = "float"
+name = "Gap"
+module = "Crosshair"
+description = "Cross only"
+default = 3.0
+min = 0.0
+max = 20.0
+format = "%.0f"
+
+[settings.crosshair_thickness]
+type = "float"
+name = "Thickness"
+module = "Crosshair"
+description = "Cross and circle"
+default = 2.0
+min = 1.0
+max = 6.0
+format = "%.1f"
+
+[settings.crosshair_color]
+type = "color"
+name = "Color"
+module = "Crosshair"
+default = "#E6332E"
+
+[settings.fps_corner]
+type = "choice"
+name = "Corner"
+module = "Show FPS"
+options = ["Top left", "Top right", "Bottom left", "Bottom right"]
+default = "Top left"
+
+[settings.fps_color]
+type = "color"
+name = "Text color"
+module = "Show FPS"
+default = "#FFFFFF"
+
+[settings.fps_frametime]
+type = "bool"
+name = "Frametime"
+module = "Show FPS"
+default = false
