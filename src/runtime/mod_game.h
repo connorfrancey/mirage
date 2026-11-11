@@ -58,6 +58,9 @@ namespace mirage::mods::game_api
 
 namespace mirage::mods
 {
+	// A value the menu itself shares with mods (mod id "memenu"), like a mod's share_set. Any thread.
+	void Share(const std::string& key, const std::string& value);
+
 	// What happened, to the mods subscribed to it (the menu calls these where the game layer reports it)
 	void DispatchTick(float seconds);								// Game thread
 	void DispatchLevelLoad(bool finished, const std::string& map);	// Game thread

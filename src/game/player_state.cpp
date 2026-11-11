@@ -1,5 +1,6 @@
 #include "game/player_state.h"
 #include "game/flight.h"
+#include "runtime/mod_game.h"
 #include "game/game.h"
 #include "game/object_ref.h"
 #include "game/uobject.h"
@@ -392,6 +393,7 @@ bool player_state::Load()
     if (!flight::Active() && pawn->Physics == EPhysics::PHYS_None) pawn->Physics = EPhysics::PHYS_Falling;
 
     ++g_loadCount;
+    mirage::mods::Share("save_state.loads", std::to_string(g_loadCount));     // Mods' checkpoint timers restart on it
     spdlog::info("Save state: loaded, player at ({:.0f}, {:.0f}, {:.0f})", pawn->Location.X, pawn->Location.Y,
                  pawn->Location.Z);
     return true;

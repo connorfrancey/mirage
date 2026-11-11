@@ -489,6 +489,15 @@ namespace mirage::mods
 	}
 }
 
+namespace mirage::mods
+{
+	void Share(const std::string& key, const std::string& value)
+	{
+		std::lock_guard lock(game_api::g_shareLock);
+		game_api::g_shared["memenu|" + key] = value;
+	}
+}
+
 namespace mirage::mods::ui
 {
 	bool MenuVisible() { return gui::visible; }

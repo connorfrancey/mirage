@@ -217,3 +217,4 @@ mirage.module {
     end,
 }
 OverlayColor = mirage.setting("tool_overlay_color")
+require("speedometer")              -- Speedometer (speedometer.lua)

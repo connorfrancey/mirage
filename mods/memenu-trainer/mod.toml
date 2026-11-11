@@ -260,3 +260,100 @@ type = "color"
 name = "Text color"
 module = "Tool Overlay"
 default = "#FFFFFF"
+
+[settings.speedo_position]
+type = "bool"
+name = "Position"
+module = "Speedometer"
+default = true
+
+[settings.speedo_speed]
+type = "bool"
+name = "Speed"
+module = "Speedometer"
+default = true
+
+[settings.speedo_angles]
+type = "bool"
+name = "Pitch / yaw"
+module = "Speedometer"
+default = true
+
+[settings.speedo_checkpoint]
+type = "bool"
+name = "Checkpoint timer"
+module = "Speedometer"
+description = "Set a checkpoint, then load a state: times how long you take to get back to it"
+default = true
+
+[settings.speedo_state]
+type = "bool"
+name = "State / health / reaction time"
+module = "Speedometer"
+default = false
+
+[settings.speedo_jump]
+type = "bool"
+name = "Jump height"
+module = "Speedometer"
+default = false
+
+[settings.speedo_unit]
+type = "choice"
+name = "Speed unit"
+module = "Speedometer"
+options = ["u/s", "km/h", "m/s"]
+default = "u/s"
+
+[settings.speedo_radius]
+type = "float"
+name = "Stop radius"
+module = "Speedometer"
+description = "The timer stops this close to the checkpoint"
+default = 50.0
+min = 1.0
+max = 500.0
+format = "%.0f"
+
+[settings.speedo_checkpoint_key]
+type = "key"
+name = "Set checkpoint key"
+module = "Speedometer"
+description = "Sets the checkpoint where you are (menu closed)"
+default = 51
+
+[settings.speedo_title_bar]
+type = "bool"
+name = "Title bar"
+module = "Speedometer"
+default = false
+
+[settings.speedo_opacity]
+type = "float"
+name = "Opacity"
+module = "Speedometer"
+default = 0.6
+min = 0.0
+max = 1.0
+format = "%.2f"
+
+[settings.speedo_value_column]
+type = "float"
+name = "Value column"
+module = "Speedometer"
+default = 90.0
+min = 40.0
+max = 200.0
+format = "%.0f"
+
+[settings.speedo_label_color]
+type = "color"
+name = "Label color"
+module = "Speedometer"
+default = "#BFBFC7"
+
+[settings.speedo_value_color]
+type = "color"
+name = "Value color"
+module = "Speedometer"
+default = "#FFFFFF"
