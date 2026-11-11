@@ -45,7 +45,7 @@ local function tool(def)
 end
 
 -- ---- Kickglitch -----------------------------------------------------------------------------------------------------
-tool {
+local kickglitch = tool {
     name = "Kickglitch",
     description = "Arm, then wallrun: kicks off the wall and jumps the moment you land",
     order = 10,
@@ -69,7 +69,7 @@ local function beamer_release()
         beamer_key = nil
     end
 end
-tool {
+local beamer = tool {
     name = "Beamer",
     description = "Arm while wall climbing: turns around (or sidesteps) at full climb speed",
     order = 20,
@@ -252,4 +252,4 @@ AkgBuffer = mirage.setting("akg_buffer")
 AkgWindow = mirage.setting("akg_window")
 AkgOnMiss = mirage.setting("akg_on_miss")
 
-return {}
+return { kickglitch = kickglitch, beamer = beamer, strang = strang }

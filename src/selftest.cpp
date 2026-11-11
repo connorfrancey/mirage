@@ -46,9 +46,6 @@
 #if MEMENU_FEATURE_INFO_LINES
 #include "features/visual/info_lines.h"
 #endif
-#if MEMENU_FEATURE_KICKGLITCH_HELPER
-#include "features/trainer/kickglitch_helper.h"
-#endif
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
 #endif
@@ -401,6 +398,14 @@ struct Expectation {
     std::function<std::string()> whileOn, afterOff;
 };
 
+// A value a mod shares (mirage.share), as a number
+int SharedInt(const char* mod, const char* key)
+{
+    char v[32]{};
+    mirage::mods::game_api::ShareGet(mod, key, v, sizeof v);
+    return std::atoi(v);
+}
+
 Expectation ExpectationFor(Module& m)
 {
     const std::string& name = m.Name();
@@ -594,10 +599,17 @@ Expectation ExpectationFor(Module& m)
                     return Expect(static_cast<int>(c->Rotation.Yaw) != turnedYaw, "the view was not turned to the spawn point (SetRotation)"); }); },
                 {}};
     }
+    // Levels and Sublevels are mods/memenu-levels: what they read, from what it shares (refreshed every 60 ticks)
     if (name == "Levels")
-        return {{}, [] { return Expect(!levels::Maps().empty(), "the level list is empty"); }, {}};
+        return {{}, [] {
+                    WaitFor(3.0, [] { return SharedInt("memenu-levels", "game_maps") > 0; });
+                    return Expect(SharedInt("memenu-levels", "game_maps") > 0 && SharedInt("memenu-levels", "maps") > 0,
+                                  "the level list is not the game's (or is empty)"); }, {}};
     if (name == "Sublevels")
-        return {{}, [] { return Expect(!levels::Sublevels().empty(), "no streaming sublevels listed for this level"); }, {}};
+        return {{}, [] {
+                    WaitFor(3.0, [] { return SharedInt("memenu-levels", "sublevels") > 0; });
+                    return Expect(SharedInt("memenu-levels", "sublevels") > 0, "no streaming sublevels listed for this level"); },
+                {}};
     return {};
 }
 #endif
@@ -1938,7 +1950,7 @@ void WaitGrounded()
     WaitTicks(5);
 }
 
-#if MEMENU_FEATURE_KICKGLITCH_HELPER
+// Kickglitch Helper is mods/memenu-trainer (helper.lua): what it measured comes from what it shares (kg_helper.*).
 // A kick is faked (the wallrun kick's move state on a player standing on the ground: "landed" the next tick), then the
 // game is told to jump like the Kickglitch tool does. The helper must count one attempt and time the jump.
 void TestKickglitchHelper()
@@ -1978,9 +1990,14 @@ void TestKickglitchHelper()
     OnGameThread([] { if (auto* pawn = game::Pawn()) pawn->MovementState = Classes::EMovement::MOVE_MeleeWallrun; });
     WaitTicks(2);
     OnGameThread([] { if (auto* pawn = game::Pawn()) pawn->MovementState = Classes::EMovement::MOVE_Falling; });
-    WaitFor(5.0, [] { return kickglitch_helper::Get().attempts > 0; });
+    struct Last { int attempts, jumpFrame; bool calibrated; };
+    const auto get = [] {
+        return Last{SharedInt("memenu-trainer", "kg_helper.attempts"), SharedInt("memenu-trainer", "kg_helper.jump_frame"),
+                    SharedInt("memenu-trainer", "kg_helper.calibrated") != 0};
+    };
+    WaitFor(5.0, [&] { return get().attempts > 0; });
 
-    const auto last = kickglitch_helper::Get();
+    const Last last = get();
     if (last.attempts != 1) p.Problem("it counted " + std::to_string(last.attempts) + " attempts, not 1");
     else if (last.jumpFrame < 0) p.Problem("it saw the kick and the landing but not the jump");
     else s.notes.push_back("jump timed " + std::to_string(last.jumpFrame) + " frame(s) after landing (the Kickglitch tool's jump)");
@@ -2002,7 +2019,6 @@ void TestKickglitchHelper()
     p.Check(1, false);
     End(s);
 }
-#endif
 
 // What Auto Kickglitch's kick buffer did (mods/memenu-trainer shares it: kick_buffer.*)
 struct KickBufferStats {
@@ -4223,9 +4239,7 @@ const Named* FeatureList()
         {"Input overlay", &TestInputOverlay, true},
 #endif
 #endif
-#if MEMENU_FEATURE_KICKGLITCH_HELPER
         {"Kickglitch helper", &TestKickglitchHelper, false},
-#endif
         {"Auto kickglitch", &TestAutoKickglitch, false},
         {"Kill bots", &TestKillBots, false},
 #if MEMENU_FEATURE_KEY_BINDINGS

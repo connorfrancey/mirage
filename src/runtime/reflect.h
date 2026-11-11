@@ -11,6 +11,7 @@
 #include "runtime/layout.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 
@@ -31,6 +32,14 @@ namespace mirage::reflect
 		std::uint64_t flags = 0;
 		Classes::UStruct* structType = nullptr;		// Struct: its UScriptStruct
 		Classes::UClass* objectClass = nullptr;		// Object, Class, Component: the class it holds
+		std::shared_ptr<const Member> inner;		// Array: what one element is (its offset 0)
+	};
+
+	// A dynamic array (TArray) as the engine keeps it
+	struct ArrayHeader
+	{
+		std::uint8_t* data;
+		std::int32_t count, max;
 	};
 
 	// The property `name` of `type` or a struct/class it extends (cached per type). nullptr if there is none.
@@ -44,7 +53,10 @@ namespace mirage::reflect
 		std::string error;							// Why the path doesn't resolve
 		explicit operator bool() const { return member && address; }
 	};
-	// `base` is an instance of `type` (an object and its class, a call's parameters and its function)
+	// `base` is an instance of `type` (an object and its class, a call's parameters and its function). A part of the
+	// path may index an array, 0-based: "StreamingLevels[2].PackageName" (a dynamic array, checked against its count),
+	// "Foo[3]" (a static one). An array without an index is the array itself (ArrayCount); a static one stays its
+	// first element for everything else, as before.
 	Value Resolve(Classes::UStruct* type, void* base, std::string_view path);
 
 	// Reading and writing a value of the kind the member has. Get on another kind gives 0 / "" / nullptr; Set on
@@ -53,6 +65,7 @@ namespace mirage::reflect
 	float GetFloat(const Value& v);					// Float (Int and Byte converted)
 	Classes::UObject* GetObj(const Value& v);	// Object, Class, Component, Interface
 	std::string GetText(const Value& v);			// Name, Str (and a number as text)
+	std::int32_t ArrayCount(const Value& v);		// Array: its elements; a static array (Foo[4]): its size; else 0
 	bool SetInt(const Value& v, std::int32_t x);	// Int, Byte (0-255), Bool
 	bool SetFloat(const Value& v, float x);
 	bool SetObj(const Value& v, Classes::UObject* x);

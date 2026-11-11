@@ -196,6 +196,7 @@ namespace mirage::mods
 			key = d.key;
 			enabledByDefault = (d.flags & MIRAGE_MODULE_ENABLED_BY_DEFAULT) != 0;
 			if (d.flags & MIRAGE_MODULE_EVERY_TICK) schedule.priority = sched::Priority::Critical;
+			if (d.flags & MIRAGE_MODULE_PANEL_OPEN) expanded = true;
 			Bind(d);
 		}
 

@@ -185,3 +185,35 @@ freeze = mirage.module {
     end,
     on_disable = function() later.run(function() last = -1 end) end,
 }
+
+-- ---- Kickglitch Helper (helper.lua) and Tool Overlay ---------------------------------------------------------------------
+local tools = require("tools")
+local flight = require("flight")
+local helper = require("helper")
+helper.kickglitch = tools.kickglitch
+
+-- The trainer's "Show Tool Overlay": which tools are armed or on, in the top-right corner
+local SHOWN = {
+    { tools.strang, "Strang" }, { tools.beamer, "Beamer" }, { tools.kickglitch, "KG" },
+    { flight.modules[2], "Flight" }, { flight.modules[1], "No Clip" }, { god, "God" },
+}
+mirage.module {
+    name = "Tool Overlay",
+    tab = "Trainer",
+    description = "Show the armed tools in the top-right corner",
+    order = 80,
+    enabled_by_default = true,
+    on_render = function()
+        local parts = {}
+        for _, s in ipairs(SHOWN) do
+            if s[1]:enabled() then parts[#parts + 1] = s[2] end
+        end
+        if #parts == 0 then return end
+        local text = table.concat(parts, " ")
+        local w = mirage.draw.screen_size()
+        local tw, th = mirage.draw.text_size(text)
+        mirage.draw.rect_filled(w - tw - 10, 0, w, th + 4, mirage.rgba(0, 0, 0, 100))
+        mirage.draw.text(w - tw - 5, 2, OverlayColor:get(), text)
+    end,
+}
+OverlayColor = mirage.setting("tool_overlay_color")

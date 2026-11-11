@@ -175,6 +175,7 @@ namespace mirage::mods
 		static int IsA(lua_State* L);
 		static int CallGame(lua_State* L);
 		static int ProxyIndex(lua_State* L);
+		static int ProxyLen(lua_State* L);
 		static int ProxyNewIndex(lua_State* L);
 		static int ProxyEq(lua_State* L);
 		static int ProxyToString(lua_State* L);
@@ -278,7 +279,7 @@ namespace mirage::mods
 		d.order = integer("order");
 		d.key = integer("key");
 		d.flags = (flag("action") ? MIRAGE_MODULE_ACTION : 0u) | (flag("enabled_by_default") ? MIRAGE_MODULE_ENABLED_BY_DEFAULT : 0u) |
-				  (flag("every_tick") ? MIRAGE_MODULE_EVERY_TICK : 0u);
+				  (flag("every_tick") ? MIRAGE_MODULE_EVERY_TICK : 0u) | (flag("panel_open") ? MIRAGE_MODULE_PANEL_OPEN : 0u);
 		d.user = refs.get();
 		d.on_enable = &Invoke<kEnable>;
 		d.on_disable = &Invoke<kDisable>;
@@ -607,7 +608,9 @@ namespace mirage::mods
 			case MIRAGE_VALUE_FLOAT: lua_pushnumber(L, v.f); break;
 			case MIRAGE_VALUE_OBJECT: PushObject(L, v.o); break;
 			case MIRAGE_VALUE_TEXT: lua_pushstring(L, v.text); break;
-			case MIRAGE_VALUE_STRUCT: PushProxy(L, kind == kObject ? kInObject : kind, handle, path, owner); break;
+			case MIRAGE_VALUE_STRUCT: case MIRAGE_VALUE_ARRAY:
+				PushProxy(L, kind == kObject ? kInObject : kind, handle, path, owner);
+				break;
 			default: lua_pushnil(L); break;
 		}
 	}
@@ -695,13 +698,26 @@ namespace mirage::mods
 			return r;
 		}
 		std::string Join(const std::string& path, const char* key) { return path.empty() ? key : path + "." + key; }
+		// t.Name or t[1] (Lua's 1-based index: the path's [0])
+		std::string Key(lua_State* L, const std::string& path)
+		{
+			if (lua_type(L, 2) == LUA_TNUMBER) {
+				const lua_Integer i = luaL_checkinteger(L, 2);
+				return path + "[" + std::to_string(i - 1) + "]";
+			}
+			return Join(path, luaL_checkstring(L, 2));
+		}
 	}
 
 	int LuaMod::ProxyIndex(lua_State* L)
 	{
 		LuaMod& self = Self(L);
 		const ProxyAt at = OpenProxy(L);
-		const std::string path = Join(at.path, luaL_checkstring(L, 2));
+		if (lua_type(L, 2) == LUA_TNUMBER && luaL_checkinteger(L, 2) < 1) {
+			lua_pushnil(L);
+			return 1;
+		}
+		const std::string path = Key(L, at.path);
 		MirageValue v;
 		const int ok = at.p->kind == kInCall ? self.api_->call_get(static_cast<MirageCall*>(at.p->handle), path.c_str(), &v)
 											 : self.api_->object_get(static_cast<MirageObject*>(at.p->handle), path.c_str(), &v);
@@ -716,7 +732,19 @@ namespace mirage::mods
 	int LuaMod::ProxyNewIndex(lua_State* L)
 	{
 		const ProxyAt at = OpenProxy(L);
-		return Self(L).Set(L, at.p->kind, at.p->handle, Join(at.path, luaL_checkstring(L, 2)), 3);
+		return Self(L).Set(L, at.p->kind, at.p->handle, Key(L, at.path), 3);
+	}
+
+	// #array
+	int LuaMod::ProxyLen(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const ProxyAt at = OpenProxy(L);
+		MirageValue v;
+		const int ok = at.p->kind == kInCall ? self.api_->call_get(static_cast<MirageCall*>(at.p->handle), at.path.c_str(), &v)
+											 : self.api_->object_get(static_cast<MirageObject*>(at.p->handle), at.path.c_str(), &v);
+		lua_pushinteger(L, ok && v.type == MIRAGE_VALUE_ARRAY ? v.i : 0);
+		return 1;
 	}
 
 	int LuaMod::ProxyEq(lua_State* L)
@@ -1315,7 +1343,7 @@ namespace mirage::mods
 		lua_pop(L, 1);
 
 		luaL_newmetatable(L, kProxyMeta);
-		const luaL_Reg proxyFns[] = {{"__index", ProxyIndex}, {"__newindex", ProxyNewIndex}, {"__eq", ProxyEq},
+		const luaL_Reg proxyFns[] = {{"__index", ProxyIndex}, {"__newindex", ProxyNewIndex}, {"__eq", ProxyEq}, {"__len", ProxyLen},
 			{"__tostring", ProxyToString}, {nullptr, nullptr}};
 		set(proxyFns);
 		lua_pop(L, 1);

@@ -89,6 +89,7 @@ namespace mirage::mods
 					break;
 				}
 				case K::Struct: out->type = MIRAGE_VALUE_STRUCT; break;
+				case K::Array: out->type = MIRAGE_VALUE_ARRAY; out->i = reflect::ArrayCount(v); break;
 				default: return 0;
 			}
 			return 1;

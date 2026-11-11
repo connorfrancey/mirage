@@ -47,6 +47,25 @@ namespace mirage::reflect
 					m.arrayDim = Dword(f, kArrayDim);
 					std::memcpy(&m.flags, reinterpret_cast<const std::uint8_t*>(f) + kFlags, sizeof m.flags);
 					switch (kind) {
+						case layout::Kind::Array:
+							if (auto* in = game::layout::PtrAt<Classes::UField>(f, kReference); in && in->Class) {
+								auto e = std::make_shared<Member>();
+								e->name = m.name;
+								e->kind = layout::KindFromClass(in->Class->GetName());
+								e->elementSize = Dword(in, kElementSize);
+								e->arrayDim = 1;
+								switch (e->kind) {
+									case layout::Kind::Bool: e->boolMask = Dword(in, kReference); break;
+									case layout::Kind::Struct: e->structType = game::layout::PtrAt<Classes::UStruct>(in, kReference); break;
+									case layout::Kind::Object: case layout::Kind::Component: case layout::Kind::Interface:
+										e->objectClass = game::layout::PtrAt<Classes::UClass>(in, kReference);
+										break;
+									case layout::Kind::Class: e->objectClass = game::layout::PtrAt<Classes::UClass>(in, kMetaClass); break;
+									default: break;
+								}
+								m.inner = std::move(e);
+							}
+							break;
 						case layout::Kind::Bool: m.boolMask = Dword(f, kReference); break;
 						case layout::Kind::Struct: m.structType = game::layout::PtrAt<Classes::UStruct>(f, kReference); break;
 						case layout::Kind::Object: case layout::Kind::Component: case layout::Kind::Interface:
@@ -84,7 +103,25 @@ namespace mirage::reflect
 		auto* address = static_cast<std::uint8_t*>(base);
 		while (true) {
 			const auto dot = path.find('.');
-			const std::string_view part = path.substr(0, dot);
+			std::string_view part = path.substr(0, dot);
+			// "Name[3]": an element
+			long index = -1;
+			if (const auto open = part.find('['); open != std::string_view::npos) {
+				const auto close = part.find(']', open);
+				if (close != part.size() - 1 || close == open + 1) {
+					v.error = "bad index in '" + std::string(part) + "'";
+					return v;
+				}
+				index = 0;
+				for (std::size_t i = open + 1; i < close; ++i) {
+					if (part[i] < '0' || part[i] > '9' || index > 10'000'000) {
+						v.error = "bad index in '" + std::string(part) + "'";
+						return v;
+					}
+					index = index * 10 + (part[i] - '0');
+				}
+				part = part.substr(0, open);
+			}
 			if (!type || !address) {
 				v.error = "nothing to look '" + std::string(part) + "' up in";
 				return v;
@@ -95,6 +132,23 @@ namespace mirage::reflect
 				return v;
 			}
 			address += m->offset;
+			if (index >= 0) {
+				if (m->kind == layout::Kind::Array) {
+					ArrayHeader a{};
+					std::memcpy(&a, address, sizeof a);
+					if (!m->inner || index >= a.count || !a.data) {
+						v.error = "'" + std::string(part) + "' has no element " + std::to_string(index);
+						return v;
+					}
+					address = a.data + static_cast<std::size_t>(index) * m->inner->elementSize;
+					m = m->inner.get();
+				} else if (static_cast<std::uint32_t>(index) < m->arrayDim) {
+					address += static_cast<std::size_t>(index) * m->elementSize;
+				} else {
+					v.error = "'" + std::string(part) + "' has no element " + std::to_string(index);
+					return v;
+				}
+			}
 			if (dot == std::string_view::npos) {
 				v.member = m;
 				v.address = address;
@@ -209,6 +263,17 @@ namespace mirage::reflect
 		if (name.Index == 0 && x != "None") return false;		// Not a name the engine has
 		std::memcpy(v.address, &name, sizeof name);
 		return true;
+	}
+
+	std::int32_t ArrayCount(const Value& v)
+	{
+		if (!v) return 0;
+		if (v.member->kind == layout::Kind::Array) {
+			ArrayHeader a{};
+			std::memcpy(&a, v.address, sizeof a);
+			return a.count;
+		}
+		return v.member->arrayDim > 1 ? static_cast<std::int32_t>(v.member->arrayDim) : 0;
 	}
 
 	void ClearCache() { g_types.clear(); }

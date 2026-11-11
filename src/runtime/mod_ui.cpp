@@ -350,6 +350,48 @@ namespace mirage::mods::ui
 		float MIRAGE_CALL Time() { return Ready() ? static_cast<float>(ImGui::GetTime()) : 0.f; }
 		float MIRAGE_CALL DeltaTime() { return Ready() ? ImGui::GetIO().DeltaTime : 0.f; }
 
+		void MIRAGE_CALL NextOpen(int32_t open, int32_t always)
+		{
+			if (Ready()) ImGui::SetNextItemOpen(open != 0, always ? ImGuiCond_Always : ImGuiCond_Once);
+		}
+		int32_t MIRAGE_CALL InputTextHint(const char* l, const char* hint, char* buf, uint32_t cap, uint32_t flags)
+		{
+			if (!Ready() || !buf || cap == 0) return 0;
+			ImGuiInputTextFlags f = 0;
+			if (flags & MIRAGE_INPUT_ENTER_RETURNS) f |= ImGuiInputTextFlags_EnterReturnsTrue;
+			if (flags & MIRAGE_INPUT_READ_ONLY) f |= ImGuiInputTextFlags_ReadOnly;
+			if (flags & MIRAGE_INPUT_PASSWORD) f |= ImGuiInputTextFlags_Password;
+			return ImGui::InputTextWithHint(S(l), S(hint), buf, cap, f);
+		}
+		void MIRAGE_CALL AlignTextToFrame() { if (Ready()) ImGui::AlignTextToFramePadding(); }
+		void MIRAGE_CALL TextSize(const char* t, float* w, float* h)
+		{
+			const ImVec2 s = Ready() && t ? ImGui::CalcTextSize(t) : ImVec2{};
+			if (w) *w = s.x;
+			if (h) *h = s.y;
+		}
+		float MIRAGE_CALL FrameHeight() { return Ready() ? ImGui::GetFrameHeight() : 0.f; }
+
+		void MIRAGE_CALL WindowRect(float* x1, float* y1, float* x2, float* y2)
+		{
+			ImVec2 a{}, s{};
+			if (Ready()) {
+				a = ImGui::GetWindowPos();
+				s = ImGui::GetWindowSize();
+			}
+			if (x1) *x1 = a.x;
+			if (y1) *y1 = a.y;
+			if (x2) *x2 = a.x + s.x;
+			if (y2) *y2 = a.y + s.y;
+		}
+		void MIRAGE_CALL OverlayRect(float x1, float y1, float x2, float y2, uint32_t c, float rounding, float thickness)
+		{
+			if (!Ready()) return;
+			ImDrawList* dl = ImGui::GetForegroundDrawList();
+			if (thickness <= 0.f) dl->AddRectFilled({x1, y1}, {x2, y2}, C(c), rounding);
+			else dl->AddRect({x1, y1}, {x2, y2}, C(c), rounding, 0, thickness);
+		}
+
 		const MirageUi kUi = {
 			sizeof(MirageUi),
 			WindowBegin, WindowEnd, WindowNextPos, WindowNextSize, WindowNextBgAlpha, ChildBegin, ChildEnd,
@@ -365,6 +407,7 @@ namespace mirage::mods::ui
 			ScrollY, ScrollMaxY, ScrollToBottom,
 			WindowDrawRect, WindowDrawText, WindowDrawLine, WindowDrawCircle,
 			KeyPressed, WantsKeyboard, MousePos, Time, DeltaTime,
+			NextOpen, InputTextHint, AlignTextToFrame, TextSize, FrameHeight, WindowRect, OverlayRect,
 		};
 	}
 

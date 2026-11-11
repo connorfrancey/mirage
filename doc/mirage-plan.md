@@ -345,7 +345,8 @@ paths); every one of today's self-test checks passes with the features loaded as
 - `mods/memenu-trainer` (Lua): God Mode, Teleport to Spawn, Game Speed, Kill Bots, Freeze Timer.
   `mods/memenu-visual` (Lua): FOV, Crosshair, Show FPS, Watermark, Frame Rate Limit, Clear Frame.
   `mods/memenu-trainer` also has No Clip, Flight (flight.lua), Kickglitch, Beamer, Strang, Auto Kickglitch (tools.lua).
-  `mods/memenu-levels` (Lua): Restart Checkpoint, Main Menu. Same names and settings as the native modules they
+  `mods/memenu-trainer` also has Kickglitch Helper (helper.lua) and Tool Overlay.
+  `mods/memenu-levels` (Lua): Levels (the level loader), Sublevels (loader.lua), Restart Checkpoint, Main Menu. Same names and settings as the native modules they
   replace (removed), and the self-test's checks pass on them. API appended for them: `notify`, `draw_circle`,
   `draw_circle_filled`, `frame_rate`, `setting_color` (and `color` settings in mod.toml), `objects_of_class`
   (Lua `mirage.all`: every live object of a class, by short name or path); `call_set` takes string parameters in a
@@ -361,6 +362,8 @@ paths); every one of today's self-test checks passes with the features loaded as
   that doesn't apply. The runtime wraps every mod render callback in ImGui's error recovery: a window or color the mod
   left open is closed for it. Lua: `mirage.ui.*` (edited values come back: `changed, v = ui.slider_float(...)`).
   Self-test "Mirage UI layer" (tests/mods/ui-lua) draws most widgets and leaves a window open on purpose.
+- **Arrays:** paths index arrays, 0-based ("StreamingLevels[2].PackageName", static "Foo[3]"); an array without an
+  index reads as `MIRAGE_VALUE_ARRAY` with its count. Lua: arrays are proxies, 1-based, with `#`.
 - **API-only, enforced:** Lua mods reach the game through `mirage.*` alone. For native parts, `EmbedMods.cmake`
   fails the build when a first-party mod's source has a quoted `#include` other than `"mirage/..."` or its own files.
   No first-party native mod exists yet: when the TAS or the collision view moves, it is built as its own project

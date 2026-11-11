@@ -62,6 +62,8 @@ typedef enum MirageLogLevel {
 /* MirageModuleDesc.flags */
 #define MIRAGE_MODULE_ACTION 0x1u                /* A button: on_trigger, no on/off state */
 #define MIRAGE_MODULE_ENABLED_BY_DEFAULT 0x2u    /* On the first time the mod is loaded (the config remembers after) */
+#define MIRAGE_MODULE_PANEL_OPEN 0x8u             /* Its settings panel is open the first time (a module that is
+                                                    mostly its panel: a list) */
 #define MIRAGE_MODULE_EVERY_TICK 0x4u            /* on_tick is never deferred when the menu is over its time budget
                                                     (a module that must see one exact frame: a jump on landing) */
 
@@ -117,7 +119,9 @@ typedef enum MirageValueType {
     MIRAGE_VALUE_OBJECT = 4,    /* o (NULL: none) */
     MIRAGE_VALUE_TEXT = 5,      /* text: a name or a string (written: names; strings only as a call's parameters,
                                    in a call the mod makes with call_begin) */
-    MIRAGE_VALUE_STRUCT = 6     /* A struct: reach its members with a longer path ("Location" -> "Location.X") */
+    MIRAGE_VALUE_STRUCT = 6,    /* A struct: reach its members with a longer path ("Location" -> "Location.X") */
+    MIRAGE_VALUE_ARRAY = 7      /* An array: i = how many elements; reach one with "[n]" ("StreamingLevels[0]",
+                                   0-based). Elements are read and written, the array isn't resized */
 } MirageValueType;
 typedef struct MirageValue {
     int32_t type;               /* MIRAGE_VALUE_* */
@@ -335,6 +339,17 @@ struct MirageUi {
     void(MIRAGE_CALL* mouse_pos)(float* x, float* y);
     float(MIRAGE_CALL* time)(void);                                  /* Seconds the menu has run */
     float(MIRAGE_CALL* delta_time)(void);                            /* Seconds since the last frame */
+
+    /* Appended */
+    void(MIRAGE_CALL* next_open)(int32_t open, int32_t always);      /* The next tree node opened or closed */
+    int32_t(MIRAGE_CALL* input_text_hint)(const char* label, const char* hint, char* buffer, uint32_t capacity,
+                                          uint32_t flags);           /* input_text with a grey hint while empty */
+    void(MIRAGE_CALL* align_text_to_frame)(void);                    /* Text on this line lines up with widgets */
+    void(MIRAGE_CALL* text_size)(const char* text, float* width, float* height);
+    float(MIRAGE_CALL* frame_height)(void);                          /* A widget's height */
+    void(MIRAGE_CALL* window_rect)(float* x1, float* y1, float* x2, float* y2);  /* The current window's box */
+    /* Drawing over every window (the foreground), screen pixels; thickness 0: filled */
+    void(MIRAGE_CALL* overlay_rect)(float x1, float y1, float x2, float y2, uint32_t color, float rounding, float thickness);
 };
 
 /* The runtime's functions. Only grows; `size` says how much of it this runtime has. */

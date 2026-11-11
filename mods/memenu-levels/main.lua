@@ -6,6 +6,7 @@
 -- Both go through the game's data store (UIDataStore_TdGameData), the object its own menus call.
 
 local later = require("later")     -- Game-thread work from on_trigger
+require("loader")                  -- Levels, Sublevels (loader.lua)
 
 -- The game's data store: the game info's in a level; found among all objects elsewhere (the main menu)
 local function game_data()

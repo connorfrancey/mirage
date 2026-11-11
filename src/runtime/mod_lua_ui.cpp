@@ -255,6 +255,39 @@ namespace mirage::mods::lua_ui
 		int Time(lua_State* L) { lua_pushnumber(L, U(L).time()); return 1; }
 		int DeltaTime(lua_State* L) { lua_pushnumber(L, U(L).delta_time()); return 1; }
 
+		int NextOpen(lua_State* L) { U(L).next_open(lua_toboolean(L, 1), lua_toboolean(L, 2)); return 0; }
+		// input_text_hint(label, hint, text, flags, capacity = 1024) -> changed, text
+		int InputTextHint(lua_State* L)
+		{
+			std::size_t len = 0;
+			const char* text = luaL_optlstring(L, 3, "", &len);
+			const auto capacity = static_cast<std::size_t>(std::clamp<lua_Integer>(luaL_optinteger(L, 5, 1024), 2, 1 << 20));
+			std::vector<char> buf(std::max(capacity, len + 1), '\0');
+			std::copy_n(text, len, buf.data());
+			const bool c = U(L).input_text_hint(Str(L, 1), Str(L, 2), buf.data(), static_cast<uint32_t>(buf.size()), Flags(L, 4));
+			lua_pushstring(L, buf.data());
+			return Changed(L, c);
+		}
+		int AlignTextToFrame(lua_State* L) { U(L).align_text_to_frame(); return 0; }
+		int TextSize(lua_State* L)
+		{
+			float w, h;
+			U(L).text_size(Str(L, 1), &w, &h);
+			lua_pushnumber(L, w);
+			lua_pushnumber(L, h);
+			return 2;
+		}
+		int FrameHeight(lua_State* L) { lua_pushnumber(L, U(L).frame_height()); return 1; }
+
+		int WindowRect(lua_State* L)
+		{
+			float r[4];
+			U(L).window_rect(&r[0], &r[1], &r[2], &r[3]);
+			for (float v : r) lua_pushnumber(L, v);
+			return 4;
+		}
+		int OverlayRect(lua_State* L) { U(L).overlay_rect(F(L, 1), F(L, 2), F(L, 3), F(L, 4), Color(L, 5), F(L, 6), F(L, 7)); return 0; }
+
 		const luaL_Reg kFns[] = {
 			{"window_begin", WindowBegin}, {"window_end", WindowEnd}, {"window_next_pos", WindowNextPos},
 			{"window_next_size", WindowNextSize}, {"window_next_bg_alpha", WindowNextBgAlpha},
@@ -281,7 +314,9 @@ namespace mirage::mods::lua_ui
 			{"scroll_to_bottom", ScrollToBottom},
 			{"draw_rect", DrawRect}, {"draw_text", DrawText}, {"draw_line", DrawLine}, {"draw_circle", DrawCircle},
 			{"key_pressed", KeyPressed}, {"wants_keyboard", WantsKeyboard}, {"mouse_pos", MousePos}, {"time", Time},
-			{"delta_time", DeltaTime},
+			{"delta_time", DeltaTime}, {"next_open", NextOpen}, {"input_text_hint", InputTextHint},
+			{"align_text_to_frame", AlignTextToFrame}, {"text_size", TextSize}, {"frame_height", FrameHeight},
+			{"window_rect", WindowRect}, {"overlay_rect", OverlayRect},
 			{nullptr, nullptr},
 		};
 

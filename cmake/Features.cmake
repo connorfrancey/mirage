@@ -140,12 +140,10 @@ endfunction()
 # Player
 
 # Trainer
-memenu_feature(kickglitch_helper trainer GAME STAGE 10 FILES features/trainer/kickglitch_helper.cpp)
 memenu_feature(save_state        trainer GAME STAGE 9  FILES features/trainer/save_state.cpp)
 memenu_feature(save_states       trainer GAME STAGE 9  FILES features/trainer/save_states.cpp)
 memenu_feature(speedometer       trainer GAME STAGE 7  FILES features/trainer/speedometer.cpp)
 memenu_feature(speedrun_timer    trainer GAME STAGE 7  FILES features/trainer/speedrun_timer.cpp speedrun/live.cpp speedrun/timer.cpp)
-memenu_feature(tool_overlay      trainer      STAGE 5  FILES features/trainer/tool_overlay.cpp)
 
 # TAS / replay
 memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module.cpp features/tas/timeline_view.cpp features/tas/replay_editor.cpp features/tas/macro_library.cpp
@@ -166,8 +164,6 @@ memenu_feature(performance       debug      STAGE 5  FILES features/debug/perfor
 memenu_feature(self_test         debug      STAGE 4  FILES features/debug/self_test.cpp)   # Shown in developer mode only
 
 # Levels
-memenu_feature(level_loader      levels GAME STAGE 8 FILES features/levels/level_loader.cpp)
-memenu_feature(sublevels         levels GAME STAGE 8 FILES features/levels/sublevels.cpp)
 
 # Misc
 memenu_feature(config_actions    misc      STAGE 4 FILES features/misc/config_actions.cpp)
