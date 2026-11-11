@@ -5,6 +5,7 @@
 #include "game/object_query.h"
 #include "game/object_ref.h"
 #include "game/uobject.h"
+#include "gui.h"
 #include "runtime/call.h"
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
@@ -19,6 +20,7 @@
 #include <atomic>
 #include <cstring>
 #include <list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -221,16 +223,25 @@ namespace mirage::mods
 		e.value = after ? 1 : 0;
 		Dispatch(e);
 	}
-	void DispatchPlayerState()
+	namespace
+	{
+		const MirageEvent* g_skippable = nullptr;	// The player state event being dispatched (game thread)
+		bool g_skipped = false;
+	}
+	bool DispatchPlayerState()
 	{
 		static int previous = -1;
 		auto* pawn = game::Pawn();
-		if (!pawn) return;
+		if (!pawn) return false;
 		MirageEvent e = Event(MIRAGE_EVENT_PLAYER_STATE);
 		e.value = static_cast<int32_t>(static_cast<std::uint8_t>(pawn->MovementState.GetValue()));
 		e.value2 = previous;
 		previous = e.value;
+		g_skippable = &e;
+		g_skipped = false;
 		Dispatch(e);
+		g_skippable = nullptr;
+		return g_skipped;
 	}
 	void DispatchStateRestored() { Dispatch(Event(MIRAGE_EVENT_STATE_RESTORED)); }
 
@@ -429,6 +440,41 @@ namespace mirage::mods
 				++n;
 			}
 			return n;
+		}
+
+		void MIRAGE_CALL EventSkip(const MirageEvent* event)
+		{
+			if (event && event == g_skippable) g_skipped = true;
+		}
+
+		int32_t MIRAGE_CALL MenuOpen() { return gui::visible ? 1 : 0; }
+
+		void MIRAGE_CALL InputKey(int32_t vk, int32_t down)
+		{
+			if (vk <= 0 || vk > 0xFE) return;
+			INPUT in{};
+			in.type = INPUT_KEYBOARD;
+			in.ki.wVk = static_cast<WORD>(vk);
+			in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+			SendInput(1, &in, sizeof in);
+		}
+
+		std::mutex g_shareLock;
+		std::map<std::string, std::string, std::less<>> g_shared;	// "<mod id>|<key>" (no id has a '|')
+		void MIRAGE_CALL ShareSet(MirageMod* mod, const char* key, const char* value)
+		{
+			if (!mod || !key) return;
+			std::lock_guard lock(g_shareLock);
+			g_shared[mod->id + '|' + key] = value ? value : "";
+		}
+		uint32_t MIRAGE_CALL ShareGet(const char* modId, const char* key, char* buffer, uint32_t capacity)
+		{
+			std::string v;
+			if (modId && key) {
+				std::lock_guard lock(g_shareLock);
+				if (const auto it = g_shared.find(std::string(modId) + '|' + key); it != g_shared.end()) v = it->second;
+			}
+			return CopyOut(v, buffer, capacity);
 		}
 
 		int32_t MIRAGE_CALL ObjectIsA(MirageObject* object, const char* className)

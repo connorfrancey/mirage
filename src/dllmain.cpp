@@ -122,7 +122,7 @@ static void Run(HMODULE module)
             });
             // The mods' other events: deaths, the player's move state, keys
             game::OnPlayerDeath([](bool after) { mirage::mods::DispatchDeath(after); });
-            game::OnPlayerStateChange([] { mirage::mods::DispatchPlayerState(); return false; });
+            game::OnPlayerStateChange([] { return mirage::mods::DispatchPlayerState(); });
             modules::SetKeyListener([](int vk) { mirage::mods::DispatchKey(vk); });
             // A TAS rewind: the game's memory went back (the mods' own didn't: tas/memory_map.h leaves memenu\ out)
             game::OnStateRestored([] { mirage::mods::DispatchStateRestored(); });

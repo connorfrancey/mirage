@@ -138,15 +138,9 @@ endfunction()
 
 # -------------------------------------------------------------------------------------------------
 # Player
-memenu_feature(flight_mode       player GAME STAGE 10 FILES features/player/flight_mode.cpp features/player/fly_module.cpp)
-memenu_feature(no_clip           player GAME STAGE 10 FILES features/player/no_clip.cpp features/player/fly_module.cpp)
 
 # Trainer
-memenu_feature(beamer            trainer GAME STAGE 10 FILES features/trainer/beamer.cpp)
-memenu_feature(kickglitch        trainer GAME STAGE 10 FILES features/trainer/kickglitch.cpp)
 memenu_feature(kickglitch_helper trainer GAME STAGE 10 FILES features/trainer/kickglitch_helper.cpp)
-memenu_feature(auto_kickglitch   trainer GAME STAGE 10 FILES features/trainer/auto_kickglitch.cpp)
-memenu_feature(strang            trainer GAME STAGE 10 FILES features/trainer/strang.cpp)
 memenu_feature(save_state        trainer GAME STAGE 9  FILES features/trainer/save_state.cpp)
 memenu_feature(save_states       trainer GAME STAGE 9  FILES features/trainer/save_states.cpp)
 memenu_feature(speedometer       trainer GAME STAGE 7  FILES features/trainer/speedometer.cpp)

@@ -2,8 +2,8 @@
 # is written to memenu\mods\memenu-trainer at startup: edit a copy under another id, not this folder.
 id = "memenu-trainer"
 name = "Trainer"
-version = "1.1.0"
-description = "The menu's trainer and world features as a Lua mod: God Mode, Teleport to Spawn, Game Speed, Kill Bots, Freeze Timer"
+version = "1.2.0"
+description = "The menu's trainer and world features as a Lua mod: God Mode, Teleport to Spawn, Game Speed, Kill Bots, Freeze Timer, No Clip, Flight, Kickglitch, Beamer, Strang, Auto Kickglitch"
 authors = ["Mirror's Edge Menu"]
 mirage = "^0.1"
 
@@ -26,3 +26,206 @@ default = 0.0
 min = 0.0
 max = 200.0
 format = "%.0f"
+
+[settings.no_clip_speed]
+type = "float"
+name = "Speed"
+module = "No Clip"
+description = "Units per second. Hold the boost key for more"
+default = 900.0
+min = 100.0
+max = 10000.0
+format = "%.0f"
+
+[settings.no_clip_boost]
+type = "float"
+name = "Boost"
+module = "No Clip"
+default = 3.0
+min = 1.0
+max = 10.0
+format = "%.1fx"
+
+[settings.no_clip_responsiveness]
+type = "float"
+name = "Responsiveness"
+module = "No Clip"
+description = "How fast you reach full speed and stop. Higher = snappier, lower = floatier"
+default = 10.0
+min = 1.0
+max = 40.0
+format = "%.0f"
+
+[settings.no_clip_follow_view]
+type = "bool"
+name = "Move along view"
+module = "No Clip"
+description = "Forward goes where you look, up and down included. Off: forward stays level"
+default = true
+
+[settings.no_clip_invulnerable]
+type = "bool"
+name = "Invulnerable"
+module = "No Clip"
+description = "Keeps health full and prevents fall damage while active (and after you land)"
+default = true
+
+[settings.no_clip_block_actions]
+type = "bool"
+name = "Block jump/actions"
+module = "No Clip"
+description = "Ignore the game's own jump/crouch/etc. while flying (the up/down keys are often those)"
+default = true
+
+[settings.no_clip_up_key]
+type = "key"
+name = "Up key"
+module = "No Clip"
+default = 32
+
+[settings.no_clip_down_key]
+type = "key"
+name = "Down key"
+module = "No Clip"
+default = 162
+
+[settings.no_clip_boost_key]
+type = "key"
+name = "Boost key"
+module = "No Clip"
+default = 160
+
+[settings.flight_speed]
+type = "float"
+name = "Speed"
+module = "Flight"
+description = "Units per second. Hold the boost key for more"
+default = 900.0
+min = 100.0
+max = 10000.0
+format = "%.0f"
+
+[settings.flight_boost]
+type = "float"
+name = "Boost"
+module = "Flight"
+default = 3.0
+min = 1.0
+max = 10.0
+format = "%.1fx"
+
+[settings.flight_responsiveness]
+type = "float"
+name = "Responsiveness"
+module = "Flight"
+description = "How fast you reach full speed and stop. Higher = snappier, lower = floatier"
+default = 10.0
+min = 1.0
+max = 40.0
+format = "%.0f"
+
+[settings.flight_follow_view]
+type = "bool"
+name = "Move along view"
+module = "Flight"
+description = "Forward goes where you look, up and down included. Off: forward stays level"
+default = true
+
+[settings.flight_invulnerable]
+type = "bool"
+name = "Invulnerable"
+module = "Flight"
+description = "Keeps health full and prevents fall damage while active (and after you land)"
+default = true
+
+[settings.flight_block_actions]
+type = "bool"
+name = "Block jump/actions"
+module = "Flight"
+description = "Ignore the game's own jump/crouch/etc. while flying (the up/down keys are often those)"
+default = true
+
+[settings.flight_up_key]
+type = "key"
+name = "Up key"
+module = "Flight"
+default = 32
+
+[settings.flight_down_key]
+type = "key"
+name = "Down key"
+module = "Flight"
+default = 162
+
+[settings.flight_boost_key]
+type = "key"
+name = "Boost key"
+module = "Flight"
+default = 160
+
+[settings.beamer_sidestep]
+type = "bool"
+name = "Sidestep beamer"
+module = "Beamer"
+description = "Jump sideways off the wall instead of turning around"
+default = false
+
+[settings.beamer_auto]
+type = "bool"
+name = "Auto sidestep"
+module = "Beamer"
+description = "Hold the strafe key for you. Off: hold left or right yourself while the beamer is armed"
+default = false
+
+[settings.beamer_direction]
+type = "choice"
+name = "Direction"
+module = "Beamer"
+options = ["Left", "Right"]
+default = "Left"
+
+[settings.beamer_left_key]
+type = "key"
+name = "Left key"
+module = "Beamer"
+description = "Your strafe left key (pressed by Auto sidestep)"
+default = 65
+
+[settings.beamer_right_key]
+type = "key"
+name = "Right key"
+module = "Beamer"
+description = "Your strafe right key (pressed by Auto sidestep)"
+default = 68
+
+[settings.akg_kick_key]
+type = "key"
+name = "Kick key"
+module = "Auto Kickglitch"
+description = "Held while wallrunning: kicks off the wall for you too (none: you kick)"
+default = 0
+
+[settings.akg_buffer]
+type = "bool"
+name = "Kick buffer"
+module = "Auto Kickglitch"
+description = "Kick pressed in the air, just before the wall: instead of an air kick it waits, and kicks off the wall on the first frame you are on it. Not with a gun (that shoots)"
+default = true
+
+[settings.akg_window]
+type = "int"
+name = "Buffer window"
+module = "Auto Kickglitch"
+description = "How long a held kick waits for a wall (game time)"
+default = 200
+min = 50
+max = 600
+format = "%d ms"
+
+[settings.akg_on_miss]
+type = "choice"
+name = "No wall in time"
+module = "Auto Kickglitch"
+description = "When the window runs out in the air. Kick anyway: the air kick, late. Drop it: no kick. Landing or grabbing a ledge first always drops it"
+options = ["Kick anyway", "Drop it"]
+default = "Kick anyway"

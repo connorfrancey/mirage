@@ -5,9 +5,13 @@
 --   Game Speed          the world's TimeDilation and the game's GameSpeed
 --   Kill Bots           every enemy (TdBotPawn) in the level, or near the player, dies as if hit
 --   Freeze Timer        a time trial's clock stops (its start stamps move on with the world time)
+--   No Clip, Flight     flight.lua
+--   Kickglitch, Beamer, Strang, Auto Kickglitch   tools.lua
 
 local player = require("player")
 local later = require("later")     -- Game-thread work from on_trigger / on_disable
+require("flight")                  -- No Clip, Flight (flight.lua)
+require("tools")                   -- Kickglitch, Beamer, Strang, Auto Kickglitch (tools.lua)
 
 -- ---- God Mode ------------------------------------------------------------------------------------------------------
 local god

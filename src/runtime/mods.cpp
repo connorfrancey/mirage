@@ -194,6 +194,7 @@ namespace mirage::mods
 		{
 			key = d.key;
 			enabledByDefault = (d.flags & MIRAGE_MODULE_ENABLED_BY_DEFAULT) != 0;
+			if (d.flags & MIRAGE_MODULE_EVERY_TICK) schedule.priority = sched::Priority::Critical;
 			Bind(d);
 		}
 
@@ -399,7 +400,7 @@ namespace mirage::mods
 						s = std::make_unique<ctl::SliderInt>(&m, d.name, static_cast<int>(d.intDefault),
 															 static_cast<int>(std::clamp<double>(d.min, -(INT32_MAX / 2), INT32_MAX / 2)),
 															 static_cast<int>(std::clamp<double>(d.max, -(INT32_MAX / 2), INT32_MAX / 2)),
-															 std::string("%d"), 0, d.description);
+															 d.format.empty() ? std::string("%d") : d.format, 0, d.description);
 						break;
 					case T::Float:
 						s = std::make_unique<ctl::Slider>(&m, d.name, static_cast<float>(d.floatDefault), static_cast<float>(d.min),
@@ -694,7 +695,8 @@ namespace mirage::mods
 			game_api::ScriptAdd, game_api::ScriptChildren, game_api::ScriptSetChildren, game_api::ScriptApply,
 			game_api::ScriptRestore, game_api::ScriptDump, game_api::ScriptKind, game_api::ScriptKindName,
 			Notify, DrawCircle, DrawCircleFilled, FrameRate, SettingColor,
-			game_api::ObjectsOfClass,
+			game_api::ObjectsOfClass, game_api::EventSkip, game_api::MenuOpen, game_api::InputKey, game_api::ShareSet,
+			game_api::ShareGet,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

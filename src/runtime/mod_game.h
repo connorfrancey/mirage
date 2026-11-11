@@ -31,6 +31,11 @@ namespace mirage::mods::game_api
 	uint32_t MIRAGE_CALL ObjectClassName(MirageObject* object, char* buffer, uint32_t capacity);
 	int32_t MIRAGE_CALL ObjectIsA(MirageObject* object, const char* className);
 	int32_t MIRAGE_CALL ObjectsOfClass(const char* className, uint32_t flags, MirageObject** out, int32_t capacity);
+	void MIRAGE_CALL EventSkip(const MirageEvent* event);
+	int32_t MIRAGE_CALL MenuOpen();
+	void MIRAGE_CALL InputKey(int32_t vk, int32_t down);
+	void MIRAGE_CALL ShareSet(MirageMod* mod, const char* key, const char* value);
+	uint32_t MIRAGE_CALL ShareGet(const char* modId, const char* key, char* buffer, uint32_t capacity);
 	MirageDetour* MIRAGE_CALL DetourCreate(MirageMod* mod, void* target, void* detour, int32_t priority, void** original);
 	void MIRAGE_CALL DetourRemove(MirageDetour* detour);
 	void* MIRAGE_CALL FindPattern(const char* pattern, const char* mask);
@@ -57,7 +62,8 @@ namespace mirage::mods
 	void DispatchTick(float seconds);								// Game thread
 	void DispatchLevelLoad(bool finished, const std::string& map);	// Game thread
 	void DispatchDeath(bool after);									// Game thread
-	void DispatchPlayerState();										// Game thread: reads the move state itself
+	bool DispatchPlayerState();										// Game thread: reads the move state itself; true: a mod
+																	// skipped it (event_skip)
 	void DispatchKey(int vk);										// The window's thread
 	void DispatchStateRestored();									// Game thread: a TAS snapshot was put back
 }

@@ -344,11 +344,14 @@ paths); every one of today's self-test checks passes with the features loaded as
   at startup (`runtime/firstparty`), so every install has them.
 - `mods/memenu-trainer` (Lua): God Mode, Teleport to Spawn, Game Speed, Kill Bots, Freeze Timer.
   `mods/memenu-visual` (Lua): FOV, Crosshair, Show FPS, Watermark, Frame Rate Limit, Clear Frame.
+  `mods/memenu-trainer` also has No Clip, Flight (flight.lua), Kickglitch, Beamer, Strang, Auto Kickglitch (tools.lua).
   `mods/memenu-levels` (Lua): Restart Checkpoint, Main Menu. Same names and settings as the native modules they
   replace (removed), and the self-test's checks pass on them. API appended for them: `notify`, `draw_circle`,
   `draw_circle_filled`, `frame_rate`, `setting_color` (and `color` settings in mod.toml), `objects_of_class`
   (Lua `mirage.all`: every live object of a class, by short name or path); `call_set` takes string parameters in a
-  call the mod makes. Frame Rate Limit lost its "Back to 62" button and warning line (no buttons or text in a
+  call the mod makes; `event_skip` (a player state callback takes the move state handler's place: Strang),
+  `menu_open`, `input_key` (a real key event), `share_set` / `share_get` (values for other mods and the menu's tests:
+  the kick buffer's counts, "flight"), `MIRAGE_MODULE_EVERY_TICK` (never deferred). Frame Rate Limit lost its "Back to 62" button and warning line (no buttons or text in a
   module's column yet: the UI layer below).
 - **API-only, enforced:** Lua mods reach the game through `mirage.*` alone. For native parts, `EmbedMods.cmake`
   fails the build when a first-party mod's source has a quoted `#include` other than `"mirage/..."` or its own files.
@@ -366,7 +369,6 @@ paths); every one of today's self-test checks passes with the features loaded as
 | Features | Missing API |
 | --- | --- |
 | Console, Log Viewer, Info Lines (editor), Performance, Themes, Speedrun Timer, Speedometer, Input Overlay, Key Bindings, Hotkeys, Config Actions, Game Status, Level Loader, Sublevels, Save States (list), Tool Overlay | A UI layer: windows and widgets (text, inputs, tables, trees, plots) beyond the settings in a module's column. The biggest gap: most remaining features are UI. |
-| Strang, Kickglitch, Auto Kickglitch, Beamer, Flight, No Clip | Player state change events (the native move state handler, not a script function) and input injection / capture on exact frames. |
 | TAS, Save State / Load State, Collision View | Stay native (memory snapshots, the engine's world, 3D drawing): native first-party mods once a native mod can get a 3D draw list and engine-thread scheduling through the API. |
 
 Also measured: a Lua module's tick costs 20-30 us in release (native ~1 us), worth bringing down before many more

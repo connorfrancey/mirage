@@ -62,6 +62,8 @@ typedef enum MirageLogLevel {
 /* MirageModuleDesc.flags */
 #define MIRAGE_MODULE_ACTION 0x1u                /* A button: on_trigger, no on/off state */
 #define MIRAGE_MODULE_ENABLED_BY_DEFAULT 0x2u    /* On the first time the mod is loaded (the config remembers after) */
+#define MIRAGE_MODULE_EVERY_TICK 0x4u            /* on_tick is never deferred when the menu is over its time budget
+                                                    (a module that must see one exact frame: a jump on landing) */
 
 /* setting_type: what a setting holds */
 typedef enum MirageSettingType {
@@ -313,6 +315,19 @@ typedef struct MirageApi {
      * Copies up to `capacity` handles into `out` (may be NULL) and returns how many there are; -1 when no such class is
      * loaded. Like any MirageObject, look them up again rather than keep them across ticks. */
     int32_t(MIRAGE_CALL* objects_of_class)(const char* class_name, uint32_t flags, MirageObject** out, int32_t capacity);
+
+    /* ---- The player and input (step 9) ------------------------------------------------------------------------------
+     * In a MIRAGE_EVENT_PLAYER_STATE callback: the game doesn't handle the new move state this tick (the engine's move
+     * state handler is skipped for it, so a jump made in the callback takes its place). Anywhere else: nothing. */
+    void(MIRAGE_CALL* event_skip)(const MirageEvent* event);
+    int32_t(MIRAGE_CALL* menu_open)(void);                /* The menu is open (it has the mouse and the keyboard) */
+    /* A real key press (down 1) or release (down 0) of a virtual-key code, as the keyboard sends it: the game reads it
+     * as the player's own. Any thread. A mod releases what it pressed (on_disable). */
+    void(MIRAGE_CALL* input_key)(int32_t vk, int32_t down);
+    /* Values a mod shares with other mods and the menu's tests, as text by key ("kick_buffer.held"). Any thread.
+     * share_get copies up to `capacity` bytes and returns the full length (0, "" when not set). */
+    void(MIRAGE_CALL* share_set)(MirageMod* mod, const char* key, const char* value);
+    uint32_t(MIRAGE_CALL* share_get)(const char* mod_id, const char* key, char* buffer, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

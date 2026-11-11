@@ -304,8 +304,8 @@ namespace mirage::mods
 							break;
 						}
 					}
-					if (std::any_of(m.settings.begin(), m.settings.end(), [&](const SettingDecl& o) { return o.name == d.name; }))
-						error(where + ": another setting is also named '" + d.name + "'");
+					if (std::any_of(m.settings.begin(), m.settings.end(), [&](const SettingDecl& o) { return o.name == d.name && o.module == d.module; }))
+						error(where + ": another setting of the same module is also named '" + d.name + "'");
 					m.settings.push_back(std::move(d));
 				}
 		}

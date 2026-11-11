@@ -19,6 +19,7 @@
 #include "game/object_cache.h"
 #include "game/player_state.h"
 #include "game/save_library.h"
+#include "runtime/mod_game.h"
 #include "runtime/call.h"
 #include "runtime/engine_calls.h"
 #include "runtime/fhooks.h"
@@ -47,9 +48,6 @@
 #endif
 #if MEMENU_FEATURE_KICKGLITCH_HELPER
 #include "features/trainer/kickglitch_helper.h"
-#endif
-#if MEMENU_FEATURE_AUTO_KICKGLITCH
-#include "features/trainer/auto_kickglitch.h"
 #endif
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
@@ -2006,8 +2004,23 @@ void TestKickglitchHelper()
 }
 #endif
 
-#if MEMENU_FEATURE_AUTO_KICKGLITCH
-// Same faked kick as the helper's test (the kick's state for a few ticks of a real fall): on the game's landing the
+// What Auto Kickglitch's kick buffer did (mods/memenu-trainer shares it: kick_buffer.*)
+struct KickBufferStats {
+    int held = 0, onWall = 0, late = 0, dropped = 0;
+    bool hooked = false;
+};
+KickBufferStats KickBuffer()
+{
+    const auto get = [](const char* key) {
+        char v[32]{};
+        mirage::mods::game_api::ShareGet("memenu-trainer", key, v, sizeof v);
+        return std::atoi(v);
+    };
+    return {get("kick_buffer.held"), get("kick_buffer.on_wall"), get("kick_buffer.late"), get("kick_buffer.dropped"),
+            get("kick_buffer.hooked") != 0};
+}
+
+// Auto Kickglitch is a first-party mod (mods/memenu-trainer). Same faked kick as the helper's test (the kick's state for a few ticks of a real fall): on the game's landing the
 // module must jump by itself, with nothing else armed.
 void TestAutoKickglitch()
 {
@@ -2067,7 +2080,7 @@ void TestAutoKickglitch()
             onMiss->Set(0);         // Kick anyway
         });
         WaitGrounded();
-        const auto before = auto_kickglitch::Stats();
+        const auto before = KickBuffer();
         OnGameThread([] {
             auto* pawn = game::Pawn();
             if (!pawn) return;
@@ -2084,12 +2097,12 @@ void TestAutoKickglitch()
             if (auto* pawn = game::Pawn()) airKick = pawn->MovementState == Classes::EMovement::MOVE_MeleeAir;
         });
         WaitTicks(1);
-        const auto held = auto_kickglitch::Stats();
+        const auto held = KickBuffer();
         WaitFor(3.0, [&] {
-            const auto st = auto_kickglitch::Stats();
+            const auto st = KickBuffer();
             return st.late + st.dropped > before.late + before.dropped;
         });
-        const auto after = auto_kickglitch::Stats();
+        const auto after = KickBuffer();
         char note[160];
         std::snprintf(note, sizeof note, "kick buffer: hooked %s, held %d, let go late %d, dropped %d",
                       after.hooked ? "yes" : "no", after.held - before.held, after.late - before.late,
@@ -2114,7 +2127,6 @@ void TestAutoKickglitch()
     p.Check(1, false);
     End(s);
 }
-#endif
 
 // Kill Bots is a first-party mod (mods/memenu-trainer). Only checks the kills where the level has enemies (start game-test with --map at one); elsewhere, that it runs.
 void TestKillBots()
@@ -4172,9 +4184,7 @@ const Named* FeatureList()
 #if MEMENU_FEATURE_KICKGLITCH_HELPER
         {"Kickglitch helper", &TestKickglitchHelper, false},
 #endif
-#if MEMENU_FEATURE_AUTO_KICKGLITCH
         {"Auto kickglitch", &TestAutoKickglitch, false},
-#endif
         {"Kill bots", &TestKillBots, false},
 #if MEMENU_FEATURE_KEY_BINDINGS
         {"Keep key bindings", &TestKeepKeyBindings, false},
@@ -4186,9 +4196,7 @@ const Named* FeatureList()
 #if MEMENU_FEATURE_SPEEDRUN_TIMER
         {"Speedrun timer", &TestSpeedrunTimer, false},
 #endif
-#if MEMENU_FEATURE_STRANG
         {"Engine state hook", &TestEngineStateHook, false},
-#endif
         {"Mirage runtime", &TestMirageRuntime, false},
         {"Mirage layouts", &TestMirageLayouts, false},
         {"Mirage calls", &TestMirageCalls, false},

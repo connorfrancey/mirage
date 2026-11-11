@@ -16,6 +16,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <vector>
 
 namespace mirage::mods
@@ -133,6 +134,10 @@ namespace mirage::mods
 		static int DrawCircleFilled(lua_State* L);
 		static int FrameRate(lua_State* L);
 		static int All(lua_State* L);
+		static int MenuOpen(lua_State* L);
+		static int InputKey(lua_State* L);
+		static int Share(lua_State* L);
+		static int Shared(lua_State* L);
 		static int ModuleColor(lua_State* L);
 		static int ScreenSize(lua_State* L);
 		static int TextSize(lua_State* L);
@@ -266,7 +271,8 @@ namespace mirage::mods
 		d.description = description.c_str();
 		d.order = integer("order");
 		d.key = integer("key");
-		d.flags = (flag("action") ? MIRAGE_MODULE_ACTION : 0u) | (flag("enabled_by_default") ? MIRAGE_MODULE_ENABLED_BY_DEFAULT : 0u);
+		d.flags = (flag("action") ? MIRAGE_MODULE_ACTION : 0u) | (flag("enabled_by_default") ? MIRAGE_MODULE_ENABLED_BY_DEFAULT : 0u) |
+				  (flag("every_tick") ? MIRAGE_MODULE_EVERY_TICK : 0u);
 		d.user = refs.get();
 		d.on_enable = &Invoke<kEnable>;
 		d.on_disable = &Invoke<kDisable>;
@@ -799,8 +805,17 @@ namespace mirage::mods
 			case MIRAGE_EVENT_KEY: lua_pushinteger(L, e->value); n = 1; break;
 			default: break;
 		}
-		const lua::Result r = self.state_.Call(n, 0);
-		if (!r.ok) self.Fail(*c, r.error);
+		// A player state callback that returns true skips the game's handling of the new state (event_skip)
+		const bool skippable = e->type == MIRAGE_EVENT_PLAYER_STATE;
+		const lua::Result r = self.state_.Call(n, skippable ? 1 : 0);
+		if (!r.ok) {
+			self.Fail(*c, r.error);
+			return;
+		}
+		if (skippable) {
+			if (lua_toboolean(L, -1)) self.api_->event_skip(e);
+			lua_pop(L, 1);
+		}
 	}
 
 	void MIRAGE_CALL LuaMod::OnHook(void* user, MirageCall* call)
@@ -924,6 +939,38 @@ namespace mirage::mods
 	//   s:apply()                               -- in place until mirage.script.restore(path) or the mod's unload
 	//
 	// Indices are 1-based; children(0) / set_children(0, ...) are the top-level statements.
+
+	int LuaMod::MenuOpen(lua_State* L)
+	{
+		lua_pushboolean(L, Self(L).api_->menu_open());
+		return 1;
+	}
+	// mirage.input_key(vk, down): a real key press (true) or release (false)
+	int LuaMod::InputKey(lua_State* L)
+	{
+		Self(L).api_->input_key(static_cast<int32_t>(luaL_checkinteger(L, 1)), lua_toboolean(L, 2));
+		return 0;
+	}
+	// mirage.share(key, value): a value other mods read with mirage.shared(this mod's id, key); any Lua value as text
+	int LuaMod::Share(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const char* key = luaL_checkstring(L, 1);
+		const char* value = luaL_tolstring(L, 2, nullptr);
+		self.api_->share_set(self.mod_, key, value);
+		lua_pop(L, 1);
+		return 0;
+	}
+	int LuaMod::Shared(lua_State* L)
+	{
+		const char* mod = luaL_checkstring(L, 1);
+		const char* key = luaL_checkstring(L, 2);
+		const MirageApi& api = *Self(L).api_;
+		std::string v(api.share_get(mod, key, nullptr, 0), '_');
+		api.share_get(mod, key, v.data(), static_cast<uint32_t>(v.size() + 1));
+		lua_pushlstring(L, v.data(), v.size());
+		return 1;
+	}
 
 	int LuaMod::Notify(lua_State* L)
 	{
@@ -1258,7 +1305,8 @@ namespace mirage::mods
 			{"setting", FindSetting}, {"rgba", Rgba},
 			{"on", On}, {"hook", HookFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
-			{"frame_rate", FrameRate}, {"all", All}, {nullptr, nullptr}};
+			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
+			{"shared", Shared}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");
