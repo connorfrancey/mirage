@@ -1,16 +1,11 @@
 #include "debug_world.h"
-#include "game.h"
-#include "game/uobject.h"
-#include "levels.h"
-#include "paths.h"
-#include "render/debug_renderer.h"
+#include "compat.h"
 #include "render/geometry.h"
 #include "render/mesh.h"
 
 #include <Windows.h>
 
-#include "sdk/SDK.hpp"
-#include <spdlog/spdlog.h>
+#include <sdk/SDK.hpp>
 
 #include <algorithm>
 #include <array>
@@ -207,7 +202,7 @@ namespace debugworld
                 info.category = ClassifyActor(o);
 
             if (info.kind != Kind::None || info.category != kNoCategory || info.skip)
-                spdlog::debug("Debug world: classified '{}' (skip={}, category={}, kind={})", className, info.skip,
+                mlog::debug("Debug world: classified '{}' (skip={}, category={}, kind={})", className, info.skip,
                               info.category == kNoCategory ? "-" : kCategoryNames[info.category],
                               info.kind == Kind::Cylinder ? "cylinder" : info.kind == Kind::Brush ? "brush" :
                               info.kind == Kind::DrawBox ? "box" : info.kind == Kind::DrawSphere ? "sphere" : "-");
@@ -472,7 +467,7 @@ namespace debugworld
             std::ofstream f(path, std::ios::binary | std::ios::trunc);
             if (!f)
             {
-                spdlog::warn("Debug world: could not write the cache file {}", path.string());
+                mlog::warn("Debug world: could not write the cache file {}", path.string());
                 return;
             }
             Put(f, kCacheMagic);
@@ -502,7 +497,7 @@ namespace debugworld
                 Put(f, static_cast<std::uint16_t>(len));
                 f.write(k.data(), static_cast<std::streamsize>(len));
             }
-            spdlog::info("Debug world: saved {} volumes of '{}' to {}", g_shapes.size(), map, path.string());
+            mlog::info("Debug world: saved {} volumes of '{}' to {}", g_shapes.size(), map, path.string());
         }
 
         bool LoadCache(const std::string& map)
@@ -516,7 +511,7 @@ namespace debugworld
                 version < kOldestCacheVersion ||
                 count > 2000000)
             {
-                spdlog::warn("Debug world: ignoring the cache file {} (unknown format)", path.string());
+                mlog::warn("Debug world: ignoring the cache file {} (unknown format)", path.string());
                 return false;
             }
 
@@ -568,7 +563,7 @@ namespace debugworld
             }
             g_shapes = std::move(shapes);
             g_keys = std::move(keys);
-            spdlog::info("Debug world: loaded {} volumes of '{}' from the cache ({}, version {})", g_shapes.size(), map,
+            mlog::info("Debug world: loaded {} volumes of '{}' from the cache ({}, version {})", g_shapes.size(), map,
                          path.string(), version);
             return true;
         }
@@ -656,7 +651,7 @@ namespace debugworld
 
             ++g_scanCount;
             g_lastScanMs = g_scan.ms;
-            spdlog::debug("Debug world: scan #{} of '{}': {} components, {} new ({} shapes), {} remembered, {:.2f} ms of work",
+            mlog::debug("Debug world: scan #{} of '{}': {} components, {} new ({} shapes), {} remembered, {:.2f} ms of work",
                           g_scanCount, g_map, g_scan.components, g_scan.added, g_scan.addedShapes, g_shapes.size(),
                           g_lastScanMs);
             g_scan.at = kNotScanning;
@@ -766,7 +761,7 @@ namespace debugworld
             for (std::size_t m = 0; m < maps.size(); ++m)
             {
                 if (MapFile(maps[m].label) != g_bake.startMap) continue;
-                spdlog::info("Debug world: baking: back to '{}'", maps[m].label);
+                mlog::info("Debug world: baking: back to '{}'", maps[m].label);
                 levels::Load(static_cast<int>(m), 0, levels::Method::Game, false);
                 return true;
             }
@@ -775,7 +770,7 @@ namespace debugworld
 
         void FinishBake(const std::string& why, bool goBack)
         {
-            spdlog::info("Debug world: baking {}", why);
+            mlog::info("Debug world: baking {}", why);
             g_bake.running = false;
             g_bake.phase = Bake::Phase::Idle;
             if (goBack && ReturnToStart()) SetBakeStatus(why + ", back to the level you were in");
@@ -799,7 +794,7 @@ namespace debugworld
                 if (g_bake.mapOk && !g_map.empty())
                 {
                     std::ofstream(BakedMarker(g_map)) << kBakedMarker << '\n';
-                    spdlog::info("Debug world: '{}' baked ({} volumes)", g_map, g_shapes.size());
+                    mlog::info("Debug world: '{}' baked ({} volumes)", g_map, g_shapes.size());
                 }
                 g_bake.mapOk = true;
             }
@@ -827,7 +822,7 @@ namespace debugworld
                         return;
                     }
                     const BakeJob& job = g_bake.jobs[g_bake.job];
-                    spdlog::info("Debug world: baking {} / {}: {}", g_bake.job + 1, g_bake.jobs.size(), job.label);
+                    mlog::info("Debug world: baking {} / {}: {}", g_bake.job + 1, g_bake.jobs.size(), job.label);
                     SetBakeStatus(job.label);
                     g_bake.loadsSeen = g_loadsFinished.load(std::memory_order_relaxed);
                     levels::Load(job.map, job.checkpoint, levels::Method::Game, false);
@@ -848,7 +843,7 @@ namespace debugworld
                     }
                     else if (secs(g_bake.since) > kLoadTimeout)
                     {
-                        spdlog::warn("Debug world: baking: {} did not load in {:.0f} s, skipped",
+                        mlog::warn("Debug world: baking: {} did not load in {:.0f} s, skipped",
                                      g_bake.jobs[g_bake.job].label, kLoadTimeout);
                         EndJob(false);
                     }
@@ -869,7 +864,7 @@ namespace debugworld
                     const double t = secs(g_bake.since);
                     if ((t >= kSettleMin && secs(g_bake.lastNew) >= kSettleQuiet) || t >= kSettleMax)
                     {
-                        spdlog::info("Debug world: baking: {} done, {} new volumes ({} in '{}')",
+                        mlog::info("Debug world: baking: {} done, {} new volumes ({} in '{}')",
                                      g_bake.jobs[g_bake.job].label, g_shapes.size() - g_bake.shapesAtStart,
                                      g_shapes.size(), g_map);
                         EndJob(true);
@@ -1091,7 +1086,7 @@ namespace debugworld
         {
             if (!g_waitingForGame)
             {
-                spdlog::info("Debug world: paused ({})", !game::Ready() ? "game not ready" : "game is loading");
+                mlog::info("Debug world: paused ({})", !game::Ready() ? "game not ready" : "game is loading");
                 g_waitingForGame = true;
             }
             ClearCylinders();       // Their objects go with the level
@@ -1099,7 +1094,7 @@ namespace debugworld
         }
         if (g_waitingForGame)
         {
-            spdlog::info("Debug world: resumed, game is ready");
+            mlog::info("Debug world: resumed, game is ready");
             g_waitingForGame = false;
             g_dirty = true;
         }
@@ -1134,7 +1129,7 @@ namespace debugworld
         if (map != g_map)
         {
             if (g_cacheDirty && cfg.useCache) SaveCache(g_map);
-            spdlog::info("Debug world: level '{}' (was '{}')", map, g_map.empty() ? "none" : g_map);
+            mlog::info("Debug world: level '{}' (was '{}')", map, g_map.empty() ? "none" : g_map);
             g_map = map;
             g_shapes.clear(); g_shapeNamesFor = ~std::size_t{0};
             g_keys.clear();
@@ -1256,10 +1251,10 @@ namespace debugworld
         scene->shapes = builder.Shapes();
         scene->buildMs = std::chrono::duration<double, std::milli>(Clock::now() - started).count();
         if (scene->buildMs > kSlowMs)
-            spdlog::warn("Debug world: slow rebuild #{} took {:.1f} ms ({} shapes)", g_rebuildCount, scene->buildMs, scene->shapes);
-        if (capHit) spdlog::warn("Debug world: vertex cap ({}) reached; farther volumes omitted", kMaxVertices);
+            mlog::warn("Debug world: slow rebuild #{} took {:.1f} ms ({} shapes)", g_rebuildCount, scene->buildMs, scene->shapes);
+        if (capHit) mlog::warn("Debug world: vertex cap ({}) reached; farther volumes omitted", kMaxVertices);
 
-        spdlog::debug("Debug world: rebuild #{} in {:.2f} ms: {} shapes, {} tri verts, {} line verts, {} labels, {} out of range",
+        mlog::debug("Debug world: rebuild #{} in {:.2f} ms: {} shapes, {} tri verts, {} line verts, {} labels, {} out of range",
                       g_rebuildCount, scene->buildMs, scene->shapes, scene->mesh.tris.size(), scene->mesh.lines.size(),
                       scene->labels.size(), culled);
         if (g_rebuildCount == 1 || g_rebuildCount % 120 == 0)
@@ -1267,7 +1262,7 @@ namespace debugworld
             std::string cats;
             for (int i = 0; i < kCategoryCount; ++i)
                 cats += fmt::format("{}{} {}", cats.empty() ? "" : ", ", perCategory[static_cast<std::size_t>(i)], kCategoryNames[i]);
-            spdlog::info("Debug world: rebuild #{}: {} shapes in range ({}) of {} remembered", g_rebuildCount, scene->shapes, cats,
+            mlog::info("Debug world: rebuild #{}: {} shapes in range ({}) of {} remembered", g_rebuildCount, scene->shapes, cats,
                          g_shapes.size());
         }
 
@@ -1278,13 +1273,13 @@ namespace debugworld
 
     void RequestRebuild()
     {
-        spdlog::debug("Debug world: rebuild requested");
+        mlog::debug("Debug world: rebuild requested");
         g_dirty = true;
     }
 
     void Clear()
     {
-        spdlog::info("Debug world: scene cleared ({} volumes stay remembered)", g_shapes.size());
+        mlog::info("Debug world: scene cleared ({} volumes stay remembered)", g_shapes.size());
         debugrender::SetScene(nullptr);
         ClearCylinders();
         g_dirty = true;
@@ -1300,7 +1295,7 @@ namespace debugworld
     {
         game::RunOnGameThread([]
         {
-            spdlog::info("Debug world: clearing the remembered volumes of '{}'", g_map);
+            mlog::info("Debug world: clearing the remembered volumes of '{}'", g_map);
             std::error_code ec;
             if (!g_map.empty())
             {
@@ -1360,7 +1355,7 @@ namespace debugworld
             g_bake.startMap = Lower(g_map);
             g_bake.running = true;
             g_bake.phase = Bake::Phase::Start;
-            spdlog::info("Debug world: baking {} levels ({} checkpoints){}", order.size(), g_bake.jobs.size(),
+            mlog::info("Debug world: baking {} levels ({} checkpoints){}", order.size(), g_bake.jobs.size(),
                          onlyMissing ? ", the ones not baked yet" : "");
             SetBakeStatus("starting");
         });

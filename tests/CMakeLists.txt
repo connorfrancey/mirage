@@ -29,7 +29,7 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/runtime/semver.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/manifest.cpp
         ${CMAKE_SOURCE_DIR}/src/render/mesh.cpp
-        ${CMAKE_SOURCE_DIR}/src/render/static_scene.cpp
+        ${CMAKE_SOURCE_DIR}/mods/memenu-collision/render/static_scene.cpp   # A native first-party mod's pure part
         ${CMAKE_SOURCE_DIR}/src/tas/replay.cpp
         ${CMAKE_SOURCE_DIR}/src/tas/timeline.cpp
         ${CMAKE_SOURCE_DIR}/mods/memenu-speedrun/timer.cpp   # A native first-party mod's pure part

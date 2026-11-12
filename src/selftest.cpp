@@ -35,10 +35,6 @@
 #include "runtime/mods.h"
 #include "runtime/resolve.h"
 #include "runtime/packages.h"
-#if MEMENU_FEATURE_COLLISION_VIEW
-#include "game/debug_world.h"
-#include "game/static_world.h"
-#endif
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
 #endif
@@ -1935,7 +1931,6 @@ void TestTasMemorySurvey()
 }
 #endif
 
-#if MEMENU_FEATURE_COLLISION_VIEW
 // The collision view's inspector: with the panel open it lists the volumes near the player; facing one of them (the
 // Nearby list's click) must make the look-at report that same volume: as the one looked at, or on the line behind
 // another volume that hides it (the "behind" list). Volumes the player is inside can't be checked that way: up to five
@@ -2825,13 +2820,37 @@ void TestKeepKeyBindings()
     End(s);
 }
 
+// Collision View is a native first-party mod (mods/memenu-collision): what it sees comes from what it shares (JSON).
+nlohmann::json CollisionShared(const char* key)
+{
+    std::string v(1 << 16, '\0');
+    const uint32_t n = mirage::mods::game_api::ShareGet("memenu-collision", key, v.data(), static_cast<uint32_t>(v.size()));
+    v.resize(std::min<std::size_t>(n, v.size() - 1));
+    const auto j = nlohmann::json::parse(v, nullptr, false);
+    return j.is_discarded() ? nlohmann::json::object() : j;
+}
+
+// Turns the player's view toward a point (what the panel's Nearby click does)
+void FaceTowards(float x, float y, float z)
+{
+    OnGameThread([x, y, z] {
+        auto* pc = game::Controller();
+        const rmath::Camera cam = game::GetCamera();
+        if (!pc || !cam.valid) return;
+        const float dx = x - cam.pos.x, dy = y - cam.pos.y, dz = z - cam.pos.z;
+        const float flat = std::sqrt(dx * dx + dy * dy);
+        constexpr float kUnits = 65536.f / (2.f * 3.14159265f);
+        pc->Rotation.Yaw = static_cast<int>(std::atan2(dy, dx) * kUnits) & 0xFFFF;
+        pc->Rotation.Pitch = static_cast<int>(std::atan2(dz, flat) * kUnits) & 0xFFFF;
+    });
+}
+
 void TestCollisionInspect()
 {
     Step& s = Begin("Collision view inspect");
     Probe p(s);
-    Module* view = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "Collision View") view = &m; });
-    auto* inspect = view ? dynamic_cast<ctl::Section*>(view->FindSetting("Inspect")) : nullptr;
+    Module* view = modules::Find("Collision View");
+    auto* inspect = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Inspect")) : nullptr;
     if (!view || !inspect) {
         p.Problem("the Collision View module or its Inspect section was not found");
         p.Check(1, false);
@@ -2843,6 +2862,7 @@ void TestCollisionInspect()
     const bool enabledWas = view->Enabled(), expandedWas = view->expanded, inspectWas = inspect->Get();
     unsigned yawWas = 0, pitchWas = 0;
     OnGameThread([&] { if (auto* pc = game::Controller()) { yawWas = pc->Rotation.Yaw; pitchWas = pc->Rotation.Pitch; } });
+    game::SetCameraTracking(true);
     OnRenderThread([&] {
         view->expanded = true;
         inspect->Set(true);
@@ -2850,31 +2870,37 @@ void TestCollisionInspect()
         if (!view->Enabled()) view->SetEnabled(true);
     });
 
-    std::vector<debugworld::Info::Near> nearby;
-    WaitFor(10.0, [&] { nearby = debugworld::GetInfo().nearby; return !nearby.empty(); });
+    nlohmann::json nearby = nlohmann::json::array();
+    WaitFor(10.0, [&] { nearby = CollisionShared("inspect").value("nearby", nlohmann::json::array()); return !nearby.empty(); });
     if (nearby.empty()) p.Problem("no volumes listed near the player");
     int tried = 0, matched = 0;
     for (const auto& n : nearby) {
         if (tried >= 5 || g_aborted) break;
-        if (n.distance <= 0.f || n.name.empty()) continue;      // Inside it: the view ray starts in it
+        const std::string name = n.value("name", std::string());
+        const float distance = n.value("distance", 0.f);
+        if (distance <= 0.f || name.empty()) continue;      // Inside it: the view ray starts in it
         ++tried;
-        debugworld::FaceTowards(n.x, n.y, n.z);
-        WaitTicks(15);
-        const auto look = debugworld::GetInfo().look;
-        const bool front = look.valid && look.name == n.name;
-        const bool behindIt = look.valid && std::any_of(look.behind.begin(), look.behind.end(),
-                                                        [&](const auto& b) { return b.first == n.name; });
+        FaceTowards(n.value("x", 0.f), n.value("y", 0.f), n.value("z", 0.f));
+        WaitTicks(45);          // The mod shares twice a second
+        const auto look = CollisionShared("inspect").value("look", nlohmann::json::object());
+        const bool valid = look.value("valid", false);
+        const std::string lookName = look.value("name", std::string());
+        bool behindIt = false;
+        std::string behind;
+        for (const auto& b : look.value("behind", nlohmann::json::array())) {
+            const std::string bn = b.value("name", std::string());
+            behindIt |= valid && bn == name;
+            behind += " " + bn + "@" + std::to_string(static_cast<int>(b.value("at", 0.f)));
+        }
+        const bool front = valid && lookName == name;
         const bool ok = front || behindIt;
         matched += ok ? 1 : 0;
-        const std::string what = front      ? "looked at it"
-                                 : behindIt ? "on the line behind " + look.name
-                                 : look.valid ? "looked at " + look.name : "looked at nothing";
+        const std::string what = front ? "looked at it" : behindIt ? "on the line behind " + lookName
+                                 : valid ? "looked at " + lookName : "looked at nothing";
         char note[200];
-        std::snprintf(note, sizeof note, "faced %s (center %.0f away): %s, hit %.0f away", n.name.c_str(), n.distance,
-                      what.c_str(), look.distance);
+        std::snprintf(note, sizeof note, "faced %s (center %.0f away): %s, hit %.0f away", name.c_str(), distance,
+                      what.c_str(), look.value("distance", 0.f));
         s.notes.push_back(note);
-        std::string behind;
-        for (const auto& [name, at] : look.behind) behind += " " + name + "@" + std::to_string(static_cast<int>(at));
         if (!behind.empty()) s.notes.push_back("  also on the line:" + behind);
         if (ok) break;
     }
@@ -2895,14 +2921,12 @@ void TestCollisionInspect()
 }
 
 // Static geometry in the collision view: the level is read (a slice per tick), real collision comes out of it (not only
-// bounding boxes: the mesh and body setup pointers check out), something is drawn near the player, and the game thread
-// never pays for it in one go (its worst tick stays small; the build runs on the worker).
+// bounding boxes), something is drawn near the player, and the game thread never pays for it in one go.
 void TestCollisionStatic()
 {
     Step& s = Begin("Collision view static geometry");
     Probe p(s);
-    Module* view = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "Collision View") view = &m; });
+    Module* view = modules::Find("Collision View");
     auto* on = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Show static geometry")) : nullptr;
     auto* other = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Static: other")) : nullptr;
     if (!view || !on || !other) {
@@ -2918,33 +2942,37 @@ void TestCollisionStatic()
         if (!view->Enabled()) view->SetEnabled(true);
     });
 
-    staticworld::Info info;
-    const bool read = WaitFor(30.0, [&] { info = staticworld::GetInfo(); return !info.map.empty() && !info.scanning && info.meshes > 0; });
-    WaitFor(5.0, [&] { info = staticworld::GetInfo(); return info.vertices > 0; });
+    nlohmann::json info;
+    const bool read = WaitFor(30.0, [&] {
+        info = CollisionShared("static");
+        return !info.value("map", std::string()).empty() && !info.value("scanning", true) && info.value("meshes", 0) > 0;
+    });
+    WaitFor(5.0, [&] { info = CollisionShared("static"); return info.value("vertices", 0) > 0; });
     WaitTicks(120);                 // The steady state: the level read, the drawing kept up to date
-    info = staticworld::GetInfo();
+    info = CollisionShared("static");
     std::size_t found = 0, drawn = 0;
     std::string per;
-    for (int c = 0; c < rstatic::kCategoryCount; ++c) {
-        found += info.found[static_cast<std::size_t>(c)];
-        drawn += info.drawn[static_cast<std::size_t>(c)];
-        per += std::string(per.empty() ? "" : ", ") + std::to_string(info.drawn[static_cast<std::size_t>(c)]) + "/" +
-               std::to_string(info.found[static_cast<std::size_t>(c)]) + " " + rstatic::CategoryName(static_cast<rstatic::Category>(c));
+    const auto foundList = info.value("found", nlohmann::json::array()), drawnList = info.value("drawn", nlohmann::json::array());
+    for (std::size_t c = 0; c < foundList.size() && c < drawnList.size(); ++c) {
+        found += foundList[c].get<std::size_t>();
+        drawn += drawnList[c].get<std::size_t>();
+        per += std::string(per.empty() ? "" : ", ") + std::to_string(drawnList[c].get<std::size_t>()) + "/" +
+               std::to_string(foundList[c].get<std::size_t>());
     }
+    const double tickMax = info.value("tick_max_ms", 0.0), tickAvg = info.value("tick_ms", 0.0);
     char note[240];
-    std::snprintf(note, sizeof note, "%s: %zu meshes with simple collision, %zu placed; drawn/found: %s", info.map.c_str(),
-                  info.meshes, found, per.c_str());
+    std::snprintf(note, sizeof note, "%s: %d meshes with simple collision, %zu placed; drawn/found per kind: %s",
+                  info.value("map", std::string()).c_str(), info.value("meshes", 0), found, per.c_str());
     s.notes.push_back(note);
-    std::snprintf(note, sizeof note, "%zu k vertices built in %.1f ms (worker); game thread %.3f ms a tick on average, "
-                  "slowest %.1f ms%s", info.vertices / 1000, info.buildMs, info.tickAvgMs, info.tickMaxMs,
-                  info.budgetHit ? "; vertex limit hit" : "");
+    std::snprintf(note, sizeof note, "%d k vertices built in %.1f ms (worker); game thread %.3f ms a tick on average, "
+                  "slowest %.1f ms%s", info.value("vertices", 0) / 1000, info.value("build_ms", 0.0), tickAvg, tickMax,
+                  info.value("budget_hit", false) ? "; vertex limit hit" : "");
     s.notes.push_back(note);
-    if (!read) p.Problem("the level was never read (scanning " + std::string(info.scanning ? "still" : "not") + " going)");
-    else if (info.meshes == 0) p.Problem("no mesh had simple collision we could read (only bounding boxes): check the "
-                                         "StaticMesh / RB_BodySetup offsets");
+    if (!read) p.Problem("the level was never read");
+    else if (info.value("meshes", 0) == 0) p.Problem("no mesh had simple collision we could read (only bounding boxes)");
     if (read && drawn == 0) p.Problem("nothing drawn near the player");
-    if (info.tickMaxMs > 4.0) p.Problem("a game thread tick took " + std::to_string(info.tickMaxMs) + " ms");
-    if (info.tickAvgMs > 0.5) p.Problem("the game thread spends " + std::to_string(info.tickAvgMs) + " ms a tick on it");
+    if (tickMax > 4.0) p.Problem("a game thread tick took " + std::to_string(tickMax) + " ms");
+    if (tickAvg > 0.5) p.Problem("the game thread spends " + std::to_string(tickAvg) + " ms a tick on it");
 
     OnRenderThread([&] {
         on->Set(onWas);
@@ -2955,7 +2983,6 @@ void TestCollisionStatic()
     p.Check(1, true);
     End(s);
 }
-#endif
 
 // The speedrun timer (mods/memenu-speedrun, a native first-party mod) against the game, through what it shares
 // (memenu-speedrun/run.*) and the commands the menu hands it (memenu/speedrun.command):
@@ -4254,10 +4281,8 @@ const Named* FeatureList()
         {"Auto kickglitch", &TestAutoKickglitch, false},
         {"Kill bots", &TestKillBots, false},
         {"Keep key bindings", &TestKeepKeyBindings, false},
-#if MEMENU_FEATURE_COLLISION_VIEW
         {"Collision view inspect", &TestCollisionInspect, false},
         {"Collision view static geometry", &TestCollisionStatic, false},
-#endif
         {"Speedrun timer", &TestSpeedrunTimer, false},
         {"Engine state hook", &TestEngineStateHook, false},
         {"Mirage runtime", &TestMirageRuntime, false},

@@ -378,6 +378,59 @@ struct MirageUi {
 #define MIRAGE_THEME_TEXT_DIM 2
 #define MIRAGE_THEME_PANEL 3      /* A settings panel's background */
 
+/* ---- 3D drawing in the world (step 9) ------------------------------------------------------------------------------
+ * Flat-colored triangles and lines in world units, drawn by the runtime's Direct3D renderer inside the game's frame
+ * (hidden behind the world where its depth buffer is there, else an overlay), with the engine's own view. One scene at
+ * a time (the last mod to set it): the collision view's. Layers are replaced whole; set them from the game thread. */
+typedef struct MirageWorldVertex {
+    float x, y, z;
+    uint32_t color;             /* 0xAARRGGBB (Direct3D's order, not the draw functions') */
+} MirageWorldVertex;
+typedef struct MirageWorldLabel {
+    float x, y, z;
+    uint32_t color;             /* 0xAARRGGBB */
+    const char* text;           /* Copied */
+} MirageWorldLabel;
+typedef struct MirageWorldMesh {
+    uint32_t size;              /* sizeof(MirageWorldMesh) */
+    const MirageWorldVertex* triangles;     /* A triangle list: 3 vertices each */
+    uint32_t triangle_vertices;
+    const MirageWorldVertex* lines;         /* A line list: 2 vertices each */
+    uint32_t line_vertices;
+    const MirageWorldLabel* labels;         /* Text at a world position (MIRAGE_WORLD_SCENE only) */
+    uint32_t label_count;
+    uint32_t shapes;            /* For the stats: how many shapes it is */
+    float build_ms;             /* For the stats: how long building it took */
+} MirageWorldMesh;
+/* world_draw_set: the layer */
+#define MIRAGE_WORLD_SCENE 0      /* The main scene (rebuilt now and then) */
+#define MIRAGE_WORLD_MOVING 1     /* Small geometry that moves, replaced every tick */
+#define MIRAGE_WORLD_STATIC 2     /* Large world geometry; its faces at static_opacity */
+typedef struct MirageWorldStyle {
+    uint32_t size;              /* sizeof(MirageWorldStyle) */
+    float opacity;              /* Faces (outlines are opaque) */
+    int32_t overlay;            /* 1: always on top (no depth test) */
+    float fov_offset;           /* Degrees added to the camera's */
+    float aspect;               /* 0: from the viewport */
+    float near_plane;           /* Used when the engine's is unknown */
+    float static_opacity;       /* Faces of MIRAGE_WORLD_STATIC */
+} MirageWorldStyle;
+typedef struct MirageWorldStats {
+    uint32_t size;              /* sizeof(MirageWorldStats): set it before world_draw_stats */
+    int32_t drawn;              /* The last frame drew something */
+    int32_t in_scene;           /* ... inside the game's frame (depth tested); 0: as an overlay */
+    int32_t overlay_fallback;   /* The game's scene pass wasn't found: overlay only */
+    uint32_t triangles, lines, shapes, labels, static_triangles, static_lines;
+    float build_ms;
+} MirageWorldStats;
+/* camera_get: the player's view */
+typedef struct MirageCamera {
+    uint32_t size;              /* sizeof(MirageCamera): set it before the call */
+    float x, y, z;
+    int32_t pitch, yaw, roll;   /* Unreal rotation units (65536 a turn) */
+    float fov;                  /* Degrees */
+} MirageCamera;
+
 /* input_key_state: a key as the game gets it */
 typedef struct MirageKeyState {
     uint32_t size;          /* sizeof(MirageKeyState): set it before the call */
@@ -595,6 +648,18 @@ typedef struct MirageApi {
     void(MIRAGE_CALL* player_reset_movement)(void);   /* Back to plain walking: out of a death fall, a slide, stuck input */
     /* Any module, by name (another mod's too), switched on or off as the player would. 0: no such module. Any thread. */
     int32_t(MIRAGE_CALL* module_set_state)(const char* name, int32_t on);
+
+    /* ---- 3D drawing in the world and the camera (step 9; see MirageWorldMesh). ---------------------------------------
+     * world_draw_active: on, the renderer draws the layers (and follows the camera); off, nothing. The mod's unload
+     * switches it off if it was the one that switched it on. */
+    void(MIRAGE_CALL* world_draw_active)(MirageMod* mod, int32_t on);
+    void(MIRAGE_CALL* world_draw_set)(int32_t layer, const MirageWorldMesh* mesh);     /* NULL clears the layer */
+    void(MIRAGE_CALL* world_draw_style)(const MirageWorldStyle* style);
+    void(MIRAGE_CALL* world_draw_stats)(MirageWorldStats* out);
+    /* A world position on screen (pixels) with the last frame's view; 0: behind the camera or no frame yet */
+    int32_t(MIRAGE_CALL* world_to_screen)(float x, float y, float z, float* sx, float* sy);
+    /* The player's view as the game has it this tick; 0: no camera yet. Any thread. */
+    int32_t(MIRAGE_CALL* camera_get)(MirageCamera* out);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

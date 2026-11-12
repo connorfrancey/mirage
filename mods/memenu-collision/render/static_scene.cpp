@@ -1,4 +1,4 @@
-#include "render/static_scene.h"
+#include "static_scene.h"
 
 #include <algorithm>
 #include <cmath>

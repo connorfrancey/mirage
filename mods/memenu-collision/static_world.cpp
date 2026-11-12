@@ -1,10 +1,8 @@
-#include "game/static_world.h"
-#include "game/game.h"
-#include "game/uobject.h"
-#include "render/debug_renderer.h"
+#include "static_world.h"
 
-#include "sdk/SDK.hpp"
-#include <spdlog/spdlog.h>
+#include "compat.h"
+
+#include <sdk/SDK.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -395,7 +393,7 @@ void ScanTick()
     }
     g_at = i;
     if (g_at >= g_pending.size()) {
-        spdlog::info("Static world: pass over '{}' done: {} meshes, {} placed, {} moving ({} components read)", g_map,
+        mlog::info("Static world: pass over '{}' done: {} meshes, {} placed, {} moving ({} components read)", g_map,
                      g_world.meshes.size(), g_world.instances.size(), g_live.size(), g_pending.size());
         g_pending.clear();
         g_phase = Phase::Idle;
@@ -480,7 +478,7 @@ void UpdateNow(const Config& cfg)
     const std::string map = Lower(game::MapName());
     if (map.empty()) return;
     if (map != g_map) {
-        spdlog::info("Static world: level '{}'", map);
+        mlog::info("Static world: level '{}'", map);
         Reset(map);
     }
     EnsureWorker();
@@ -497,7 +495,7 @@ void UpdateNow(const Config& cfg)
             const auto ms = [](Clock::time_point a, Clock::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
             const double scan = ms(t0, t1), rest = ms(t1, Clock::now());
             if (scan + rest > 2.0)
-                spdlog::debug("Static world: slow tick: scan {:.2f} ms (phase {}), the rest {:.2f} ms", scan,
+                mlog::debug("Static world: slow tick: scan {:.2f} ms (phase {}), the rest {:.2f} ms", scan,
                               static_cast<int>(phase), rest);
         }
     } slowLog{t0, t1, phaseWas};

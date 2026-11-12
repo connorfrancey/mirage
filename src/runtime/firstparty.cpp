@@ -15,6 +15,7 @@ namespace mirage::firstparty
 {
 	void MigrateKeyBindings(const std::filesystem::path& modsDir);
 	void MigrateFolder(const std::filesystem::path& modsDir, const char* folder, const char* mod);
+	void MigrateCollisionCache(const std::filesystem::path& modsDir);
 
 	namespace
 	{
@@ -73,6 +74,7 @@ namespace mirage::firstparty
 		MigrateFolder(modsDir, "speedrun", "memenu-speedrun");
 		MigrateFolder(modsDir, "hud", "memenu-info-lines");
 		MigrateFolder(modsDir, "savestates", "memenu-savestate");
+		MigrateCollisionCache(modsDir);
 		return written;
 	}
 
@@ -110,6 +112,27 @@ namespace mirage::firstparty
 		out.close();
 		std::filesystem::rename(old, old.parent_path() / "keybindings.json.migrated", ec);
 		spdlog::info("Mods: {} kept key bindings moved into memenu-misc's config", list.size());
+	}
+
+	// The collision view's level caches (<menu folder>/cache/*.mevc and *.baked; the folder also holds the runtime's
+	// texture cache) are copied once into mods/memenu-collision/cache/, where the mod keeps them now
+	void MigrateCollisionCache(const std::filesystem::path& modsDir)
+	{
+		namespace fs = std::filesystem;
+		const fs::path old = modsDir.parent_path() / "cache";
+		const fs::path target = modsDir / "memenu-collision" / "cache";
+		std::error_code ec;
+		if (!fs::is_directory(old, ec) || fs::exists(target / ".migrated", ec)) return;
+		fs::create_directories(target, ec);
+		int copied = 0;
+		for (const auto& e : fs::directory_iterator(old, ec)) {
+			const auto ext = e.path().extension();
+			if (!e.is_regular_file(ec) || (ext != ".mevc" && ext != ".baked") || fs::exists(target / e.path().filename(), ec)) continue;
+			fs::copy_file(e.path(), target / e.path().filename(), ec);
+			if (!ec) ++copied;
+		}
+		std::ofstream(target / ".migrated") << "copied from memenu\\cache\n";
+		if (copied) spdlog::info("Mods: {} collision view level cache(s) copied into memenu-collision", copied);
 	}
 
 	// Features that became first-party mods kept files in <menu folder>/<folder>/ (Input Overlay's input_layouts, the

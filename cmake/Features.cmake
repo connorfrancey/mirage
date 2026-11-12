@@ -152,7 +152,6 @@ memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module
 # Visual
 
 # Debug
-memenu_feature(collision_view    debug GAME STAGE 11 FILES features/debug/collision_view.cpp)
 memenu_feature(log_viewer        debug      STAGE 4  FILES features/debug/log_viewer.cpp)
 memenu_feature(performance       debug      STAGE 5  FILES features/debug/performance.cpp)
 memenu_feature(self_test         debug      STAGE 4  FILES features/debug/self_test.cpp)   # Shown in developer mode only

@@ -128,6 +128,10 @@ MIRAGE_AT(theme_color, 396);
 MIRAGE_AT(player_state_capture, 400);
 MIRAGE_AT(player_reset_movement, 408);
 MIRAGE_AT(module_set_state, 412);
+MIRAGE_AT(world_draw_active, 416);
+MIRAGE_AT(camera_get, 436);
+static_assert(sizeof(MirageWorldVertex) == 16 && sizeof(MirageWorldLabel) == 20 && sizeof(MirageWorldMesh) == 36);
+static_assert(sizeof(MirageCamera) == 32);
 static_assert(sizeof(MirageKeyState) == 32 && offsetof(MirageKeyState, down) == 16);   // doubles: 8-aligned on Windows x86
 static_assert(offsetof(MirageModuleDesc, on_panel) == 52, "MirageModuleDesc moved");
 // MirageUi: its own append-only table

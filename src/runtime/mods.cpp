@@ -9,6 +9,7 @@
 #include "runtime/mod_lua.h"
 #include "runtime/mod_ui.h"
 #include "runtime/mod_io.h"
+#include "runtime/mod_world.h"
 #include "sdk/SDK.hpp"
 #include "theme.h"
 #include "runtime/resolve.h"
@@ -784,6 +785,7 @@ namespace mirage::mods
 			io::FileRead, io::FileWrite, io::FileList, io::FileStamp, io::FileOpenFolder,
 			SdkGlobals, ModuleState, ThemeColor,
 			game_api::PlayerStateCapture, game_api::PlayerStateApply, game_api::PlayerResetMovement, ModuleSetState,
+			world::DrawActive, world::DrawSet, world::DrawStyle, world::DrawStats, world::WorldToScreen, world::CameraGet,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -816,6 +818,7 @@ namespace mirage::mods
 		void UnloadCode(MirageMod& mod)
 		{
 			detail::RemoveGameHooks(mod);	// Before its code goes
+			world::Unloading(&mod);			// Its 3D drawing too
 			if (mod.content && content::Applied(*mod.content)) content::Restore(*mod.content);
 			mod.lua.reset();
 			if (mod.unload) {

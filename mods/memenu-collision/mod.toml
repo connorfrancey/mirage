@@ -1,0 +1,510 @@
+# A first-party mod: part of the menu, written against the public API and SDK only (native, C++). It ships inside the
+# menu's DLL and is written to its mods folder at startup: edit a copy under another id, not this folder.
+# Level caches: cache\<level>.mevc next to this file.
+id = "memenu-collision"
+name = "Collision View"
+version = "1.0.0"
+description = "Collision, trigger and kill volumes and the level's static collision, drawn in the world"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+entry = "memenu-collision.dll"
+
+[settings.section_show]
+type = "bool"
+name = "Show"
+module = "Collision View"
+default = true
+
+[settings.triggers]
+type = "bool"
+name = "Triggers"
+module = "Collision View"
+default = true
+
+[settings.triggers_color]
+type = "color"
+name = "Triggers color"
+module = "Collision View"
+default = "#FF8C1A"
+
+[settings.kill_zones]
+type = "bool"
+name = "Kill zones"
+module = "Collision View"
+default = true
+
+[settings.kill_zones_color]
+type = "color"
+name = "Kill zones color"
+module = "Collision View"
+default = "#EB2929"
+
+[settings.checkpoints]
+type = "bool"
+name = "Checkpoints"
+module = "Collision View"
+default = true
+
+[settings.checkpoints_color]
+type = "color"
+name = "Checkpoints color"
+module = "Collision View"
+default = "#33D959"
+
+[settings.blocking]
+type = "bool"
+name = "Blocking volumes"
+module = "Collision View"
+default = true
+
+[settings.blocking_color]
+type = "color"
+name = "Blocking color"
+module = "Collision View"
+default = "#4080FF"
+
+[settings.movement]
+type = "bool"
+name = "Movement volumes"
+module = "Collision View"
+description = "Ladders, ziplines, swing/balance/ledge volumes, water, gravity, fall height, teleporters"
+default = false
+
+[settings.movement_color]
+type = "color"
+name = "Movement color"
+module = "Collision View"
+default = "#A659F2"
+
+[settings.other_volumes]
+type = "bool"
+name = "Other volumes"
+module = "Collision View"
+default = false
+
+[settings.other_post_process]
+type = "bool"
+name = "Other: post process"
+module = "Collision View"
+description = "Post process, color scale, light and reflection volumes"
+default = true
+
+[settings.other_post_process_color]
+type = "color"
+name = "Other: post process color"
+module = "Collision View"
+default = "#F2CC59"
+
+[settings.other_audio]
+type = "bool"
+name = "Other: audio"
+module = "Collision View"
+description = "Reverb and other audio volumes"
+default = true
+
+[settings.other_audio_color]
+type = "color"
+name = "Other: audio color"
+module = "Collision View"
+default = "#8CD973"
+
+[settings.other_fog]
+type = "bool"
+name = "Other: fog"
+module = "Collision View"
+description = "Fog volumes and their density shapes"
+default = true
+
+[settings.other_fog_color]
+type = "color"
+name = "Other: fog color"
+module = "Collision View"
+default = "#B8B8D1"
+
+[settings.other_streaming]
+type = "bool"
+name = "Other: streaming"
+module = "Collision View"
+description = "Level streaming volumes (where parts of the level load), cull distance and portal volumes"
+default = true
+
+[settings.other_streaming_color]
+type = "color"
+name = "Other: streaming color"
+module = "Collision View"
+default = "#598CF2"
+
+[settings.other_misc]
+type = "bool"
+name = "Other: misc"
+module = "Collision View"
+description = "Every other kind of volume (physics force field excludes, plain volumes, ...)"
+default = true
+
+[settings.other_misc_color]
+type = "color"
+name = "Other: misc color"
+module = "Collision View"
+default = "#33CCCC"
+
+[settings.cylinders]
+type = "bool"
+name = "Cylinders"
+module = "Collision View"
+description = "Cylinder collision of pawns and other moving actors (looked up live)"
+default = true
+
+[settings.cylinders_color]
+type = "color"
+name = "Cylinders color"
+module = "Collision View"
+default = "#F2D940"
+
+[settings.spawns]
+type = "bool"
+name = "Spawn points"
+module = "Collision View"
+description = "Player starts: level starts, time trial and tutorial starts"
+default = false
+
+[settings.spawns_color]
+type = "color"
+name = "Spawn points color"
+module = "Collision View"
+default = "#F2F2F2"
+
+[settings.pickups]
+type = "bool"
+name = "Pickups"
+module = "Collision View"
+description = "Weapon pickups and stash points (where they are placed, not dropped weapons)"
+default = false
+
+[settings.pickups_color]
+type = "color"
+name = "Pickups color"
+module = "Collision View"
+default = "#F273BF"
+
+[settings.ai]
+type = "bool"
+name = "AI volumes"
+module = "Collision View"
+description = "Volumes and areas only AI uses: AI blocking volumes (not walls for the player), path limits, cover groups, grenade target areas"
+default = false
+
+[settings.ai_color]
+type = "color"
+name = "AI volumes color"
+module = "Collision View"
+default = "#8C9959"
+
+[settings.navigation]
+type = "bool"
+name = "Navigation points"
+module = "Collision View"
+description = "The AI's path network: path nodes and move hints (vault, wallrun, jump, slide). Many per level"
+default = false
+
+[settings.navigation_color]
+type = "color"
+name = "Navigation points color"
+module = "Collision View"
+default = "#73A6D9"
+
+[settings.section_display]
+type = "bool"
+name = "Display"
+module = "Collision View"
+default = true
+
+[settings.style]
+type = "choice"
+name = "Style"
+module = "Collision View"
+options = ["Solid", "Solid + outline", "Wireframe"]
+default = "Solid + outline"
+
+[settings.opacity]
+type = "float"
+name = "Opacity"
+module = "Collision View"
+description = "1 = fully opaque"
+min = 0.1
+max = 1.0
+format = "%.2f"
+default = 0.55
+
+[settings.depth]
+type = "choice"
+name = "Depth"
+module = "Collision View"
+description = "Hidden by the world: drawn inside the game's frame, so walls and props hide the volumes behind them. Always on top: drawn over the finished frame, nothing hides them"
+options = ["Hidden by the world", "Always on top"]
+default = "Hidden by the world"
+
+[settings.max_distance]
+type = "float"
+name = "Max distance"
+module = "Collision View"
+description = "Volumes farther away than this are not drawn"
+min = 500.0
+max = 40000.0
+format = "%.0f"
+default = 6000.0
+
+[settings.fade]
+type = "bool"
+name = "Fade with distance"
+module = "Collision View"
+description = "Volumes fade out over the last quarter of the max distance instead of popping out of view"
+default = true
+
+[settings.labels]
+type = "bool"
+name = "Labels"
+module = "Collision View"
+description = "Actor names of the triggers, volumes and other objects shown"
+default = false
+
+[settings.label_distance]
+type = "float"
+name = "Label range"
+module = "Collision View"
+description = "Labels only for volumes this close; the nearest win where labels would overlap"
+min = 250.0
+max = 20000.0
+format = "%.0f"
+default = 3000.0
+
+[settings.section_inspect]
+type = "bool"
+name = "Inspect"
+module = "Collision View"
+default = true
+
+[settings.look_at]
+type = "bool"
+name = "Look-at info"
+module = "Collision View"
+description = "Under the crosshair: the name, kind, distance and size of the volume you are looking at"
+default = true
+
+[settings.highlight]
+type = "bool"
+name = "Highlight looked-at"
+module = "Collision View"
+description = "Outline the volume you are looking at in white"
+default = true
+
+[settings.inside_list]
+type = "bool"
+name = "Inside list"
+module = "Collision View"
+description = "Top left: the triggers, kill zones, checkpoints and volumes the player is inside right now"
+default = true
+
+[settings.own_cylinder]
+type = "bool"
+name = "Own cylinder"
+module = "Collision View"
+description = "Your own collision cylinder, as an outline (needs Cylinders on): for checking clearance"
+default = false
+
+[settings.section_static]
+type = "bool"
+name = "Static geometry"
+module = "Collision View"
+default = false
+
+[settings.static_on]
+type = "bool"
+name = "Show static geometry"
+module = "Collision View"
+description = "The simple collision of the level's static meshes: walls, floors, rails, movers, props and invisible walls. Read a little per frame and built on a worker thread"
+default = false
+
+[settings.static_architecture]
+type = "bool"
+name = "Static: architecture"
+module = "Collision View"
+description = "Static mesh actors: the walls, floors, roofs and rails of the level"
+default = true
+
+[settings.static_architecture_color]
+type = "color"
+name = "Static: architecture color"
+module = "Collision View"
+default = "#C7C7D1"
+
+[settings.static_movers]
+type = "bool"
+name = "Static: movers"
+module = "Collision View"
+description = "Doors, elevators and moving platforms (InterpActors), drawn where they are now"
+default = true
+
+[settings.static_movers_color]
+type = "color"
+name = "Static: movers color"
+module = "Collision View"
+default = "#59D9F2"
+
+[settings.static_props]
+type = "bool"
+name = "Static: props"
+module = "Collision View"
+description = "Physics objects and other dynamic meshes (KActors), drawn where they are now"
+default = true
+
+[settings.static_props_color]
+type = "color"
+name = "Static: props color"
+module = "Collision View"
+default = "#F2A640"
+
+[settings.static_invisible]
+type = "bool"
+name = "Static: invisible"
+module = "Collision View"
+description = "Meshes the game doesn't draw but that still block you: invisible walls"
+default = true
+
+[settings.static_invisible_color]
+type = "color"
+name = "Static: invisible color"
+module = "Collision View"
+default = "#FF4CD9"
+
+[settings.static_other]
+type = "bool"
+name = "Static: other"
+module = "Collision View"
+description = "Static meshes of any other kind of actor"
+default = false
+
+[settings.static_other_color]
+type = "color"
+name = "Static: other color"
+module = "Collision View"
+default = "#9E9E80"
+
+[settings.static_bounds]
+type = "bool"
+name = "Static: bounds only"
+module = "Collision View"
+description = "Meshes without simple collision (they collide per polygon, which can't be read): their bounding box, so it is only roughly where they block"
+default = false
+
+[settings.static_bounds_color]
+type = "color"
+name = "Static: bounds only color"
+module = "Collision View"
+default = "#80809E"
+
+[settings.non_colliding]
+type = "bool"
+name = "Include non-colliding"
+module = "Collision View"
+description = "Also meshes you pass through (decoration). Off: only what blocks the player"
+default = false
+
+[settings.static_style]
+type = "choice"
+name = "Static style"
+module = "Collision View"
+description = "Outline keeps the view readable: filled walls everywhere hide the level"
+options = ["Outline", "Solid + outline", "Solid"]
+default = "Outline"
+
+[settings.static_opacity]
+type = "float"
+name = "Static opacity"
+module = "Collision View"
+min = 0.05
+max = 1.0
+format = "%.2f"
+default = 0.25
+
+[settings.static_range]
+type = "float"
+name = "Static range"
+module = "Collision View"
+description = "Meshes farther away than this are not drawn. Larger costs more to build and draw"
+min = 500.0
+max = 15000.0
+format = "%.0f"
+default = 3000.0
+
+[settings.static_budget]
+type = "int"
+name = "Vertex limit"
+module = "Collision View"
+description = "The most vertices drawn; nearest meshes first. Lower it if the game slows down"
+min = 50
+max = 2000
+format = "%d k"
+default = 400
+
+[settings.section_cache]
+type = "bool"
+name = "Cache & baking"
+module = "Collision View"
+default = true
+
+[settings.section_advanced]
+type = "bool"
+name = "Advanced"
+module = "Collision View"
+default = false
+
+[settings.update_rate]
+type = "float"
+name = "Update rate"
+module = "Collision View"
+description = "How often the scene is rebuilt from the remembered volumes"
+min = 1.0
+max = 20.0
+format = "%.0f Hz"
+default = 3.0
+
+[settings.fov_offset]
+type = "float"
+name = "FOV offset"
+module = "Collision View"
+description = "Added to the camera FOV. Use it if the shapes do not line up with the world"
+min = -30.0
+max = 30.0
+format = "%.1f"
+default = 0.0
+
+[settings.aspect_override]
+type = "float"
+name = "Aspect override"
+module = "Collision View"
+description = "0 = taken from the viewport"
+min = 0.0
+max = 3.0
+format = "%.2f"
+default = 0.0
+
+[settings.use_cache]
+type = "bool"
+name = "Use level cache"
+module = "Collision View"
+description = "Volumes never change in a level, so they are remembered per level in this mod's cache folder and are there at once the next time the level loads"
+default = true
+
+[settings.scan_cached]
+type = "bool"
+name = "Scan cached levels"
+module = "Collision View"
+description = "Keep looking for volumes that stream in after the cache was written. Turn off once a level is baked"
+default = true
+
+[settings.stats_line]
+type = "bool"
+name = "Stats line"
+module = "Collision View"
+description = "What the renderer drew, top left of the screen"
+default = false
