@@ -734,6 +734,19 @@ typedef struct MirageApi {
      * The process's memory, the pressure level and the mod's own Lua memory. 1: filled. Any thread. To be told when
      * memory gets short, subscribe to MIRAGE_EVENT_MEMORY_PRESSURE. */
     int32_t(MIRAGE_CALL* memory_stats)(MirageMod* mod, MirageMemoryStats* out);
+
+    /* ---- Script injection (step 11): the mod's code called from inside a script function's bytecode, at a point:
+     *   "head"                  before its first statement
+     *   "return"                before every return
+     *   "before:<Function>[#n]" before each statement that calls <Function> (only the n-th one with #n)
+     *   "after:<Function>[#n]"  after it
+     *   "token:<i>"             before the statement holding token i (script_dump's indices)
+     * The callback gets a MirageCall: call_get / call_set read and write the function's parameters AND its locals by
+     * name; call_skip returns from the function there, with what "ReturnValue" holds (ignored inside a ForEach).
+     * Callbacks at one place run by priority, higher first. Game thread. NULL when the point matches nothing or the
+     * function isn't loaded (the log says why). hook_remove removes it; so does the mod's unload. */
+    MirageHook*(MIRAGE_CALL* inject_function)(MirageMod* mod, const char* function, const char* point, int32_t priority,
+                                              MirageHookFn fn, void* user);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

@@ -11,6 +11,7 @@
 #include "runtime/call.h"
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
+#include "runtime/inject.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
@@ -189,11 +190,23 @@ namespace mirage::mods
 		}
 	}
 
+	namespace
+	{
+		// An injection comes out on the game thread (its function's bytecode is rebuilt); from another thread (a Lua
+		// on_disable runs on the menu's) it is queued there. Its record is already off: the callback no longer runs.
+		void RemoveInjection(int id)
+		{
+			if (game::IsGameThread()) inject::Remove(id);
+			else game::RunOnGameThread([id] { inject::Remove(id); });
+		}
+	}
+
 	void detail::RemoveGameHooks(MirageMod& mod)
 	{
 		for (auto& r : mod.hooks)
 			if (r->id) {
-				hooks::Remove(r->id);
+				if (r->inject) RemoveInjection(r->id);
+				else hooks::Remove(r->id);
 				r->id = 0;
 			}
 		{
@@ -314,8 +327,34 @@ namespace mirage::mods
 		{
 			auto* r = reinterpret_cast<HookRecord*>(hook);
 			if (!r || !r->id) return;
-			hooks::Remove(r->id);
+			if (r->inject) RemoveInjection(r->id);
+			else hooks::Remove(r->id);
 			r->id = 0;
+		}
+
+		MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
+											   MirageHookFn fn, void* user)
+		{
+			if (!mod || !function || !point || !fn) return nullptr;
+			if (!game::IsGameThread()) {	// It rebuilds bytecode the VM may be running
+				spdlog::error("[mod {}] inject_function {}: only on the game thread (a tick event, a hook)", mod->id, function);
+				return nullptr;
+			}
+			auto r = std::make_unique<HookRecord>();
+			r->mod = mod;
+			r->fn = fn;
+			r->user = user;
+			r->function = function;
+			r->inject = true;
+			std::string error;
+			r->id = inject::Add(function, point, priority, &OnHook, r.get(), mod->id, &error);
+			if (!r->id) {
+				spdlog::error("[mod {}] inject_function {} at {}: {}", mod->id, function, point, error);
+				return nullptr;
+			}
+			HookRecord* raw = r.get();
+			mod->hooks.push_back(std::move(r));
+			return reinterpret_cast<MirageHook*>(raw);
 		}
 
 		MirageObject* MIRAGE_CALL CallObject(MirageCall* call) { return call ? Handle(call->object) : nullptr; }

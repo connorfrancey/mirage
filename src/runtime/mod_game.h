@@ -10,6 +10,8 @@ namespace mirage::mods::game_api
 {
 	MirageSubscription* MIRAGE_CALL EventSubscribe(MirageMod* mod, int32_t type, MirageEventFn fn, void* user);
 	void MIRAGE_CALL EventUnsubscribe(MirageSubscription* subscription);
+	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
+											   MirageHookFn fn, void* user);
 	MirageHook* MIRAGE_CALL HookFunction(MirageMod* mod, const char* function, int32_t when, int32_t priority,
 										 MirageHookFn fn, void* user);
 	void MIRAGE_CALL HookRemove(MirageHook* hook);

@@ -165,6 +165,7 @@ namespace mirage::mods
 		void Fail(Callback& c, const std::string& error);
 		static int On(lua_State* L);
 		static int HookFn(lua_State* L);
+		static int InjectFn(lua_State* L);
 		static int CallbackRemove(lua_State* L);
 		static int Pawn(lua_State* L);
 		static int Controller(lua_State* L);
@@ -986,6 +987,37 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.inject("TdGame.TdMove_Jump.StartMove", "before:GetMobilityMultiplier", function(call) ... end, { priority = 0 })
+	// The call reads and writes parameters and locals (call:get / call:set); call:skip() returns from the function there.
+	int LuaMod::InjectFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const char* function = luaL_checkstring(L, 1);
+		const char* point = luaL_checkstring(L, 2);
+		luaL_checktype(L, 3, LUA_TFUNCTION);
+		int priority = 0;
+		if (lua_istable(L, 4)) {
+			lua_getfield(L, 4, "priority");
+			priority = static_cast<int>(luaL_optinteger(L, -1, 0));
+			lua_pop(L, 1);
+		}
+		auto c = std::make_unique<Callback>();
+		c->owner = &self;
+		c->what = std::string("injection into ") + function + " at " + point;
+		lua_pushvalue(L, 3);
+		c->fn = luaL_ref(L, LUA_REGISTRYINDEX);
+		c->hook = self.api_->inject_function(self.mod_, function, point, priority, &OnHook, c.get());
+		if (!c->hook) {
+			luaL_unref(L, LUA_REGISTRYINDEX, c->fn);
+			return luaL_error(L, "mirage.inject: %s at %s can't be injected (see the log)", function, point);
+		}
+		auto** box = static_cast<Callback**>(lua_newuserdatauv(L, sizeof(Callback*), 0));
+		*box = c.get();
+		luaL_setmetatable(L, kCallbackMeta);
+		self.callbacks_.push_back(std::move(c));
+		return 1;
+	}
+
 	int LuaMod::CallbackRemove(lua_State* L)
 	{
 		auto** box = static_cast<Callback**>(luaL_checkudata(L, 1, kCallbackMeta));
@@ -1373,7 +1405,7 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {nullptr, nullptr}};

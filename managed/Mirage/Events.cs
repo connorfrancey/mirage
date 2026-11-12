@@ -106,6 +106,21 @@ namespace Mirage
             return h;
         }
 
+        /// <summary>Script injection (step 11): see <see cref="Mod.Inject"/>.</summary>
+        internal static Hook CreateInjection(Mod mod, string function, string point, int priority, Action<Call> handler)
+        {
+            var h = new Hook(mod, function, handler);
+            h._self = GCHandle.Alloc(h);
+            h._handle = Bridge.Api->inject_function(mod.Handle, Utf8.Intern(function), Utf8.Intern(point), priority,
+                                                    (delegate* unmanaged[Cdecl]<void*, void*, void>)&Thunk, (void*)GCHandle.ToIntPtr(h._self));
+            if (h._handle == null) {
+                h._self.Free();
+                throw new InvalidOperationException($"{function} at {point} can't be injected (see the log)");
+            }
+            mod.Owned.Add(h);
+            return h;
+        }
+
         public void Dispose()
         {
             if (_handle != null) Bridge.Api->hook_remove(_handle);

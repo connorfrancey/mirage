@@ -41,6 +41,8 @@ namespace mirage::scripts
 			std::size_t patches = 0;
 		};
 		std::map<Classes::UStruct*, Record> g_patched;
+		const Layer* g_layer = nullptr;
+		bool Layered(Classes::UStruct* f) { return g_layer && g_layer->holds(f); }
 
 		SerializationContext Context()
 		{
@@ -67,9 +69,10 @@ namespace mirage::scripts
 		return nullptr;
 	}
 
-	bool Read(Classes::UStruct* function, Script& out, std::string* error)
+	namespace
 	{
-		const RawArray& code = ScriptOf(function);
+		bool Decode(const RawArray& code, Script& out, std::string* error)
+		{
 		if (!code.data || code.count <= 0) {
 			if (error) *error = "it has no script";
 			return false;
@@ -87,9 +90,56 @@ namespace mirage::scripts
 			if (error) *error = e.what();
 			return false;
 		}
+		}
 	}
 
+	bool Read(Classes::UStruct* function, Script& out, std::string* error)
+	{
+		if (Layered(function)) {		// What is under the injections
+			g_layer->base(function, out);
+			return true;
+		}
+		return Decode(ScriptOf(function), out, error);
+	}
+
+	bool ReadOriginal(Classes::UStruct* function, Script& out, std::string* error)
+	{
+		const auto it = g_patched.find(function);
+		return Decode(it == g_patched.end() ? ScriptOf(function) : it->second.original, out, error);
+	}
+
+	void SetLayer(const Layer* layer) { g_layer = layer; }
+
 	bool Apply(Classes::UStruct* function, const Script& script, const std::string& owner, std::string* error)
+	{
+		if (Layered(function) && owner != g_layer->owner) {
+			// Under the layer: it becomes the new base, the layer goes over it again. The record names this owner.
+			g_patched.try_emplace(function, Record{ScriptOf(function), owner, 0});
+			if (!g_layer->rebase(function, &script, owner, error)) return false;
+			g_patched[function].owner = owner;
+			++g_patched[function].patches;
+			spdlog::info("Scripts: {} patched by {} under its injections", function->GetPathName(), owner);
+			return true;
+		}
+		return ApplyRaw(function, script, owner, error);
+	}
+
+	bool Restore(Classes::UStruct* function)
+	{
+		if (Layered(function)) {		// The original under the layer; the record stays (the injections are there)
+			std::string error;
+			if (!g_layer->rebase(function, nullptr, {}, &error)) {
+				spdlog::error("Scripts: {}: {}", function->GetPathName(), error);
+				return false;
+			}
+			if (const auto it = g_patched.find(function); it != g_patched.end()) it->second.owner = g_layer->owner;
+			spdlog::info("Scripts: {} back to its own code under its injections", function->GetPathName());
+			return true;
+		}
+		return RestoreRaw(function);
+	}
+
+	bool ApplyRaw(Classes::UStruct* function, const Script& script, const std::string& owner, std::string* error)
 	{
 		std::vector<std::byte> bytes;
 		try {
@@ -110,9 +160,10 @@ namespace mirage::scripts
 		std::memcpy(buffer, bytes.data(), bytes.size());
 		RawArray& code = ScriptOf(function);
 		auto [it, first] = g_patched.try_emplace(function, Record{code, owner, 0});
-		if (!first && it->second.owner != owner)
+		const bool layer = g_layer && owner == g_layer->owner;
+		if (!first && it->second.owner != owner && !layer)
 			spdlog::warn("Scripts: {} patched by {} over {}'s patch", function->GetPathName(), owner, it->second.owner);
-		it->second.owner = owner;
+		if (first || !layer) it->second.owner = owner;		// The layer keeps the name of the patch under it
 		++it->second.patches;
 		code.data = buffer;
 		code.count = code.max = static_cast<std::int32_t>(bytes.size());
@@ -121,7 +172,7 @@ namespace mirage::scripts
 		return true;
 	}
 
-	bool Restore(Classes::UStruct* function)
+	bool RestoreRaw(Classes::UStruct* function)
 	{
 		const auto it = g_patched.find(function);
 		if (it == g_patched.end()) return false;
@@ -146,6 +197,11 @@ namespace mirage::scripts
 	}
 
 	bool Patched(Classes::UStruct* function) { return g_patched.count(function) != 0; }
+	std::string Owner(Classes::UStruct* function)
+	{
+		const auto it = g_patched.find(function);
+		return it == g_patched.end() ? std::string() : it->second.owner;
+	}
 
 	std::string Dump(const Script& script)
 	{

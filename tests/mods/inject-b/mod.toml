@@ -1,0 +1,4 @@
+# Self-test (step 11): a second injection at inject-a's place, lower priority: records what it sees
+id = "inject-b"
+version = "1.0.0"
+mirage = "^0.1"

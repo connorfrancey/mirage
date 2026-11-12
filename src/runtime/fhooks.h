@@ -62,6 +62,10 @@ namespace mirage::hooks
 	// Every hook off and every function back as it was, ProcessInternal's detour removed: before the menu unloads
 	void RemoveAll();
 
+	// UFunction::Func of `fn`: a native function's code, ProcessInternal for a script function, a hook's thunk for a
+	// hooked native (calibrates first). nullptr while the offset isn't known. Game thread.
+	void* FunctionEntry(Classes::UFunction* fn);
+
 	// Whether hooks work in this game (the offsets were found), and if not, why
 	bool Ready(std::string* why = nullptr);
 

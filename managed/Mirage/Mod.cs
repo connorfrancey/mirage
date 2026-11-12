@@ -47,6 +47,14 @@ namespace Mirage
         public Hook Hook(string function, HookWhen when, Action<Call> handler, int priority = 0) =>
             Mirage.Hook.Create(this, function, when, priority, handler);
 
+        /// <summary>
+        /// Calls <paramref name="handler"/> from inside <paramref name="function"/>'s bytecode at <paramref name="point"/>:
+        /// "head", "return", "before:Name[#n]", "after:Name[#n]" (a statement calling Name), "token:i". The call reads and
+        /// writes parameters and locals by name; <c>call.Skip()</c> returns from the function there (with "ReturnValue").
+        /// </summary>
+        public Hook Inject(string function, string point, Action<Call> handler, int priority = 0) =>
+            Mirage.Hook.CreateInjection(this, function, point, priority, handler);
+
         /// <summary>A notification on screen.</summary>
         public void Notify(string text) => Utf8.With(text, t => { Bridge.Api->notify(Handle, (byte*)t); return 0; });
     }

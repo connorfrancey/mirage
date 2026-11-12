@@ -1,0 +1,4 @@
+# Self-test (step 11): injects into TdMove_Jump.StartMove and changes a local before a branch
+id = "inject-a"
+version = "1.0.0"
+mirage = "^0.1"

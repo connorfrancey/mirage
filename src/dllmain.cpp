@@ -32,6 +32,7 @@
 #include "runtime/mods.h"
 #include "runtime/reflect.h"
 #include "runtime/texture_overlays.h"
+#include "runtime/inject.h"
 #include "runtime/script_patch.h"
 #include "runtime/firstparty.h"
 #include "runtime/mem/manager.h"
@@ -215,6 +216,7 @@ static void Run(HMODULE module)
         mirage::hooks::RemoveAll();  // Functions back to their own code before this DLL goes
         mirage::detours::RemoveAll();   // Mods' detours, before MinHook is shut down
         mirage::textures::Shutdown();   // Its worker, and the package file redirects (MinHook too)
+        mirage::inject::RemoveAll();    // Injections out (their functions rebuilt), the stub's native slot freed
         mirage::scripts::RestoreAll();  // Patched functions back to their own bytecode
         mirage::crash::Uninstall();     // The game's own crash handling back, before MinHook is shut down
 #endif

@@ -28,6 +28,7 @@
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
 #include "game/object_query.h"
+#include "runtime/inject.h"
 #include "runtime/script_patch.h"
 #include "runtime/reflect.h"
 #include "runtime/layout.h"
@@ -4260,6 +4261,286 @@ void TestMirageTextures()
 // Mirage step 8: a script patch from a Lua mod (examples/mods/higher-jumps). On, TdMove_Jump.StartMove's bytecode
 // multiplies the jump's upward speed by 1.5: a standing jump goes about 2.25 times as high, with no native detour.
 // Off, the function's own bytecode is back and the jump is as before.
+// A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
+float StandingJump()
+{
+    std::string jumpKey;
+    OnGameThread([&] { jumpKey = KeyFor(game::Controller(), "GBA_Jump", "SpaceBar"); });
+    WaitGrounded();
+    float startZ = 0.f, topZ = 0.f;
+    bool ok = false;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) startZ = topZ = pawn->Location.Z, ok = true;
+    });
+    if (!ok) return -1.f;
+    tas::Macro mac(60.f);
+    mac.Describe("memenu self-test: standing jump").Wait(5).Hold(jumpKey, 2).Wait(80);
+    tas::Replay saved;
+    tas::WithReplay([&](tas::Replay& r) { saved = r; r = mac.Build(); });
+    tas::Play();
+    bool started = false;
+    const ULONGLONG deadline = GetTickCount64() + 20000;
+    while (GetTickCount64() < deadline && !g_aborted) {
+        const tas::Status st = tas::GetStatus();
+        if (st.mode == tas::Mode::Playing) started = true;
+        if (started && (st.mode != tas::Mode::Playing || st.frame >= st.frames)) break;
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) topZ = std::max(topZ, pawn->Location.Z);
+        }, 0.5);
+    }
+    tas::Stop();
+    WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
+    tas::WithReplay([&](tas::Replay& r) { r = saved; });
+    WaitGrounded();
+    return started ? topZ - startZ : -1.f;
+}
+
+// Script injection (step 11), the milestone: two Lua mods (tests/mods/inject-a, inject-b) inject at one place in the
+// middle of TdGame.TdMove_Jump.StartMove. inject-a (priority 10) sets the local CurrentWeaponType to 1 before the branch
+// that picks BaseJumpZHeavy over BaseJumpZ, so a standing jump changes height; inject-b (priority 0) runs after it and
+// sees the 1. A hot reload of inject-a takes its injection out and puts it back; with both off the function is its
+// original bytecode again, byte for byte. Higher Jumps (a script patch of the same function) goes under the injections.
+void TestScriptInjectionMods()
+{
+    Step& s = Begin("Mirage script injection (Lua)");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    Module* a = modules::Find("Inject A (Lua)");
+    Module* b = modules::Find("Inject B (Lua)");
+    Module* higher = modules::Find("Higher Jumps");
+    Classes::UStruct* fn = nullptr;
+    OnGameThread([&] { fn = mirage::scripts::Find("TdGame.TdMove_Jump.StartMove"); });
+    if (!a || !b || !fn) {
+        p.Problem(!fn ? "TdGame.TdMove_Jump.StartMove wasn't found" : "the Inject A / Inject B (Lua) modules are missing (tests/mods)");
+        End(s);
+        return;
+    }
+    const auto bytes = [&] {
+        std::vector<std::uint8_t> out;
+        OnGameThread([&] {
+            const auto* data = *reinterpret_cast<std::uint8_t* const*>(&fn->Script);
+            const std::int32_t count = *reinterpret_cast<const std::int32_t*>(reinterpret_cast<const std::uint8_t*>(&fn->Script) + 4);
+            out.assign(data, data + count);
+        });
+        return out;
+    };
+    const auto intOf = [](Module* m, const char* name) {
+        auto* v = dynamic_cast<ctl::SliderInt*>(m->FindSetting(name));
+        return v ? v->Get() : -2;
+    };
+    const auto setOn = [&](Module* m, bool on) {
+        OnRenderThread([m, on] { m->SetEnabled(on); });
+        WaitTicks(10);		// They inject or remove on their next tick
+    };
+    const bool higherWas = higher && higher->Enabled();
+    if (higher) setOn(higher, false);
+    setOn(a, false);
+    setOn(b, false);
+    OnGameThread([] { player_state::Save(); });
+
+    const std::vector<std::uint8_t> original = bytes();
+    const float normal = StandingJump();
+
+    setOn(b, true);
+    setOn(a, true);
+    if (bytes() == original) p.Problem("with both on, StartMove's bytecode is unchanged (the mods' logs say why)");
+    if (auto* seen = dynamic_cast<ctl::SliderInt*>(b->FindSetting("Seen"))) OnRenderThread([seen] { seen->Set(-1); });
+    const int runsBefore = intOf(a, "Runs");
+    const float heavy = StandingJump();
+    if (intOf(a, "Runs") <= runsBefore) p.Problem("inject-a's callback didn't run during the jump");
+    if (intOf(b, "Seen") != 1) p.Problem("inject-b saw CurrentWeaponType " + std::to_string(intOf(b, "Seen")) + ", not inject-a's 1 (order)");
+
+    // Higher Jumps patches the same function: under the injections, both apply
+    float both = -1.f;
+    if (higher) {
+        setOn(higher, true);
+        both = StandingJump();
+        setOn(higher, false);
+    }
+
+    // Hot reload of inject-a: its injection out, the mod loaded again, its injection back on its next tick
+    std::string reload = "timed out";
+    OnGameThread([&] { reload = mm::Reload("inject-a"); }, 15.0);
+    if (!reload.empty()) p.Problem("hot reload of inject-a: " + reload);
+    Module* a2 = modules::Find("Inject A (Lua)");
+    if (a2 && !a2->Enabled()) setOn(a2, true);
+    WaitTicks(10);
+    if (auto* seen = dynamic_cast<ctl::SliderInt*>(b->FindSetting("Seen"))) OnRenderThread([seen] { seen->Set(-1); });
+    const float reloaded = StandingJump();
+    if (intOf(b, "Seen") != 1) p.Problem("after inject-a's reload inject-b saw " + std::to_string(intOf(b, "Seen")) + ", not 1");
+
+    setOn(a2 ? a2 : a, false);
+    setOn(b, false);
+    if (bytes() != original) p.Problem("with both off again, StartMove isn't its original bytecode");
+    const float after = StandingJump();
+    OnGameThread([] { player_state::Load(); });
+    WaitGrounded();
+    if (higher && higherWas) setOn(higher, true);
+
+    char line[240];
+    std::snprintf(line, sizeof line, "standing jump: %.0f, heavy by injection %.0f, with Higher Jumps under it %.0f, after inject-a's "
+                  "reload %.0f, both off %.0f", normal, heavy, both, reloaded, after);
+    s.notes.push_back(line);
+    if (normal <= 10.f) p.Problem("the player didn't jump");
+    else {
+        if (std::fabs(heavy - normal) < normal * 0.05f) p.Problem("the injected local didn't change the jump (" + std::string(line) + ")");
+        if (std::fabs(reloaded - heavy) > normal * 0.1f) p.Problem("after the reload the jump isn't the injected one");
+        if (std::fabs(after - normal) > normal * 0.1f) p.Problem("with both off the jump isn't the normal one");
+        if (higher && both < heavy * 1.6f) p.Problem("Higher Jumps under the injections didn't raise the injected jump");
+    }
+    End(s);
+}
+
+// Script injection (step 11), the mechanism: Core.Object.FPctByRange (Value - InMin) / (InMax - InMin) called directly.
+// An injection at its head changes a parameter, one returns early with its own value, two at one place run by priority,
+// and with none left the bytecode is the original again, byte for byte. Then what an injection costs a call, next to a
+// function hook doing the same nothing.
+void TestScriptInjection()
+{
+    Step& s = Begin("Mirage script injection");
+    Probe p(s);
+    namespace inj = mirage::inject;
+    std::string why = "not run";
+    bool ready = false;
+    OnGameThread([&] { ready = inj::Ready(&why); });
+    if (!ready) {
+        p.Problem("injection isn't available: " + why);
+        End(s);
+        return;
+    }
+    const char* kFunction = "Core.Object.FPctByRange";
+    Classes::UStruct* fn = nullptr;
+    const auto bytes = [&] {
+        std::vector<std::uint8_t> out;
+        OnGameThread([&] {
+            const auto* data = *reinterpret_cast<std::uint8_t* const*>(&fn->Script);
+            const std::int32_t count = *reinterpret_cast<const std::int32_t*>(reinterpret_cast<const std::uint8_t*>(&fn->Script) + 4);
+            out.assign(data, data + count);
+        });
+        return out;
+    };
+    OnGameThread([&] {
+        fn = mirage::scripts::Find(kFunction);
+        // What the Lua milestone works on: its tokens in the log
+        if (auto* jumpFn = mirage::scripts::Find("TdGame.TdMove_Jump.StartMove")) {
+            UnrealLib::Script sc;
+            std::string e;
+            if (mirage::scripts::Read(jumpFn, sc, &e)) spdlog::info("Self-test: StartMove:\n{}", mirage::scripts::Dump(sc));
+        }
+    });
+    if (!fn) {
+        p.Problem(std::string(kFunction) + " wasn't found");
+        End(s);
+        return;
+    }
+    const std::vector<std::uint8_t> original = bytes();
+    // FPctByRange(v, 0, 10) on any object (it is static): v / 10
+    const auto pct = [&](float value) {
+        float out = -1.f;
+        OnGameThread([&] {
+            auto* pawn = game::Pawn();
+            if (!pawn) return;
+            mirage::call::Params prm(pawn, "FPctByRange");
+            prm.Set("Value", value);
+            prm.Set("InMin", 0.f);
+            prm.Set("InMax", 10.f);
+            if (mirage::call::Call(pawn, prm)) out = prm.GetFloat("ReturnValue");
+        });
+        return out;
+    };
+    const float plainResult = pct(5.f);
+    if (std::fabs(plainResult - 0.5f) > 1e-4f) p.Problem("FPctByRange(5, 0, 10) isn't 0.5 before any injection: " + std::to_string(plainResult));
+
+    struct Ctx
+    {
+        std::vector<int>* order;
+        int tag;
+    };
+    static std::vector<int> order;
+    static Ctx high{&order, 1}, low{&order, 2}, early{&order, 3};
+    const auto setValue = [](void* user, mirage::hooks::Call& call) {
+        auto* c = static_cast<Ctx*>(user);
+        c->order->push_back(c->tag);
+        if (auto v = call.Param("Value")) *reinterpret_cast<float*>(v.address) = 9.f;
+    };
+    const auto record = [](void* user, mirage::hooks::Call&) {
+        auto* c = static_cast<Ctx*>(user);
+        c->order->push_back(c->tag);
+    };
+    const auto returnEarly = [](void* user, mirage::hooks::Call& call) {
+        auto* c = static_cast<Ctx*>(user);
+        c->order->push_back(c->tag);
+        if (auto r = call.Param("ReturnValue")) *reinterpret_cast<float*>(r.address) = 42.f;
+        call.skip = true;
+    };
+
+    // 1. Two at the head, by priority: the high one changes Value (5 -> 9), the low one runs after it
+    int a = 0, b = 0, c = 0;
+    std::string err;
+    OnGameThread([&] {
+        b = inj::Add(kFunction, "head", 0, +record, &low, "self-test", &err);
+        a = inj::Add(kFunction, "head", 10, +setValue, &high, "self-test", &err);
+    });
+    if (!a || !b) p.Problem("injecting at the head: " + err);
+    order.clear();
+    const float changed = pct(5.f);
+    if (std::fabs(changed - 0.9f) > 1e-4f) p.Problem("a parameter changed at the head didn't change the result: " + std::to_string(changed));
+    if (order != std::vector<int>{1, 2}) p.Problem("the two injections didn't run by priority (high first)");
+    // 2. One that returns early with its own value, before every return
+    OnGameThread([&] { c = inj::Add(kFunction, "return", 0, +returnEarly, &early, "self-test", &err); });
+    if (!c) p.Problem("injecting before the returns: " + err);
+    const float returned = pct(5.f);
+    if (std::fabs(returned - 42.f) > 1e-4f) p.Problem("an early return didn't return its value: " + std::to_string(returned));
+    // 3. A point that matches nothing is refused and changes nothing
+    int none = 0;
+    OnGameThread([&] { none = inj::Add(kFunction, "before:NoSuchFunctionAnywhere", 0, +record, &low, "self-test", &err); });
+    if (none) p.Problem("a point that matches nothing was accepted");
+    // 4. All out: the original, byte for byte
+    OnGameThread([&] {
+        inj::Remove(c);
+        inj::Remove(a);
+        inj::Remove(b);
+    });
+    if (bytes() != original) p.Problem("with the injections removed the bytecode isn't the original");
+    const float again = pct(5.f);
+    if (std::fabs(again - 0.5f) > 1e-4f) p.Problem("with the injections removed FPctByRange isn't 0.5 again: " + std::to_string(again));
+    s.notes.push_back("FPctByRange: 2 at the head by priority, an early return, all removed: the original " +
+                      std::to_string(original.size()) + " bytes");
+
+    // 5. What a call costs: plain, with an injection that does nothing, with a hook that does nothing
+    const auto empty = [](void*, mirage::hooks::Call&) {};
+    const auto timeCalls = [&] {
+        double best = 1e30;
+        for (int round = 0; round < 3; ++round)
+            OnGameThread([&] {
+                auto* pawn = game::Pawn();
+                if (!pawn) return;
+                mirage::call::Params prm(pawn, "FPctByRange");
+                prm.Set("Value", 5.f);
+                prm.Set("InMax", 10.f);
+                const auto t0 = std::chrono::steady_clock::now();
+                for (int i = 0; i < 2000; ++i) mirage::call::Call(pawn, prm);
+                best = std::min(best, std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - t0).count() / 2000.0);
+            });
+        return best;
+    };
+    const double plain = timeCalls();
+    int ci = 0;
+    OnGameThread([&] { ci = inj::Add(kFunction, "head", 0, +empty, nullptr, "self-test", &err); });
+    const double injected = timeCalls();
+    OnGameThread([&] { inj::Remove(ci); });
+    const int hi = mirage::hooks::Add(kFunction, mirage::hooks::When::Before, 0, +empty, nullptr, &err);
+    const double hooked = timeCalls();
+    mirage::hooks::Remove(hi);
+    const double injCost = injected - plain, hookCost = hooked - plain;
+    char line[200];
+    std::snprintf(line, sizeof line, "a call: %.2f us; an empty injection adds %.2f us, an empty hook %.2f us", plain, injCost, hookCost);
+    s.notes.push_back(line);
+    if (injCost > std::max(2.0 * hookCost, 0.5)) p.Problem(std::string("an injection costs more than twice a hook: ") + line);
+    if (bytes() != original) p.Problem("after the cost test the bytecode isn't the original");
+    End(s);
+}
+
 void TestMirageScriptPatch()
 {
     Step& s = Begin("Mirage script patch");
@@ -4288,38 +4569,7 @@ void TestMirageScriptPatch()
         OnRenderThread([m, on] { m->SetEnabled(on); });
         WaitTicks(10);      // The mod patches or restores on its next tick
     };
-    // A standing jump, by TAS macro: how high the player gets above where it started
-    std::string jumpKey;
-    OnGameThread([&] { jumpKey = KeyFor(game::Controller(), "GBA_Jump", "SpaceBar"); });
-    const auto jump = [&]() -> float {
-        WaitGrounded();
-        float startZ = 0.f, topZ = 0.f;
-        bool ok = false;
-        OnGameThread([&] {
-            if (auto* pawn = game::Pawn()) startZ = topZ = pawn->Location.Z, ok = true;
-        });
-        if (!ok) return -1.f;
-        tas::Macro mac(60.f);
-        mac.Describe("memenu self-test: standing jump").Wait(5).Hold(jumpKey, 2).Wait(80);
-        tas::Replay saved;
-        tas::WithReplay([&](tas::Replay& r) { saved = r; r = mac.Build(); });
-        tas::Play();
-        bool started = false;
-        const ULONGLONG deadline = GetTickCount64() + 20000;
-        while (GetTickCount64() < deadline && !g_aborted) {
-            const tas::Status st = tas::GetStatus();
-            if (st.mode == tas::Mode::Playing) started = true;
-            if (started && (st.mode != tas::Mode::Playing || st.frame >= st.frames)) break;
-            OnGameThread([&] {
-                if (auto* pawn = game::Pawn()) topZ = std::max(topZ, pawn->Location.Z);
-            }, 0.5);
-        }
-        tas::Stop();
-        WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
-        tas::WithReplay([&](tas::Replay& r) { r = saved; });
-        WaitGrounded();
-        return started ? topZ - startZ : -1.f;
-    };
+    const auto jump = [] { return StandingJump(); };
 
     OnGameThread([] { player_state::Save(); });
     set(false);
@@ -4780,6 +5030,8 @@ const Named* FeatureList()
         {"Mirage textures", &TestMirageTextures, false},
 #if MEMENU_FEATURE_TAS
         {"Mirage script patch", &TestMirageScriptPatch, true},
+        {"Mirage script injection", &TestScriptInjection, false},
+        {"Mirage script injection (Lua)", &TestScriptInjectionMods, true},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

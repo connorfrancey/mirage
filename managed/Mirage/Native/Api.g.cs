@@ -134,6 +134,7 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<byte*, uint, uint> tas_preflight;
         public delegate* unmanaged[Cdecl]<byte*, uint, uint> module_list;
         public delegate* unmanaged[Cdecl]<void*, void*, int> memory_stats;
+        public delegate* unmanaged[Cdecl]<void*, byte*, byte*, int, void*, void*, void*> inject_function;
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -344,6 +344,13 @@ namespace mirage::hooks
 		return reflect::Resolve(reinterpret_cast<Classes::UStruct*>(function), params, path);
 	}
 
+	void* FunctionEntry(Classes::UFunction* fn)
+	{
+		std::lock_guard lock(g_lock);
+		if (!fn || !Calibrate()) return nullptr;
+		return reinterpret_cast<void*>(static_cast<std::uintptr_t>(Dword(fn, g_funcOffset)));
+	}
+
 	int Add(const std::string& function, When when, int priority, Callback callback, void* user, std::string* error)
 	{
 		if (!callback) return 0;

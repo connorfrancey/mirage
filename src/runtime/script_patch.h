@@ -36,10 +36,27 @@ namespace mirage::scripts
 	void RestoreOwner(const std::string& owner);
 	void RestoreAll();
 	bool Patched(Classes::UStruct* function);
+	std::string Owner(Classes::UStruct* function);		// Who patched it ("" if nobody)
 
 	// A readable listing of `script`: one line per token, indented by depth, with its memory offset and operands
 	std::string Dump(const UnrealLib::Script& script);
 
 	// The token map of the game's bytecode
 	const UnrealLib::TokenMap& Map();
+
+	// A layer over functions' bytecode (script injection, step 11, runtime/inject.h). While it holds a function, Read
+	// gives the bytecode under it (what mods edit), and Apply / Restore of another owner change what is under it: the
+	// layer is laid over the new base again. Its own writes go through ApplyRaw / RestoreRaw.
+	struct Layer
+	{
+		const char* owner;
+		bool (*holds)(Classes::UStruct* function);
+		void (*base)(Classes::UStruct* function, UnrealLib::Script& out);
+		bool (*rebase)(Classes::UStruct* function, const UnrealLib::Script* base, const std::string& owner, std::string* error);
+	};
+	void SetLayer(const Layer* layer);
+	bool ApplyRaw(Classes::UStruct* function, const UnrealLib::Script& script, const std::string& owner, std::string* error);
+	bool RestoreRaw(Classes::UStruct* function);
+	// The function's own bytecode (before any patch), decoded
+	bool ReadOriginal(Classes::UStruct* function, UnrealLib::Script& out, std::string* error);
 }

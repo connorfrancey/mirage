@@ -77,7 +77,8 @@ namespace mirage::mods
 		MirageHookFn fn = nullptr;
 		void* user = nullptr;
 		std::string function;
-		int id = 0;								// mirage::hooks id (0: removed)
+		int id = 0;								// mirage::hooks id, or mirage::inject id when `inject` (0: removed)
+		bool inject = false;
 	};
 	// A mod's event subscription
 	struct Subscription

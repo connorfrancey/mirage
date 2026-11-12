@@ -240,8 +240,11 @@ namespace {
     }
 
     // ---- Hooks ------------------------------------------------------------------------------------------------------
+    std::atomic<unsigned long> g_gameThread{0};		// Set by the tick (DrainQueue runs at every one)
+
     void DrainQueue()
     {
+        g_gameThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
         std::vector<std::function<void()>> work;
         {
             std::lock_guard lock(g_mutex);
@@ -845,6 +848,8 @@ void game::OnTick(TickCallback callback)
     std::lock_guard lock(g_mutex);
     g_tickCallbacks.push_back(callback);
 }
+
+bool game::IsGameThread() { return g_gameThread.load(std::memory_order_relaxed) == GetCurrentThreadId(); }
 
 void game::RunOnGameThread(std::function<void()> fn)
 {
