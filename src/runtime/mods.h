@@ -41,9 +41,15 @@ namespace mirage::mods
 	// Unloads every mod, last loaded first: after modules::DisableAll and the hooks are gone
 	void UnloadAll();
 
+	// Loads a mod folder made while the game runs (the script editor's "New mod"): its mod.toml is read, its required
+	// mods must be loaded already, and it loads now whatever its phase. Game thread. "" when it loaded, else why not; a
+	// mod whose code failed stays listed (Failed), so fixing its files hot reloads it.
+	std::string LoadNew(const std::filesystem::path& dir);
+
 	// Hot reload of a loaded mod. Game thread (between ticks: no on_tick is running). "" when it reloaded, else why not.
 	std::string Reload(const std::string& id);
-	// Reloads the mods whose files changed. Game thread; runs as a scheduler task every half second.
+	// Reloads the mods whose files changed. Game thread; runs as a scheduler task every half second, and walks the mods'
+	// files only after the mods folders changed (a watcher thread waits on change notifications).
 	void ReloadChanged();
 
 	// A crash outside the guarded calls (a thread a mod started): the mod whose DLL holds `address`, "" if none. Writes
@@ -60,6 +66,7 @@ namespace mirage::mods
 		std::filesystem::path dir;
 		Phase phase = Phase::Engine;
 		bool loaded = false;
+		bool script = false;					// Its code is source the game compiles: a C# script (.cs) or Lua
 		int loadIndex = -1;						// Order it loaded in (0 first), -1 if it didn't
 		int reloads = 0;
 		std::string problem;					// Why it isn't loaded (left out, failed, crashed)

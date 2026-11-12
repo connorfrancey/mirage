@@ -47,6 +47,9 @@
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
 #endif
+#if MEMENU_FEATURE_SCRIPT_EDITOR
+#include "features/misc/script_editor.h"
+#endif
 #include <shlobj.h>
 #if MEMENU_FEATURE_TAS
 #include "tas/input_monitor.h"
@@ -485,6 +488,13 @@ Expectation ExpectationFor(Module& m)
                     return std::string();
                 }};
     }
+#if MEMENU_FEATURE_SCRIPT_EDITOR
+    if (name == "Script Editor") {
+        static std::uint64_t framesBefore = 0;
+        return {[] { framesBefore = script_editor::Frames(); },
+                [] { return script_editor::Frames() == framesBefore ? std::string("its window was never drawn") : std::string(); }};
+    }
+#endif
 #if MEMENU_FEATURE_MOD_MANAGER
     if (name == "Mod Manager") {
         // Its window is drawn while the menu is open, and lists every mod found (the first-party ones at least)
@@ -3925,6 +3935,87 @@ void TestCSharpMods()
     End(s);
 }
 
+#if MEMENU_FEATURE_SCRIPT_EDITOR
+// The script editor's work without its window: a new mod from the template is made and loaded while the game runs
+// (mirage::mods::LoadNew), the check finds an error in unsaved text and says where, a saved error makes the hot reload
+// fail with the file and line, and saving the fix loads it again.
+void TestScriptEditor()
+{
+    Step& s = Begin("Mirage script editor");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    namespace fs = std::filesystem;
+    const std::string id = "selftest-new";
+    const fs::path dir = paths::Dir() / "selftest-mods" / id;
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    const auto info = [&]() -> std::optional<mm::Info> {
+        for (const mm::Info& i : mm::List())
+            if (i.id == id) return i;
+        return std::nullopt;
+    };
+
+    // Parsing what the compilers say
+    const auto cs = script_editor::ParseDiagnostics("main.cs(5,17): error CS0029: no\nmain.cs(2,1): warning CS0168: x\n(12 ms)");
+    if (cs.size() != 2 || cs[0].line != 5 || cs[0].column != 17 || !cs[0].error || cs[1].error || cs[0].file != "main.cs")
+        p.Problem("C# diagnostics parsed wrong (" + std::to_string(cs.size()) + ")");
+    const auto lua = script_editor::ParseDiagnostics("main.lua:7: '=' expected near 'x'");
+    if (lua.size() != 1 || lua[0].line != 7 || lua[0].file != "main.lua") p.Problem("Lua diagnostics parsed wrong");
+
+    // 1. A new mod, made and loaded now
+    if (const std::string why = script_editor::CreateModFiles(dir.parent_path(), id); !why.empty()) {
+        p.Problem("making the mod: " + why);
+        End(s);
+        return;
+    }
+    if (script_editor::CreateModFiles(dir.parent_path(), id).empty()) p.Problem("a second mod with the same id was made");
+    if (script_editor::CreateModFiles(dir.parent_path(), "Bad Id").empty()) p.Problem("an id with spaces was accepted");
+    std::string loaded = "timed out";
+    const auto t0 = std::chrono::steady_clock::now();
+    OnGameThread([&] { loaded = mm::LoadNew(dir); }, 30.0);
+    char line[160];
+    std::snprintf(line, sizeof line, "new %s mod made and loaded in %.0f ms", mirage::dotnet::ScriptLanguage(),
+                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+    s.notes.push_back(line);
+    if (!loaded.empty()) p.Problem("the new mod didn't load: " + loaded);
+    if (!WaitFor(3.0, [&] { return modules::Find(id) != nullptr; })) p.Problem("the new mod's module isn't in the menu");
+    std::string again = "timed out";
+    OnGameThread([&] { again = mm::LoadNew(dir); });
+    if (again.empty()) p.Problem("the same folder loaded twice");
+
+    // 2. The check sees unsaved text
+    const fs::path main = dir / mirage::dotnet::ScriptFile();
+    const std::string good = script_editor::Template(id);
+    std::string bad = good;
+    const std::string anchor = mirage::dotnet::kEnabled ? "if (!pawn.IsValid) return;" : "on_tick = function()";
+    bad.insert(bad.find(anchor), mirage::dotnet::kEnabled ? "int broken = \"text\"; " : "local = ");
+    const int badLine = static_cast<int>(std::count(bad.begin(), bad.begin() + static_cast<std::ptrdiff_t>(bad.find(anchor)), '\n')) + 1;
+    const auto checked = script_editor::Check(dir, main, bad);
+    if (!checked.ran) p.Problem("the check didn't run: " + checked.note);
+    else if (checked.Errors() == 0 || checked.diagnostics.front().line != badLine)
+        p.Problem("the check of broken text: " + std::to_string(checked.Errors()) + " error(s), first at line " +
+                  (checked.diagnostics.empty() ? std::string("-") : std::to_string(checked.diagnostics.front().line)) +
+                  " (expected " + std::to_string(badLine) + ")");
+    else s.notes.push_back("check of unsaved text: " + checked.diagnostics.front().text + " (" + checked.note + ")");
+    if (const auto ok = script_editor::Check(dir, main, good); ok.Errors() != 0) p.Problem("the template doesn't compile: " + ok.diagnostics.front().text);
+
+    // 3. Saved broken: the hot reload fails and says where; saved fixed: it loads again
+    const auto write = [&](const std::string& text) { std::ofstream(main, std::ios::binary | std::ios::trunc) << text; };
+    write(bad);
+    const std::string where = std::string(mirage::dotnet::ScriptFile()) + (mirage::dotnet::kEnabled ? "(" : ":") + std::to_string(badLine);
+    if (!WaitFor(10.0, [&] { const auto i = info(); return i && !i->loaded && i->problem.find(where) != std::string::npos; }))
+        p.Problem("saving broken code didn't fail the reload with " + where + ": " + (info() ? info()->problem : "gone"));
+    write(good);
+    if (!WaitFor(10.0, [&] { const auto i = info(); return i && i->loaded; }))
+        p.Problem("saving the fix didn't load it again: " + (info() ? info()->problem : "gone"));
+    if (const auto i = info()) {
+        if (!i->script) p.Problem("the new mod isn't listed as a script mod");
+        s.notes.push_back("reloaded " + std::to_string(i->reloads) + "x by saving");
+    }
+    End(s);
+}
+#endif
+
 void TestCacheSystem()
 {
     Step& s = Begin("Cache system");
@@ -4456,7 +4547,7 @@ void TestModule(Module& m)
     std::vector<Module*> quieted;
     if (drawsHud) {
         std::set<std::string> noisy(kDrawsHud.begin(), kDrawsHud.end());
-        noisy.insert({"Game Status", "Info Lines", "Tool Overlay", "Collision View"});
+        noisy.insert({"Game Status", "Info Lines", "Tool Overlay", "Collision View", "Hello (C#)"});	// Hello (C#): the speed
         for (const std::string& name : noisy)
             if (Module* other = modules::Find(name); other && other != &m && other->Enabled()) quieted.push_back(other);
         OnRenderThread([&quieted] { for (Module* q : quieted) q->SetEnabled(false); });
@@ -4549,10 +4640,17 @@ void TestModule(Module& m)
     }
     if (drawsHud) {
         const unsigned hudOff = HudVertices();
-        if (hudOff > hudBefore)
+        if (hudOff > hudBefore) {
+            // Who else is on and draws: the usual cause is another HUD whose text changed meanwhile
+            std::string drawing;
+            for (const auto& e : sched::Snapshot())
+                if (e.renderAvgUs > 0.f)
+                    if (Module* other = modules::Find(e.name); other && other != &m && other->Enabled())
+                        drawing += (drawing.empty() ? "" : ", ") + e.name;
             p.Problem("still draws after switching off (" + std::to_string(hudOff) + " vertices, " +
                       std::to_string(hudBefore) + " before it was on; now: " + hooks::MenuDrawLists() +
-                      "; before: " + listsBefore + ")");
+                      "; before: " + listsBefore + "; also on and drawing: " + (drawing.empty() ? "none" : drawing) + ")");
+        }
         OnRenderThread([] { gui::visible = true; });
         OnRenderThread([&quieted] { for (Module* q : quieted) q->SetEnabled(true); });
     }
@@ -4675,6 +4773,9 @@ const Named* FeatureList()
         {"Memory manager", &TestMemoryManager, false},
         {"Crash reporter and hang detector", &TestCrashAndHang, false},
         {"Mirage C# mods", &TestCSharpMods, false},
+#if MEMENU_FEATURE_SCRIPT_EDITOR
+        {"Mirage script editor", &TestScriptEditor, false},
+#endif
         {"Mirage content", &TestMirageContent, false},
         {"Mirage textures", &TestMirageTextures, false},
 #if MEMENU_FEATURE_TAS
@@ -4817,7 +4918,11 @@ static void RunTests(bool fromMenu)
 #endif
         std::vector<Module*> mods;
         // Hidden ones aren't in the menu (a crashed mod's, developer-only ones while developer mode is off)
-        modules::ForEach([&](modules::Tab&, Module& m) { if (Selected(m) && !m.Hidden()) mods.push_back(&m); });
+        // Modules that fail on purpose are left to their own steps (Throw (C#): "Mirage C# mods")
+        static const std::set<std::string> kFailsOnPurpose = {"Throw (C#)"};
+        modules::ForEach([&](modules::Tab&, Module& m) {
+            if (Selected(m) && !m.Hidden() && !kFailsOnPurpose.count(m.Name())) mods.push_back(&m);
+        });
         // Actions that leave the level go last
         std::stable_partition(mods.begin(), mods.end(), [](Module* m) { return m->Name() != "Main Menu"; });
         for (Module* m : mods) {

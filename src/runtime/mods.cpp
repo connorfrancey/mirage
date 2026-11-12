@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <thread>
 #include <chrono>
 #include <cstring>
 #include <ctime>
@@ -898,9 +899,107 @@ namespace mirage::mods
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
 		std::vector<std::unique_ptr<MirageMod>> g_mods;		// Discovered and to be loaded, in load order
+		// g_mods only grows on the game thread (LoadNew); readers on other threads (List) hold this while iterating
+		std::mutex g_modsLock;
 		std::vector<Info> g_excluded;						// Discovered and left out
 		int g_loadCount = 0;
 		std::atomic<int> g_shadowCounter{0};
+
+		// The watcher: a thread reading the change notifications of the mods folders (ReadDirectoryChangesW, recursive),
+		// which name the file. A change marks the mod whose folder it is in; what the runtime and the mods write
+		// themselves (config.toml, disabled.toml, crashes.toml, .mirage copies, build output) marks nothing. ReloadChanged
+		// walks only the marked mods, so the check on the game thread is free while nothing changes and runs at Normal
+		// priority (never deferred under load).
+		std::mutex g_dirtyLock;
+		std::set<std::wstring> g_dirty;						// Folder names (= mod ids) changed since the last check
+		std::atomic<bool> g_dirtyAll{true};					// Check every mod (the start, a lost notification, no watcher)
+		std::set<std::wstring> g_settling;					// Changed last check, still being written: checked again
+		std::thread g_watcher;
+		HANDLE g_watcherStop = nullptr;
+
+		bool Ignored(const std::wstring& relative)		// "<mod>\sub\file" relative to a mods folder
+		{
+			const auto slash = relative.find(L'\\');
+			if (slash == std::wstring::npos) return relative == L"disabled.toml" || relative == L"crashes.toml";
+			const std::wstring rest = relative.substr(slash + 1);
+			if (rest == L"config.toml") return true;	// Written by the mod itself
+			for (const wchar_t* dir : {L".mirage", L"obj", L"bin"})
+				if (rest.starts_with(std::wstring(dir) + L"\\") || rest == dir) return true;
+			return false;
+		}
+
+		void StartWatcher(const std::vector<std::filesystem::path>& folders)
+		{
+			struct Watch
+			{
+				HANDLE dir = INVALID_HANDLE_VALUE;
+				OVERLAPPED ov{};
+				alignas(DWORD) std::byte buffer[32 * 1024];
+			};
+			auto watches = std::make_shared<std::vector<std::unique_ptr<Watch>>>();
+			const DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_SIZE |
+								 FILE_NOTIFY_CHANGE_LAST_WRITE;
+			const auto arm = [filter](Watch& w) {
+				ResetEvent(w.ov.hEvent);
+				return ReadDirectoryChangesW(w.dir, w.buffer, sizeof w.buffer, TRUE, filter, nullptr, &w.ov, nullptr) != 0;
+			};
+			for (const auto& f : folders) {
+				auto w = std::make_unique<Watch>();
+				w->dir = CreateFileW(f.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+									 OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
+				if (w->dir == INVALID_HANDLE_VALUE) continue;
+				w->ov.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+				if (!w->ov.hEvent || !arm(*w)) {
+					if (w->ov.hEvent) CloseHandle(w->ov.hEvent);
+					CloseHandle(w->dir);
+					continue;
+				}
+				watches->push_back(std::move(w));
+			}
+			if (watches->empty()) return;		// ReloadChanged then walks every mod each time
+			g_watcherStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+			g_watcher = std::thread([watches, arm] {
+				std::vector<HANDLE> events;
+				for (const auto& w : *watches) events.push_back(w->ov.hEvent);
+				events.push_back(g_watcherStop);
+				const DWORD n = static_cast<DWORD>(events.size());
+				for (;;) {
+					const DWORD r = WaitForMultipleObjects(n, events.data(), FALSE, INFINITE);
+					if (r < WAIT_OBJECT_0 || r >= WAIT_OBJECT_0 + n - 1) break;		// The stop event, or an error
+					Watch& w = *(*watches)[r - WAIT_OBJECT_0];
+					DWORD bytes = 0;
+					if (!GetOverlappedResult(w.dir, &w.ov, &bytes, FALSE) || bytes == 0) {
+						g_dirtyAll = true;		// The buffer overflowed: what changed is unknown
+					} else {
+						std::lock_guard lock(g_dirtyLock);
+						for (std::size_t at = 0;;) {
+							const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(w.buffer + at);
+							const std::wstring path(info->FileName, info->FileNameLength / sizeof(wchar_t));
+							if (!Ignored(path)) g_dirty.insert(path.substr(0, path.find(L'\\')));
+							if (info->NextEntryOffset == 0) break;
+							at += info->NextEntryOffset;
+						}
+					}
+					if (!arm(w)) g_dirtyAll = true;
+				}
+				for (const auto& w : *watches) {
+					CancelIoEx(w->dir, &w->ov);
+					DWORD ignored = 0;
+					GetOverlappedResult(w->dir, &w->ov, &ignored, TRUE);	// The kernel is done with the buffer
+					CloseHandle(w->ov.hEvent);
+					CloseHandle(w->dir);
+				}
+			});
+		}
+
+		void StopWatcher()
+		{
+			if (!g_watcher.joinable()) return;
+			SetEvent(g_watcherStop);
+			g_watcher.join();
+			CloseHandle(g_watcherStop);
+			g_watcherStop = nullptr;
+		}
 
 		// The files of a mod, summed up: changes when one is added, removed, rewritten or touched
 		std::uintmax_t Fingerprint(const std::filesystem::path& dir)
@@ -1139,8 +1238,13 @@ namespace mirage::mods
 			mod->id = m->id;
 			mod->version = m->version.ToString();
 			mod->dir = Utf8(m->dir);
+			std::lock_guard lock(g_modsLock);
 			g_mods.push_back(std::move(mod));
 		}
+		std::vector<std::filesystem::path> watched;
+		for (const auto& f : folders)
+			if (std::error_code ec; std::filesystem::is_directory(f, ec)) watched.push_back(f);
+		StartWatcher(watched);
 		if (!r.order.empty()) {
 			std::string order;
 			for (const auto& id : r.order) order += (order.empty() ? "" : ", ") + id;
@@ -1232,15 +1336,28 @@ namespace mirage::mods
 
 	void ReloadChanged()
 	{
+		// Which mods to look at: the ones the watcher marked, the ones still settling, or all
+		std::set<std::wstring> check;
+		{
+			std::lock_guard lock(g_dirtyLock);
+			check.swap(g_dirty);
+		}
+		check.merge(g_settling);
+		g_settling.clear();
+		const bool all = g_dirtyAll.exchange(!g_watcher.joinable());	// Without a watcher: every mod, every time
+		if (!all && check.empty()) return;
 		for (auto& owned : g_mods) {
 			MirageMod& mod = *owned;
 			const State s = mod.state.load();
 			if (s != State::Active && s != State::Failed) continue;
 			if (mod.loadIndex < 0) continue;	// Never loaded (left out at its phase)
+			const std::wstring folder = mod.manifest.dir.filename().wstring();
+			if (!all && !check.count(folder)) continue;
 			const std::uintmax_t now = Fingerprint(mod.manifest.dir);
 			if (now == mod.fingerprint) continue;
 			if (now != mod.seen) {	// Still being written (an editor saving, a build): the next check decides
 				mod.seen = now;
+				g_settling.insert(folder);
 				continue;
 			}
 			if (!mod.manifest.hotReload) {
@@ -1274,6 +1391,7 @@ namespace mirage::mods
 
 	void UnloadAll()
 	{
+		StopWatcher();
 		std::vector<MirageMod*> loaded;
 		for (auto& m : g_mods)
 			if (m->loadIndex >= 0) loaded.push_back(m.get());
@@ -1299,6 +1417,7 @@ namespace mirage::mods
 	std::vector<Info> List()
 	{
 		std::vector<Info> out;
+		std::lock_guard modsLock(g_modsLock);
 		for (const auto& owned : g_mods) {
 			const MirageMod& mod = *owned;
 			Info info;
@@ -1309,6 +1428,7 @@ namespace mirage::mods
 			info.phase = mod.manifest.phase;
 			info.kind = Kind(mod.manifest);
 			info.loaded = mod.state.load() == State::Active;
+			info.script = !mod.manifest.lua.empty() || mod.manifest.dotnet.ends_with(".cs");
 			info.loadIndex = mod.loadIndex;
 			info.reloads = mod.reloads;
 			info.problem = mod.state.load() == State::NotLoaded ? std::string("not loaded yet (") + PhaseName(mod.manifest.phase) + " phase)"
@@ -1344,12 +1464,51 @@ namespace mirage::mods
 
 	namespace
 	{
-		const MirageMod* ModById(const std::string& id)
+		const MirageMod* ModById(const std::string& id)		// The record lives as long as the menu: safe after the lock
 		{
+			std::lock_guard lock(g_modsLock);
 			for (const auto& m : g_mods)
 				if (m->id == id) return m.get();
 			return nullptr;
 		}
+	}
+
+	std::string LoadNew(const std::filesystem::path& dir)
+	{
+		Parsed p = Load(dir);
+		for (const auto& w : p.warnings) spdlog::warn("Mods: {}", w);
+		if (!p.manifest) return "mod.toml: " + (p.errors.empty() ? std::string("invalid") : p.errors.front());
+		const Manifest& m = *p.manifest;
+		if (ModById(m.id) || std::any_of(g_excluded.begin(), g_excluded.end(), [&](const Info& i) { return i.id == m.id; }))
+			return "a mod with the id " + m.id + " is already there";
+		if (!m.mirage.Matches(*semver::Version::Parse(kRuntimeVersion)))
+			return "it needs Mirage " + m.mirage.Text() + ", this is " + kRuntimeVersion;
+		for (const Dependency& d : m.required) {
+			const MirageMod* other = ModById(d.id);
+			if (!other || other->state.load() != State::Active) return "it needs " + d.id + ", which isn't loaded";
+		}
+		for (const Dependency& d : m.incompatible)
+			if (const MirageMod* other = ModById(d.id); other && other->state.load() == State::Active)
+				return "it is incompatible with " + d.id + ", which is loaded";
+
+		auto owned = std::make_unique<MirageMod>();
+		owned->manifest = m;
+		owned->id = m.id;
+		owned->version = m.version.ToString();
+		owned->dir = Utf8(m.dir);
+		MirageMod& mod = *owned;
+		{
+			std::lock_guard lock(g_modsLock);
+			g_mods.push_back(std::move(owned));
+		}
+		mod.loadIndex = g_loadCount++;		// Even when it fails: ReloadChanged retries it once its files change
+		const std::string problem = LoadCode(mod);
+		if (!problem.empty()) {
+			spdlog::error("Mods: new mod {} {} didn't load: {}", mod.id, mod.version, problem);
+			return problem;
+		}
+		spdlog::info("Mods: loaded new mod {} {} ({}, {} module(s))", mod.id, mod.version, Kind(mod.manifest), mod.modules.size());
+		return {};
 	}
 
 	bool SetEnabledNextStart(const std::string& id, bool on)

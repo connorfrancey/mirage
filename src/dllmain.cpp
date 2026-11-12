@@ -160,8 +160,9 @@ static void Run(HMODULE module)
             events::SetDispatcher(events::Where::GameThread, toGame);
             STARTUP_STEP(mirage::hang::Start());   // Watches the game thread's ticks and the render thread's frames
             STARTUP_STEP(mirage::mods::LoadPhase(mirage::mods::Phase::Engine));   // The game layer is up
-            // Hot reload: mods whose files changed, checked twice a second (game thread, between the modules' ticks)
-            sched::AddTask("Mirage mod reload", {0.5f, sched::Priority::Background, {}, {}}, [] { mirage::mods::ReloadChanged(); });
+            // Hot reload: mods whose files changed, checked twice a second (game thread, between the modules' ticks).
+            // Normal priority: free unless the mods folders changed, and a save must not wait out a busy menu's deferrals
+            sched::AddTask("Mirage mod reload", {0.5f, sched::Priority::Normal, {}, {}}, [] { mirage::mods::ReloadChanged(); });
 #if MEMENU_FEATURE_TAS
             const bool tasReady = STARTUP_STEP(tas::Init());
             if (!tasReady) spdlog::warn("TAS unavailable: its patterns were not found");
