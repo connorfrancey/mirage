@@ -1,19 +1,14 @@
-#include "game/save_library.h"
-#include "game/game.h"
-#include "game/player_state.h"
-#include "paths.h"
+#include "library.h"
 
-#include "sdk/SDK.hpp"
+#include "mirage/sdk.hpp"
 
 #include <nlohmann/json.hpp>
-#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
-#include <fstream>
 #include <mutex>
 
 namespace {
@@ -22,15 +17,16 @@ using json = nlohmann::json;
 
 struct Stored {
     save_library::Entry info;
-    json state;                 // player_state::Export()
+    json state;                 // MirageApi::player_state_capture, parsed
 };
 
 std::mutex g_mutex;
-std::filesystem::path g_folder;     // Empty: the default
-std::string g_map;                  // Lower case
-bool g_read = false;                // g_entries holds g_map's file
+std::string g_folder = "savestates";    // In the mod's folder
+std::string g_map;                      // Lower case
+bool g_read = false;                    // g_entries holds g_map's file
 std::vector<Stored> g_entries;
 int g_selected = -1;
+std::string g_current;                  // The Save State (Save State / Load State keys): the last saved or loaded one
 
 std::string Lower(std::string s)
 {
@@ -38,13 +34,11 @@ std::string Lower(std::string s)
     return s;
 }
 
-std::filesystem::path FolderLocked() { return g_folder.empty() ? paths::Dir() / "savestates" : g_folder; }
-
-std::filesystem::path FileFor(const std::string& map)
+std::string FileFor(const std::string& map)
 {
     std::string name;
     for (char c : map) name += std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' ? c : '_';
-    return FolderLocked() / (name + ".json");
+    return g_folder + "/" + name + ".json";
 }
 
 std::string Now()
@@ -77,12 +71,12 @@ void ReadLocked()
     g_read = true;
     if (g_map.empty()) return;
 
-    const auto path = FileFor(g_map);
-    std::ifstream in(path);
-    if (!in) return;
-    const json j = json::parse(in, nullptr, false);
+    const std::string path = FileFor(g_map);
+    std::string text;
+    if (!mirage::ReadFile(path, text)) return;
+    const json j = json::parse(text, nullptr, false);
     if (!j.is_object() || !j.contains("states") || !j["states"].is_array()) {
-        spdlog::warn("Save states: {} is not a save state file, ignored", path.string());
+        mirage::Warn(path + " is not a save state file, ignored");
         return;
     }
     for (const json& e : j["states"]) {
@@ -99,7 +93,7 @@ void ReadLocked()
         g_entries.push_back(std::move(s));
     }
     if (!g_entries.empty()) g_selected = 0;
-    spdlog::info("Save states: {} in {}", g_entries.size(), path.string());
+    mirage::Info(std::to_string(g_entries.size()) + " save states in " + path);
 }
 
 void WriteLocked()
@@ -108,27 +102,8 @@ void WriteLocked()
     json states = json::array();
     for (const Stored& s : g_entries) states.push_back({{"name", s.info.name}, {"created", s.info.created}, {"state", s.state}});
     const json j = {{"map", g_map}, {"states", std::move(states)}};
-
-    const auto path = FileFor(g_map);
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    // A temporary file swapped in: a crash mid-write never destroys the previous list
-    auto tmp = path;
-    tmp += ".tmp";
-    {
-        std::ofstream out(tmp, std::ios::trunc);
-        if (!out) {
-            spdlog::error("Save states: can't write {}", tmp.string());
-            return;
-        }
-        out << j.dump(1);
-        if (!out) {
-            spdlog::error("Save states: write failed: {}", tmp.string());
-            return;
-        }
-    }
-    std::filesystem::rename(tmp, path, ec);
-    if (ec) spdlog::error("Save states: can't replace {}: {}", path.string(), ec.message());
+    // The API writes a temporary file and swaps it in: a crash mid-write never destroys the previous list
+    if (!mirage::WriteFile(FileFor(g_map), j.dump(1))) mirage::Error("can't write " + FileFor(g_map));
 }
 
 // Switches the list to `map` (lower-cased here); empty keeps the current one
@@ -153,14 +128,53 @@ bool Fail(std::string* error, std::string text)
 // Game thread: the player's state now, as data
 bool Capture(json& state, std::string* error)
 {
-    if (!game::Pawn()) return Fail(error, "no player");
-    if (!player_state::Save()) return Fail(error, "failed (see the log)");
-    state = player_state::Export();
-    return !state.is_null() || Fail(error, "failed (see the log)");
+    if (!mirage::sdk::Pawn()) return Fail(error, "no player");
+    const MirageApi& api = mirage::Api();
+    const uint32_t n = api.player_state_capture(nullptr, 0);
+    if (n == 0) return Fail(error, "failed (see the log)");
+    std::string text(n + 1, '\0');
+    api.player_state_capture(text.data(), n + 1);
+    text.resize(n);
+    state = json::parse(text, nullptr, false);
+    return !state.is_discarded() || Fail(error, "failed (see the log)");
 }
 
 } // namespace
 
+// ---- The Save State --------------------------------------------------------------------------------------------------------
+bool save_library::SaveCurrent(std::string* error)
+{
+    json state;
+    if (!Capture(state, error)) return false;
+    std::lock_guard lock(g_mutex);
+    g_current = state.dump();
+    return true;
+}
+
+bool save_library::LoadCurrent(std::string* error)
+{
+    std::string state;
+    {
+        std::lock_guard lock(g_mutex);
+        state = g_current;
+    }
+    if (state.empty()) return Fail(error, "nothing saved yet");
+    return mirage::Api().player_state_apply(state.c_str()) != 0 || Fail(error, "not right now");
+}
+
+bool save_library::HasCurrent()
+{
+    std::lock_guard lock(g_mutex);
+    return !g_current.empty();
+}
+
+void save_library::ClearCurrent()
+{
+    std::lock_guard lock(g_mutex);
+    g_current.clear();
+}
+
+// ---- The library -----------------------------------------------------------------------------------------------------------
 std::vector<save_library::Entry> save_library::List(const std::string& map)
 {
     std::lock_guard lock(g_mutex);
@@ -203,7 +217,7 @@ bool save_library::SaveNew(std::string* error)
     if (!Capture(state, error)) return false;
 
     std::lock_guard lock(g_mutex);
-    FollowLocked(game::MapName());
+    FollowLocked(mirage::sdk::MapName());
     if (g_map.empty()) return Fail(error, "not in a level");
     Stored s;
     // "State 3": one more than the highest number used so far, so deleting one doesn't produce a duplicate name
@@ -214,10 +228,11 @@ bool save_library::SaveNew(std::string* error)
     s.info.created = Now();
     s.state = std::move(state);
     Describe(s);
+    g_current = s.state.dump();         // It is the Save State too
     g_entries.push_back(std::move(s));
     g_selected = static_cast<int>(g_entries.size()) - 1;
     WriteLocked();
-    spdlog::info("Save states: saved \"{}\" in {}", g_entries.back().info.name, g_map);
+    mirage::Info("saved \"" + g_entries.back().info.name + "\" in " + g_map);
     return true;
 }
 
@@ -226,17 +241,18 @@ bool save_library::Overwrite(int index, std::string* error)
     json state;
     {
         std::lock_guard lock(g_mutex);
-        FollowLocked(game::MapName());
+        FollowLocked(mirage::sdk::MapName());
         if (!Valid(index)) return Fail(error, "no state selected");
     }
     if (!Capture(state, error)) return false;
 
     std::lock_guard lock(g_mutex);
     if (!Valid(index)) return Fail(error, "no state selected");
-    Stored& s = g_entries[index];
+    Stored& s = g_entries[static_cast<std::size_t>(index)];
     s.state = std::move(state);
     s.info.created = Now();
     Describe(s);
+    g_current = s.state.dump();
     g_selected = index;
     WriteLocked();
     return true;
@@ -244,31 +260,27 @@ bool save_library::Overwrite(int index, std::string* error)
 
 bool save_library::Load(int index, std::string* error)
 {
-    json state;
+    std::string state;
     {
         std::lock_guard lock(g_mutex);
-        FollowLocked(game::MapName());
+        FollowLocked(mirage::sdk::MapName());
         if (!Valid(index)) return Fail(error, "no state selected");
-        state = g_entries[index].state;
+        state = g_entries[static_cast<std::size_t>(index)].state.dump();
         g_selected = index;
     }
-    auto* pawn = game::Pawn();
+    auto* pawn = mirage::sdk::Pawn();
     if (!pawn || pawn->Health <= 0) return Fail(error, "no player");
-
-    // The current Save State comes back if this one can't be used
-    const json previous = player_state::Export();
-    if (!player_state::Import(state)) return Fail(error, "the stored state can't be read (see the log)");
-    if (player_state::Load()) return true;
-    if (previous.is_null()) player_state::Clear();
-    else player_state::Import(previous);
-    return Fail(error, "not right now (see the log)");
+    if (!mirage::Api().player_state_apply(state.c_str())) return Fail(error, "not right now (see the log)");
+    std::lock_guard lock(g_mutex);
+    g_current = std::move(state);       // Loading one makes it the Save State: the Load State key comes back here
+    return true;
 }
 
 void save_library::Rename(int index, const std::string& name)
 {
     std::lock_guard lock(g_mutex);
-    if (!Valid(index) || name.empty() || g_entries[index].info.name == name) return;
-    g_entries[index].info.name = name;
+    if (!Valid(index) || name.empty() || g_entries[static_cast<std::size_t>(index)].info.name == name) return;
+    g_entries[static_cast<std::size_t>(index)].info.name = name;
     WriteLocked();
 }
 
@@ -287,21 +299,23 @@ void save_library::MoveBy(int index, int step)
     std::lock_guard lock(g_mutex);
     const int to = index + step;
     if (!Valid(index) || !Valid(to)) return;
-    std::swap(g_entries[index], g_entries[to]);
+    std::swap(g_entries[static_cast<std::size_t>(index)], g_entries[static_cast<std::size_t>(to)]);
     if (g_selected == index) g_selected = to;
     else if (g_selected == to) g_selected = index;
     WriteLocked();
 }
 
-void save_library::SetFolder(const std::filesystem::path& folder)
+void save_library::SetFolder(const std::string& folder)
 {
     std::lock_guard lock(g_mutex);
-    g_folder = folder;
+    const std::string f = folder.empty() ? std::string("savestates") : folder;
+    if (f == g_folder) return;
+    g_folder = f;
     g_read = false;     // Read again from the new place
 }
 
-std::filesystem::path save_library::Folder()
+std::string save_library::Folder()
 {
     std::lock_guard lock(g_mutex);
-    return FolderLocked();
+    return g_folder;
 }

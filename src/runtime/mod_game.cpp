@@ -4,6 +4,8 @@
 #include "game/object_cache.h"
 #include "game/object_query.h"
 #include "game/object_ref.h"
+#include "game/player_state.h"
+#include <nlohmann/json.hpp>
 #include "game/uobject.h"
 #include "gui.h"
 #include "runtime/call.h"
@@ -449,6 +451,24 @@ namespace mirage::mods
 		}
 
 		int32_t MIRAGE_CALL MenuOpen() { return gui::visible ? 1 : 0; }
+
+		uint32_t MIRAGE_CALL PlayerStateCapture(char* buffer, uint32_t capacity)
+		{
+			const nlohmann::json j = player_state::Capture();
+			return CopyOut(j.is_null() ? std::string() : j.dump(), buffer, capacity);
+		}
+		int32_t MIRAGE_CALL PlayerStateApply(const char* state)
+		{
+			if (!state) return 0;
+			const auto j = nlohmann::json::parse(state, nullptr, false);
+			return !j.is_discarded() && player_state::Apply(j) ? 1 : 0;
+		}
+		void MIRAGE_CALL PlayerResetMovement()
+		{
+			auto* pawn = game::Pawn();
+			auto* controller = game::Controller();
+			if (pawn && controller) player_state::ResetMovement(pawn, controller);
+		}
 
 		void MIRAGE_CALL InputKey(int32_t vk, int32_t down)
 		{

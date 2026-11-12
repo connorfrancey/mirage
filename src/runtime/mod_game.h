@@ -32,6 +32,9 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL ObjectIsA(MirageObject* object, const char* className);
 	int32_t MIRAGE_CALL ObjectsOfClass(const char* className, uint32_t flags, MirageObject** out, int32_t capacity);
 	void MIRAGE_CALL EventSkip(const MirageEvent* event);
+	uint32_t MIRAGE_CALL PlayerStateCapture(char* buffer, uint32_t capacity);
+	int32_t MIRAGE_CALL PlayerStateApply(const char* state);
+	void MIRAGE_CALL PlayerResetMovement();
 	int32_t MIRAGE_CALL MenuOpen();
 	void MIRAGE_CALL InputKey(int32_t vk, int32_t down);
 	void MIRAGE_CALL ShareSet(MirageMod* mod, const char* key, const char* value);

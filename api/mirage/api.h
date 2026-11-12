@@ -358,6 +358,8 @@ struct MirageUi {
     void(MIRAGE_CALL* font_push)(int32_t font);                      /* MIRAGE_FONT_*; pop with font_pop */
     void(MIRAGE_CALL* font_pop)(void);
     void(MIRAGE_CALL* clipboard_set)(const char* text);
+    int32_t(MIRAGE_CALL* item_double_clicked)(void);                 /* The last widget, left button */
+    int32_t(MIRAGE_CALL* item_deactivated)(void);                    /* The last widget stopped being edited this frame */
 };
 
 /* font_push */
@@ -581,6 +583,18 @@ typedef struct MirageApi {
     /* ---- The menu (step 9) */
     int32_t(MIRAGE_CALL* module_state)(const char* name);     /* Any module, by name: 1 on, 0 off, -1 no such module */
     uint32_t(MIRAGE_CALL* theme_color)(int32_t which);        /* MIRAGE_THEME_*, packed like the draw colors */
+
+    /* ---- The player's state (step 9): everything plain about the player (position, speed, move, health, timers of
+     * their moves, the camera...) as JSON text, put back later: what save states are made of. Game thread.
+     * player_state_capture copies up to `capacity` bytes and returns the full length (0: no player, or the layout of
+     * the game's values couldn't be worked out). player_state_apply puts one back: 1 done, 0 not (another level,
+     * another player class, no player, the player can't be moved now; the log says which). Every apply counts in
+     * mirage.shared("memenu", "save_state.loads"). */
+    uint32_t(MIRAGE_CALL* player_state_capture)(char* buffer, uint32_t capacity);
+    int32_t(MIRAGE_CALL* player_state_apply)(const char* state);
+    void(MIRAGE_CALL* player_reset_movement)(void);   /* Back to plain walking: out of a death fall, a slide, stuck input */
+    /* Any module, by name (another mod's too), switched on or off as the player would. 0: no such module. Any thread. */
+    int32_t(MIRAGE_CALL* module_set_state)(const char* name, int32_t on);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

@@ -72,6 +72,7 @@ namespace mirage::firstparty
 		MigrateFolder(modsDir, "input_layouts", "memenu-input-overlay");
 		MigrateFolder(modsDir, "speedrun", "memenu-speedrun");
 		MigrateFolder(modsDir, "hud", "memenu-info-lines");
+		MigrateFolder(modsDir, "savestates", "memenu-savestate");
 		return written;
 	}
 

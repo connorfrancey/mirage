@@ -18,7 +18,6 @@
 #include "game/levels.h"
 #include "game/object_cache.h"
 #include "game/player_state.h"
-#include "game/save_library.h"
 #include "runtime/mod_game.h"
 #include "runtime/call.h"
 #include "runtime/engine_calls.h"
@@ -498,9 +497,15 @@ Expectation ExpectationFor(Module& m)
                 {}};
     }
 #endif
+    // Save State, Load State, Save States, Refill Reaction Time: mods/memenu-savestate (native); what it shares, and the
+    // commands the menu hands it (memenu/save_states.*)
     if (name == "Save State")
-        return {[] { player_state::Clear(); if (auto* p = game::Pawn()) g_savedAt = p->Location; },
-                [] { return Expect(player_state::HasSave(), "no state was saved"); }, {}};
+        return {[] {
+                    static int n = 0;
+                    mirage::mods::Share("save_states.command", std::to_string(++n) + " clear");
+                    if (auto* p = game::Pawn()) g_savedAt = p->Location;
+                },
+                [] { return Expect(SharedInt("memenu-savestate", "has_save") == 1, "no state was saved"); }, {}};
     if (name == "Load State")
         return {[] { if (auto* p = game::Pawn()) { p->Location.X += 2000.f; p->Velocity = Classes::FVector{}; } },   // Move away
                 [] { return WithPlayer([](ATdPlayerPawn* p, ATdPlayerController* c) {
@@ -520,24 +525,28 @@ Expectation ExpectationFor(Module& m)
                     return Expect(c->ReactionTimeEnergy >= 99.f, "the reaction time meter was not refilled"); }); },
                 {}};
     if (name == "Save States") {
-        // In a folder of its own, never the player's states. The check reads the file back from disk and loads it
-        // after moving away: the stored format must bring the player back, in walking state.
+        // In a folder of its own (in the mod's folder), never the player's states. The check reads the file back from
+        // disk and puts its state back after moving away: the stored format must bring the player back, walking.
         static std::filesystem::path folder;
         return {[] {
-                    folder = paths::Dir() / "selftest-savestates";
+                    folder = paths::Dir() / "mods" / "memenu-savestate" / "selftest-savestates";
                     std::error_code ec;
                     std::filesystem::remove_all(folder, ec);
-                    save_library::SetFolder(folder);
+                    mirage::mods::Share("save_states.folder", "selftest-savestates");
                     if (auto* p = game::Pawn()) g_savedAt = p->Location;
                 },
                 [] { return WithPlayer([](ATdPlayerPawn* p, ATdPlayerController* c) -> std::string {
-                    if (save_library::List(game::MapName()).size() != 1) return "running it did not add one state";
-                    if (!std::filesystem::exists(folder / (save_library::Map() + ".json"))) return "no file was written";
-                    save_library::SetFolder(folder);    // Forget it: read back from the file
+                    if (SharedInt("memenu-savestate", "states") != 1) return "running it did not add one state";
+                    char map[64]{};
+                    mirage::mods::game_api::ShareGet("memenu-savestate", "map", map, sizeof map);
+                    const auto file = folder / (std::string(map) + ".json");
+                    std::ifstream in(file);
+                    if (!in) return "no file was written";
+                    const auto j = nlohmann::json::parse(in, nullptr, false);
+                    if (j.is_discarded() || !j.contains("states") || j["states"].empty()) return "the file has no states";
                     p->Location.X += 2000.f;
                     p->Velocity = Classes::FVector{};
-                    std::string error;
-                    if (!save_library::Load(0, &error)) return "loading it back failed: " + error;
+                    if (!player_state::Apply(j["states"][0]["state"])) return std::string("putting the stored state back failed");
                     const float d = Distance(p->Location, g_savedAt);
                     if (d >= 150.f) return "the player is " + std::to_string(static_cast<int>(d)) +
                                            " units from the stored position after loading it";
@@ -545,7 +554,7 @@ Expectation ExpectationFor(Module& m)
                                   "the controller is not in PlayerWalking after loading");
                 }); },
                 [] {
-                    save_library::SetFolder({});
+                    mirage::mods::Share("save_states.folder", "");
                     std::error_code ec;
                     std::filesystem::remove_all(folder, ec);
                     return std::string();

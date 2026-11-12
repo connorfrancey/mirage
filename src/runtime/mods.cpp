@@ -700,6 +700,13 @@ namespace mirage::mods
 			const Module* m = name ? modules::Find(name) : nullptr;
 			return m ? (m->Enabled() ? 1 : 0) : -1;
 		}
+		int32_t MIRAGE_CALL ModuleSetState(const char* name, int32_t on)
+		{
+			Module* m = name ? modules::Find(name) : nullptr;
+			if (!m) return 0;
+			if (m->Enabled() != (on != 0)) m->SetEnabled(on != 0);
+			return 1;
+		}
 		uint32_t MIRAGE_CALL ThemeColor(int32_t which)
 		{
 			const theme::MenuColors& t = theme::Menu();
@@ -776,6 +783,7 @@ namespace mirage::mods
 			io::InputKeyState, io::InputMouse, io::InputKps, io::InputNow, io::InputResetCounts, io::TasSession,
 			io::FileRead, io::FileWrite, io::FileList, io::FileStamp, io::FileOpenFolder,
 			SdkGlobals, ModuleState, ThemeColor,
+			game_api::PlayerStateCapture, game_api::PlayerStateApply, game_api::PlayerResetMovement, ModuleSetState,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

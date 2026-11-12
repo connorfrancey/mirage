@@ -520,6 +520,27 @@ void player_state::Clear() { g_hasSave = false; }
 
 unsigned player_state::LoadCount() { return g_loadCount; }
 
+nlohmann::json player_state::Capture()
+{
+    const Snapshot keep = g_save;
+    const bool had = g_hasSave;
+    nlohmann::json j;
+    if (Save()) j = Export();
+    g_save = keep;
+    g_hasSave = had;
+    return j;
+}
+
+bool player_state::Apply(const nlohmann::json& state)
+{
+    const Snapshot keep = g_save;
+    const bool had = g_hasSave;
+    const bool ok = Import(state) && Load();
+    g_save = keep;
+    g_hasSave = had;
+    return ok;
+}
+
 void player_state::ResetMovement(ATdPlayerPawn* pawn, ATdPlayerController* controller)
 {
     const auto state = pawn->MovementState.GetValue();

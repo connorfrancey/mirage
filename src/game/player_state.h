@@ -34,4 +34,9 @@ namespace player_state
 	// Puts the player back into plain walking: clears a death fall, a slide, a stuck animation and blocked input. What the
 	// trainer does before God/Fly take over from a "falling uncontrolled" state.
 	void ResetMovement(Classes::ATdPlayerPawn* pawn, Classes::ATdPlayerController* controller);
+
+	// For mods (MirageApi player_state_*): the player now as data, and a state put back, without touching the slot
+	// above (the menu's own: the self-test's). Capture: null if there is no player or the layout is unknown.
+	nlohmann::json Capture();
+	bool Apply(const nlohmann::json& state);	// A Load of it; false: it doesn't fit (another level, no player, ...)
 }

@@ -434,6 +434,11 @@ namespace mirage::mods::ui
 			--t_fonts;
 		}
 		void MIRAGE_CALL ClipboardSet(const char* t) { if (Ready() && t) ImGui::SetClipboardText(t); }
+		int32_t MIRAGE_CALL ItemDoubleClicked()
+		{
+			return Ready() && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
+		}
+		int32_t MIRAGE_CALL ItemDeactivated() { return Ready() && ImGui::IsItemDeactivated(); }
 
 		const MirageUi kUi = {
 			sizeof(MirageUi),
@@ -451,7 +456,7 @@ namespace mirage::mods::ui
 			WindowDrawRect, WindowDrawText, WindowDrawLine, WindowDrawCircle,
 			KeyPressed, WantsKeyboard, MousePos, Time, DeltaTime,
 			NextOpen, InputTextHint, AlignTextToFrame, TextSize, FrameHeight, WindowRect, OverlayRect, WindowDrawTextSized, StylePush,
-			StylePop, FontPush, FontPop, ClipboardSet,
+			StylePop, FontPush, FontPop, ClipboardSet, ItemDoubleClicked, ItemDeactivated,
 		};
 	}
 
