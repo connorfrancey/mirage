@@ -137,6 +137,10 @@ MIRAGE_AT(tas_preflight, 496);
 MIRAGE_AT(module_list, 500);
 MIRAGE_AT(memory_stats, 504);
 MIRAGE_AT(inject_function, 508);
+MIRAGE_AT(native_register, 512);
+MIRAGE_AT(native_arg, 516);
+MIRAGE_AT(native_return, 520);
+MIRAGE_AT(native_self, 524);
 // managed/Mirage/Native/Structs.cs mirrors these by hand (Bridge.Initialize checks the same sizes in the game)
 static_assert(sizeof(MirageModuleDesc) == 56 && sizeof(MirageEvent) == 24 && sizeof(MirageValue) == 272);
 static_assert(sizeof(MirageMemoryStats) == 56 && offsetof(MirageMemoryStats, process_private) == 8);

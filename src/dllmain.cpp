@@ -218,6 +218,7 @@ static void Run(HMODULE module)
         mirage::textures::Shutdown();   // Its worker, and the package file redirects (MinHook too)
         mirage::inject::RemoveAll();    // Injections out (their functions rebuilt), the stub's native slot freed
         mirage::scripts::RestoreAll();  // Patched functions back to their own bytecode
+        mirage::inject::ReleaseNativeSlots();   // Mod natives out of the engine's table: no bytecode calls them now
         mirage::crash::Uninstall();     // The game's own crash handling back, before MinHook is shut down
 #endif
         hooks::Uninstall();

@@ -16,6 +16,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 
 namespace mirage::inject
@@ -75,7 +76,9 @@ namespace mirage::inject
 		// The native table and the stub's slot
 		Native* g_natives = nullptr;
 		int g_slot = -1;
-		Native g_slotBefore = nullptr;
+		Native g_slotBefore = nullptr;					// The engine's "undefined" entry: what a released slot gets back
+		std::vector<int> g_free;						// Free slots after the stub's, for mod natives (highest first)
+		std::vector<int> g_claimed;					// Taken by mod natives
 		bool g_tried = false;
 		std::string g_why;
 		std::uint8_t g_opIntConst = 0xFF, g_opEndParms = 0xFF;
@@ -83,6 +86,17 @@ namespace mirage::inject
 
 		std::uint64_t g_calls = 0;
 		double g_micros = 0.0;
+
+		// What List() gives (the mod manager, on the render thread): published on the game thread after each change
+		std::mutex g_listLock;
+		std::vector<Info> g_list;
+		void Publish()
+		{
+			std::vector<Info> out;
+			for (const auto& [id, inj] : g_injections) out.push_back({id, inj.function, inj.pointText, inj.owner, inj.priority, inj.places});
+			std::lock_guard lock(g_listLock);
+			g_list = std::move(out);
+		}
 
 		std::uint32_t Dword(const void* p, int at)
 		{
@@ -119,10 +133,11 @@ namespace mirage::inject
 		{
 			if (g_nodeOffset >= 0) return g_nodeOffset;
 			static Classes::UClass* const functionClass = Classes::UFunction::StaticClass();
+			static Classes::UClass* const stateClass = Classes::UState::StaticClass();
 			for (int at = 0; at <= 0x30; at += 4) {
 				if (Dword(frame, at + 4) != reinterpret_cast<std::uintptr_t>(self)) continue;
 				auto* node = reinterpret_cast<Classes::UStruct*>(static_cast<std::uintptr_t>(Dword(frame, at)));
-				if (!node || IsBadReadPtr(node, 0x60) || node->Class != functionClass) continue;
+				if (!node || IsBadReadPtr(node, 0x60) || (node->Class != functionClass && node->Class != stateClass)) continue;
 				// Code (Node + 8) must point into the function's bytecode, right where this call's argument is
 				const auto code = static_cast<std::uintptr_t>(Dword(frame, at + 8));
 				const auto* data = *reinterpret_cast<std::uint8_t* const*>(&node->Script);
@@ -250,8 +265,12 @@ namespace mirage::inject
 			for (int i = 0; i < kNativeCount; ++i) ++counts[table[i]];
 			const Native undefined = std::max_element(counts.begin(), counts.end(),
 													  [](const auto& a, const auto& b) { return a.second < b.second; })->first;
-			for (int i = kNativeCount - 1; i >= 0x100 && g_slot < 0; --i)
-				if (table[i] == undefined && !used.count(i)) g_slot = i;
+			for (int i = kNativeCount - 1; i >= 0x100; --i)
+				if (table[i] == undefined && !used.count(i)) g_free.push_back(i);
+			if (!g_free.empty()) {
+				g_slot = g_free.front();
+				g_free.erase(g_free.begin());
+			}
 			if (g_slot < 0) {
 				g_why = "the native function table has no free slot";
 				return false;
@@ -632,6 +651,7 @@ namespace mirage::inject
 			if (t.sites.empty() && first) g_targets.erase(fn);
 			return 0;
 		}
+		Publish();
 		spdlog::info("Script injection: {} into {} at {} (priority {}, {} place(s))", owner, function, pointText, priority,
 					 g_injections[id].places);
 		return id;
@@ -648,11 +668,13 @@ namespace mirage::inject
 		std::string error;
 		if (!Rebuild(t->second, &error)) spdlog::error("Script injection: removing #{}: {}", id, error);
 		if (t->second.sites.empty()) g_targets.erase(t);
+		Publish();
 	}
 
 	void RemoveAll()
 	{
 		g_injections.clear();
+		Publish();
 		for (auto& [fn, t] : g_targets) {
 			std::string error;
 			if (!Rebuild(t, &error)) spdlog::error("Script injection: {}: {}", fn->GetPathName(), error);
@@ -662,9 +684,13 @@ namespace mirage::inject
 		if (g_natives && g_slot >= 0) {
 			InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_natives[g_slot]),
 								static_cast<LONG>(reinterpret_cast<std::uintptr_t>(g_slotBefore)));
-			g_slot = -1;
-			g_natives = nullptr;
+			g_slot = -1;		// The table stays known: ReleaseNativeSlots frees the mod natives' slots later
 		}
+	}
+
+	void ReleaseNativeSlots()
+	{
+		for (const int slot : std::vector<int>(g_claimed)) ReleaseNativeSlot(slot);
 	}
 
 	bool Ready(std::string* why)
@@ -676,10 +702,69 @@ namespace mirage::inject
 
 	std::vector<Info> List()
 	{
-		std::vector<Info> out;
-		for (const auto& [id, inj] : g_injections) out.push_back({id, inj.function, inj.pointText, inj.owner, inj.priority, inj.places});
-		return out;
+		std::lock_guard lock(g_listLock);
+		return g_list;
 	}
 
 	Stats GetStats() { return {g_calls, g_micros, g_slot}; }
+
+	// ---- The native table for mod natives -----------------------------------------------------------------------------
+	namespace
+	{
+		void SetEntry(int slot, void* exec)
+		{
+			DWORD old = 0;
+			VirtualProtect(&g_natives[slot], sizeof(Native), PAGE_READWRITE, &old);
+			InterlockedExchange(reinterpret_cast<volatile LONG*>(&g_natives[slot]),
+								static_cast<LONG>(reinterpret_cast<std::uintptr_t>(exec)));
+		}
+	}
+
+	int ClaimNativeSlot(void* exec, std::string* error)
+	{
+		if (!FindNatives()) {
+			if (error) *error = g_why;
+			return -1;
+		}
+		if (g_free.empty()) {
+			if (error) *error = "no free slot left in the native table";
+			return -1;
+		}
+		const int slot = g_free.front();
+		g_free.erase(g_free.begin());
+		g_claimed.push_back(slot);
+		SetEntry(slot, exec);
+		return slot;
+	}
+
+	void ReleaseNativeSlot(int slot)
+	{
+		if (!g_natives || slot < 0) return;
+		SetEntry(slot, reinterpret_cast<void*>(g_slotBefore));
+		std::erase(g_claimed, slot);
+		g_free.insert(g_free.begin(), slot);
+	}
+
+	bool Frame(Classes::UObject* self, void* frame, FrameView& out)
+	{
+		auto* f = static_cast<std::uint8_t*>(frame);
+		const int node = NodeOffset(self, f);
+		if (node < 0) return false;
+		out.code = reinterpret_cast<std::uint8_t**>(f + node + 8);
+		out.object = reinterpret_cast<Classes::UObject*>(static_cast<std::uintptr_t>(Dword(f, node + 4)));
+		return true;
+	}
+
+	void Step(const FrameView& view, void* frame, void* result)
+	{
+		const std::uint8_t op = *(*view.code)++;
+		g_natives[op](view.object, frame, result);		// What FFrame::Step does: the opcode's handler, on Stack.Object
+	}
+
+	bool SkipEndOfParameters(const FrameView& view)
+	{
+		if (**view.code != g_opEndParms) return false;
+		++*view.code;
+		return true;
+	}
 }

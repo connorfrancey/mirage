@@ -29,6 +29,7 @@ namespace mirage::mods
 	enum class State : int { NotLoaded, Loading, Active, Detached, Failed, Crashed };
 	struct HookRecord;
 	struct Subscription;
+	struct NativeRecord;
 }
 namespace mirage::content
 {
@@ -63,6 +64,7 @@ struct MirageMod
 	std::vector<std::unique_ptr<mirage::mods::HookRecord>> hooks;
 	std::vector<std::shared_ptr<mirage::mods::Subscription>> subscriptions;
 	std::vector<int> detours;							// mirage::detours ids, removed with its hooks
+	std::vector<std::unique_ptr<mirage::mods::NativeRecord>> natives;	// Its natives (step 11): records live as long as the menu
 	// Its content (step 7): what its content folders change, and the module that turns it on and off
 	std::shared_ptr<mirage::content::Set> content;
 	Module* contentModule = nullptr;
@@ -79,6 +81,15 @@ namespace mirage::mods
 		std::string function;
 		int id = 0;								// mirage::hooks id, or mirage::inject id when `inject` (0: removed)
 		bool inject = false;
+	};
+	// A mod native: the runtime's callback runs it guarded while `live` (cleared at the mod's unload or reload)
+	struct NativeRecord
+	{
+		MirageMod* mod = nullptr;
+		MirageNativeFn fn = nullptr;
+		void* user = nullptr;
+		std::string name;
+		std::atomic<bool> live{true};
 	};
 	// A mod's event subscription
 	struct Subscription

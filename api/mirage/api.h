@@ -109,6 +109,7 @@ typedef struct MirageCall MirageCall;               /* A call of a game function
 typedef struct MirageHook MirageHook;               /* A function hook */
 typedef struct MirageSubscription MirageSubscription;   /* An event subscription */
 typedef struct MirageDetour MirageDetour;           /* A detour of native code */
+typedef struct MirageNativeCall MirageNativeCall;   /* One call of a mod native from the game's bytecode */
 
 /* A value read from or written to a game object or a call, by dotted path ("Location.Z", "NewLocation", "ReturnValue") */
 typedef enum MirageValueType {
@@ -136,6 +137,7 @@ typedef struct MirageValue {
 #define MIRAGE_HOOK_AFTER 1     /* After it: its out parameters and "ReturnValue" are set */
 #define MIRAGE_HOOK_REPLACE 2   /* Instead of it: set "ReturnValue" (the highest priority replace runs, alone) */
 typedef void(MIRAGE_CALL* MirageHookFn)(void* user, MirageCall* call);
+typedef void(MIRAGE_CALL* MirageNativeFn)(void* user, MirageNativeCall* call);
 
 /* event_subscribe: what happened (MirageEvent.type) and what comes with it */
 #define MIRAGE_EVENT_TICK 0           /* Game thread, every engine tick while in a level: number = seconds since the last */
@@ -747,6 +749,16 @@ typedef struct MirageApi {
      * function isn't loaded (the log says why). hook_remove removes it; so does the mod's unload. */
     MirageHook*(MIRAGE_CALL* inject_function)(MirageMod* mod, const char* function, const char* point, int32_t priority,
                                               MirageHookFn fn, void* user);
+
+    /* ---- Mod natives (step 11): a mod function the game's bytecode calls like engine code. `signature` is
+     * "float(float, int)": argument types int, float, bool, byte, object, name (arrives as text); return int, float,
+     * bool, byte, object or void. Returns the native index to put in a script patch's NativeFunction token (> 0), 0 when
+     * it can't be registered (the log says why). The same mod and name again (a hot reload) gets the same index. After
+     * the mod's unload its natives return zero. Game thread for the calls. */
+    int32_t(MIRAGE_CALL* native_register)(MirageMod* mod, const char* name, const char* signature, MirageNativeFn fn, void* user);
+    int32_t(MIRAGE_CALL* native_arg)(MirageNativeCall* call, int32_t index, MirageValue* out);    /* 0: no such argument */
+    void(MIRAGE_CALL* native_return)(MirageNativeCall* call, const MirageValue* value);
+    MirageObject*(MIRAGE_CALL* native_self)(MirageNativeCall* call);    /* The object the calling script runs on */
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

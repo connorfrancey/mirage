@@ -12,6 +12,7 @@
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
+#include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
@@ -218,6 +219,8 @@ namespace mirage::mods
 		for (int id : mod.detours) detours::Remove(id);
 		mod.detours.clear();
 		ReleaseScripts(mod);
+		for (auto& n : mod.natives) n->live = false;		// Its natives return zero from here (their index stays)
+		natives::Release(mod.id);
 	}
 
 	void DispatchTick(float seconds)
@@ -330,6 +333,58 @@ namespace mirage::mods
 			if (r->inject) RemoveInjection(r->id);
 			else hooks::Remove(r->id);
 			r->id = 0;
+		}
+
+		struct NativeArgs
+		{
+			NativeRecord* record;
+			MirageNativeCall* call;
+		};
+		void RunModNative(void* a)
+		{
+			auto* args = static_cast<NativeArgs*>(a);
+			args->record->fn(args->record->user, args->call);
+		}
+		void OnNative(void* user, natives::Call& call)
+		{
+			auto* r = static_cast<NativeRecord*>(user);
+			if (!r->live || !detail::Running(*r->mod)) return;
+			NativeArgs args{r, reinterpret_cast<MirageNativeCall*>(&call)};
+			detail::Enter(*r->mod, "native", r->name, &RunModNative, &args);
+		}
+
+		int32_t MIRAGE_CALL NativeRegister(MirageMod* mod, const char* name, const char* signature, MirageNativeFn fn, void* user)
+		{
+			if (!mod || !name || !signature || !fn) return 0;
+			auto r = std::make_unique<NativeRecord>();
+			r->mod = mod;
+			r->fn = fn;
+			r->user = user;
+			r->name = name;
+			std::string error;
+			const int index = natives::Register(mod->id, name, signature, &OnNative, r.get(), &error);
+			if (!index) {
+				spdlog::error("[mod {}] native_register {}: {}", mod->id, name, error);
+				return 0;
+			}
+			mod->natives.push_back(std::move(r));
+			return index;
+		}
+		int32_t MIRAGE_CALL NativeArg(MirageNativeCall* call, int32_t index, MirageValue* out)
+		{
+			auto* c = reinterpret_cast<natives::Call*>(call);
+			if (!c || !out || index < 0 || index >= static_cast<int32_t>(c->args.size())) return 0;
+			*out = c->args[static_cast<std::size_t>(index)];
+			return 1;
+		}
+		void MIRAGE_CALL NativeReturn(MirageNativeCall* call, const MirageValue* value)
+		{
+			if (auto* c = reinterpret_cast<natives::Call*>(call); c && value) c->result = *value;
+		}
+		MirageObject* MIRAGE_CALL NativeSelf(MirageNativeCall* call)
+		{
+			auto* c = reinterpret_cast<natives::Call*>(call);
+			return c ? Handle(c->self) : nullptr;
 		}
 
 		MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

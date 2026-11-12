@@ -894,7 +894,8 @@ namespace mirage::mods
 			ImGuiContext, SettingDraw, SettingChoice, ReservedKeys,
 			tasapi::Available, tasapi::Status, tasapi::SetOptions, tasapi::Command, tasapi::Record, tasapi::ReplayRevision,
 			tasapi::ReplayGet, tasapi::ReplaySet, tasapi::File, tasapi::Folder, tasapi::Preflight, ModuleList,
-			MemoryStats, game_api::InjectFunction,
+			MemoryStats, game_api::InjectFunction, game_api::NativeRegister, game_api::NativeArg, game_api::NativeReturn,
+			game_api::NativeSelf,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

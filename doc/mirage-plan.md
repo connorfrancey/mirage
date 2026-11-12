@@ -436,6 +436,19 @@ Finishes what step 8 left out: calling a mod's code from inside UnrealScript, no
 injects into the same function, both run in the declared order, and hot reload unpatches and repatches with the
 original bytecode byte-identical in between. Cost of an injection point measured (target: within 2x a function hook).
 
+**Status (2026-11-12): done, except declaring natives on a class (step 12 makes the UFunctions).** `runtime/inject`
+finds the engine's native table (GNatives) and puts a stub native in a free slot; each injection point becomes
+`if (stub(site)) return ReturnValue;` in the function's bytecode (UnrealLib's assembler; jumps to the statement retargeted).
+Points: `head`, `return`, `before:<Function>[#n]`, `after:<Function>[#n]`, `token:<i>`. Callbacks read and write
+parameters and locals by name and may return early (not inside a ForEach). Injection is a layer over step 8's patches: a
+patch of an injected function goes under the injections. API `inject_function`, Lua `mirage.inject`, C# `Mod.Inject`;
+the mod manager lists each mod's injections and the other mods injecting into the same functions. Mod natives
+(`runtime/natives`): `native_register(name, "float(float, int)", fn)`, Lua `mirage.native`, C# `Mod.Native`: a slot each,
+a thunk that reads the arguments from the caller's bytecode, the same index after a hot reload. Self-tests "Mirage script
+injection", "... (Lua)" and "Mirage natives (Lua)": a Lua mod sets the local `CurrentWeaponType` mid-`StartMove` (standing
+jump 124 → 58), a second runs after it and sees it, Higher Jumps under it (130), hot reload keeps it, off: the original
+bytes. An empty injection adds 0.10 µs a call, an empty function hook 0.22 µs.
+
 ### 12. New classes, objects and an UnrealScript compiler
 
 - **Runtime classes:** a mod defines a class (a subclass of an existing one: an `Actor`, a `TdPawn`, a weapon) with new

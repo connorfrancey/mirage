@@ -50,7 +50,24 @@ namespace mirage::inject
 	// Whether injection works in this game (the native table and a free slot were found), and if not, why
 	bool Ready(std::string* why = nullptr);
 
-	// The injections now, for the mod manager: one line each ("TdGame.TdMove_Jump.StartMove before:Foo (mod-a, 10)")
+	// ---- The engine's native table, for mod natives (runtime/natives.h) ------------------------------------------------
+	// A free slot of GNatives (-1 and `error`: none), its entry set to `exec` (a __thiscall (UObject*, FFrame&, Result)).
+	// Released slots go back to the engine's "undefined" entry. Game thread.
+	int ClaimNativeSlot(void* exec, std::string* error);
+	void ReleaseNativeSlot(int slot);
+	void ReleaseNativeSlots();		// All of them: at the menu's unload, after every script patch is undone
+	// The running frame a native was called with: where its arguments are (`code`) and the object it runs on
+	struct FrameView
+	{
+		std::uint8_t** code = nullptr;
+		Classes::UObject* object = nullptr;
+	};
+	bool Frame(Classes::UObject* self, void* frame, FrameView& out);
+	// One argument expression of the caller's bytecode evaluated into `result` (UE3's FFrame::Step)
+	void Step(const FrameView& view, void* frame, void* result);
+	bool SkipEndOfParameters(const FrameView& view);	// After the last argument
+
+	// The injections now, for the mod manager. Any thread (a snapshot published at each change).
 	struct Info
 	{
 		int id = 0;

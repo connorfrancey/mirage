@@ -162,6 +162,8 @@ namespace mirage::mods
 		};
 		static void MIRAGE_CALL OnEvent(void* user, const MirageEvent* e);
 		static void MIRAGE_CALL OnHook(void* user, MirageCall* call);
+		static void MIRAGE_CALL OnNative(void* user, MirageNativeCall* call);
+		static int NativeFn(lua_State* L);
 		void Fail(Callback& c, const std::string& error);
 		static int On(lua_State* L);
 		static int HookFn(lua_State* L);
@@ -1018,6 +1020,53 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// local index = mirage.native("halve", "float(float)", function(x) return x / 2 end)
+	// The index goes in a script patch's NativeFunction token: the game's bytecode calls the Lua function with its
+	// arguments (numbers, booleans, objects, names as strings) and gets its return value back.
+	int LuaMod::NativeFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const char* name = luaL_checkstring(L, 1);
+		const char* signature = luaL_checkstring(L, 2);
+		luaL_checktype(L, 3, LUA_TFUNCTION);
+		auto c = std::make_unique<Callback>();
+		c->owner = &self;
+		c->what = std::string("native ") + name;
+		lua_pushvalue(L, 3);
+		c->fn = luaL_ref(L, LUA_REGISTRYINDEX);
+		const int32_t index = self.api_->native_register(self.mod_, name, signature, &OnNative, c.get());
+		if (!index) {
+			luaL_unref(L, LUA_REGISTRYINDEX, c->fn);
+			return luaL_error(L, "mirage.native: %s %s can't be registered (see the log)", name, signature);
+		}
+		self.callbacks_.push_back(std::move(c));
+		lua_pushinteger(L, index);
+		return 1;
+	}
+
+	void MIRAGE_CALL LuaMod::OnNative(void* user, MirageNativeCall* call)
+	{
+		auto* c = static_cast<Callback*>(user);
+		LuaMod& self = *c->owner;
+		std::lock_guard lock(self.lock_);
+		if (c->failed) return;
+		lua_State* L = self.state_.Get();
+		lua_rawgeti(L, LUA_REGISTRYINDEX, c->fn);
+		int n = 0;
+		for (MirageValue v{}; self.api_->native_arg(call, n, &v); ++n) {
+			if (v.type == MIRAGE_VALUE_OBJECT) PushObject(L, v.o);
+			else PushValue(L, v, kInCall, nullptr, "", 0);
+		}
+		const lua::Result r = self.state_.Call(n, 1);
+		if (!r.ok) {
+			self.Fail(*c, r.error);
+			return;
+		}
+		MirageValue out{};
+		if (ToValue(L, -1, out)) self.api_->native_return(call, &out);
+		lua_pop(L, 1);
+	}
+
 	int LuaMod::CallbackRemove(lua_State* L)
 	{
 		auto** box = static_cast<Callback**>(luaL_checkudata(L, 1, kCallbackMeta));
@@ -1405,7 +1454,7 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {nullptr, nullptr}};

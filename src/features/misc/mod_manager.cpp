@@ -8,6 +8,7 @@
 #include "game/game.h"
 #include "gui.h"
 #include "log.h"
+#include "runtime/inject.h"
 #include "runtime/mods.h"
 #include "theme.h"
 
@@ -144,6 +145,29 @@ namespace
 						ImGui::SameLine();
 						ImGui::TextDisabled("%s", mod->Tab().c_str());
 					}
+			}
+			// Its script injections (step 11), and the other mods injecting into the same functions: the order they run in
+			const auto injections = mirage::inject::List();
+			bool header = false;
+			for (const auto& i : injections) {
+				if (i.owner != m.id) continue;
+				if (!header) {
+					ImGui::Separator();
+					ImGui::TextDisabled("Script injections");
+					header = true;
+				}
+				ImGui::BulletText("%s at %s (priority %d, %d place%s)", i.function.c_str(), i.point.c_str(), i.priority, i.places,
+								  i.places == 1 ? "" : "s");
+				std::string others;
+				for (const auto& o : injections)
+					if (o.function == i.function && o.owner != m.id && others.find(o.owner) == std::string::npos)
+						others += (others.empty() ? "" : ", ") + o.owner + " (" + std::to_string(o.priority) + ")";
+				if (!others.empty()) {
+					ImGui::SameLine();
+					ImGui::TextColored({0.95f, 0.8f, 0.3f, 1.f}, "also: %s", others.c_str());
+					if (ImGui::IsItemHovered())
+						ImGui::SetTooltip("Other mods inject into this function: at one place, higher priority runs first");
+				}
 			}
 			if (!m.required.empty() || !m.optional.empty() || !m.incompatible.empty() || !m.dependents.empty()) ImGui::Separator();
 			List("Requires", m.required);

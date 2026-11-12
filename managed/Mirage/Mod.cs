@@ -55,6 +55,14 @@ namespace Mirage
         public Hook Inject(string function, string point, Action<Call> handler, int priority = 0) =>
             Mirage.Hook.CreateInjection(this, function, point, priority, handler);
 
+        /// <summary>
+        /// Registers <paramref name="fn"/> as a native the game's bytecode can call (a script patch's NativeFunction
+        /// token with the returned index). <paramref name="signature"/>: "float(float, int)"; arguments arrive as int,
+        /// float, bool, GameObject or string (a name); the return value is converted to the declared type.
+        /// </summary>
+        public int Native(string name, string signature, Func<object?[], object?> fn) =>
+            Mirage.ModNative.Register(this, name, signature, fn);
+
         /// <summary>A notification on screen.</summary>
         public void Notify(string text) => Utf8.With(text, t => { Bridge.Api->notify(Handle, (byte*)t); return 0; });
     }

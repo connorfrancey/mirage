@@ -135,6 +135,10 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<byte*, uint, uint> module_list;
         public delegate* unmanaged[Cdecl]<void*, void*, int> memory_stats;
         public delegate* unmanaged[Cdecl]<void*, byte*, byte*, int, void*, void*, void*> inject_function;
+        public delegate* unmanaged[Cdecl]<void*, byte*, byte*, void*, void*, int> native_register;
+        public delegate* unmanaged[Cdecl]<void*, int, void*, int> native_arg;
+        public delegate* unmanaged[Cdecl]<void*, void*, void> native_return;
+        public delegate* unmanaged[Cdecl]<void*, void*> native_self;
     }
 
     [StructLayout(LayoutKind.Sequential)]

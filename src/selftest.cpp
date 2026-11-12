@@ -29,6 +29,7 @@
 #include "core/cache_sched.h"
 #include "game/object_query.h"
 #include "runtime/inject.h"
+#include "runtime/natives.h"
 #include "runtime/script_patch.h"
 #include "runtime/reflect.h"
 #include "runtime/layout.h"
@@ -4538,6 +4539,147 @@ void TestScriptInjection()
     s.notes.push_back(line);
     if (injCost > std::max(2.0 * hookCost, 0.5)) p.Problem(std::string("an injection costs more than twice a hook: ") + line);
     if (bytes() != original) p.Problem("after the cost test the bytecode isn't the original");
+
+    // 6. Mod natives: "float(float)" doubles what FPctByRange returns (a script patch wraps its return value in the
+    //    native), and "int(bool, byte, object, name)" called at its head receives True, 7, Self and a name
+    namespace nat = mirage::natives;
+    struct Got
+    {
+        int calls = 0;
+        std::vector<MirageValue> args;
+    };
+    static Got got;
+    got = {};
+    const auto twice = [](void*, nat::Call& call) {
+        call.result.type = MIRAGE_VALUE_FLOAT;
+        call.result.f = call.args.empty() ? 0.f : call.args[0].f * 2.f;
+    };
+    const auto keep = [](void*, nat::Call& call) {
+        ++got.calls;
+        got.args = call.args;
+        call.result.type = MIRAGE_VALUE_INT;
+        call.result.i = 5;
+    };
+    std::string nerr;
+    const int nTwice = nat::Register("self-test", "twice", "float(float)", +twice, nullptr, &nerr);
+    const int nKeep = nat::Register("self-test", "keep", "int(bool, byte, object, name)", +keep, nullptr, &nerr);
+    const int nAgain = nat::Register("self-test", "twice", "float(float)", +twice, nullptr, &nerr);
+    if (!nTwice || !nKeep) p.Problem("registering natives: " + nerr);
+    else {
+        if (nAgain != nTwice) p.Problem("registering the same native again gave another index");
+        if (nat::Register("self-test", "twice", "int(int)", +twice, nullptr, &nerr)) p.Problem("a native's signature changed in a session");
+        bool applied = false;
+        Classes::UObject* pawnSeen = nullptr;
+        OnGameThread([&] {
+            pawnSeen = game::Pawn();
+            UnrealLib::Script sc;
+            if (!mirage::scripts::Read(fn, sc, &nerr)) return;
+            using UnrealLib::TokenKind;
+            for (const auto st : std::vector<std::uint32_t>(sc.statements)) {
+                auto& ret = sc.tokens[st];
+                if (ret.kind != TokenKind::Return || ret.children.empty() || sc.tokens[ret.children[0]].kind == TokenKind::Nothing) continue;
+                UnrealLib::Token call;
+                call.kind = TokenKind::NativeFunction;
+                call.native_index = static_cast<std::uint16_t>(nTwice);
+                call.children = {ret.children[0]};
+                sc.tokens.push_back(call);
+                sc.tokens[st].children = {static_cast<std::uint32_t>(sc.tokens.size() - 1)};
+                break;
+            }
+            // keep(True, 7, Self, 'FPctByRange') as the first statement
+            const auto add = [&](UnrealLib::Token t) {
+                for (std::size_t op = 0; op < mirage::scripts::Map().kinds.size(); ++op)
+                    if (mirage::scripts::Map().kinds[op] == t.kind) t.opcode = static_cast<std::uint8_t>(op);
+                sc.tokens.push_back(t);
+                return static_cast<std::uint32_t>(sc.tokens.size() - 1);
+            };
+            UnrealLib::Token tTrue, tByte, tSelf, tName, tKeep;
+            tTrue.kind = TokenKind::True;
+            tByte.kind = TokenKind::ByteConst;
+            tByte.byte_value = 7;
+            tSelf.kind = TokenKind::Self;
+            tName.kind = TokenKind::NameConst;
+            tName.name.index = fn->Name.Index;
+            tName.name.number = fn->Name.Number;
+            tKeep.kind = TokenKind::NativeFunction;
+            tKeep.native_index = static_cast<std::uint16_t>(nKeep);
+            tKeep.children = {add(tTrue), add(tByte), add(tSelf), add(tName)};
+            sc.statements.insert(sc.statements.begin(), sc.tokens.size());
+            sc.tokens.push_back(tKeep);
+            applied = mirage::scripts::Apply(fn, sc, "self-test", &nerr);
+        });
+        if (!applied) p.Problem("patching FPctByRange with the natives: " + nerr);
+        const float doubled = pct(5.f);
+        OnGameThread([&] { mirage::scripts::Restore(fn); });
+        if (std::fabs(doubled - 1.f) > 1e-4f) p.Problem("FPctByRange through the native 'twice' returned " + std::to_string(doubled) + ", not 1");
+        if (got.calls != 1 || got.args.size() != 4) p.Problem("the native 'keep' ran " + std::to_string(got.calls) + " times");
+        else {
+            const auto& g = got.args;
+            if (g[0].type != MIRAGE_VALUE_BOOL || g[0].i != 1) p.Problem("keep's bool argument isn't True");
+            if (g[1].i != 7) p.Problem("keep's byte argument is " + std::to_string(g[1].i) + ", not 7");
+            if (reinterpret_cast<Classes::UObject*>(g[2].o) != pawnSeen) p.Problem("keep's object argument isn't Self");
+            if (std::string(g[3].text) != "FPctByRange") p.Problem(std::string("keep's name argument is '") + g[3].text + "'");
+        }
+        if (bytes() != original) p.Problem("after the natives' patch the bytecode isn't the original");
+        s.notes.push_back("natives " + std::to_string(nTwice) + " and " + std::to_string(nKeep) + ": FPctByRange(5, 0, 10) " +
+                          std::to_string(doubled) + " through 'twice', 'keep' got its 4 arguments");
+    }
+    nat::Release("self-test");
+    End(s);
+}
+
+// Mod natives from Lua (tests/mods/native-lua): its module on, FPctByRange returns through the Lua function (halved);
+// a hot reload keeps the native's index; off, the original
+void TestNativesLua()
+{
+    Step& s = Begin("Mirage natives (Lua)");
+    Probe p(s);
+    Module* m = modules::Find("Native (Lua)");
+    if (!m) {
+        p.Problem("the Native (Lua) module (tests/mods/native-lua) is missing");
+        End(s);
+        return;
+    }
+    const auto pct = [&] {
+        float out = -1.f;
+        OnGameThread([&] {
+            auto* pawn = game::Pawn();
+            if (!pawn) return;
+            mirage::call::Params prm(pawn, "FPctByRange");
+            prm.Set("Value", 5.f);
+            prm.Set("InMax", 10.f);
+            if (mirage::call::Call(pawn, prm)) out = prm.GetFloat("ReturnValue");
+        });
+        return out;
+    };
+    const auto index = [](Module* mod) {
+        auto* v = mod ? dynamic_cast<ctl::SliderInt*>(mod->FindSetting("Index")) : nullptr;
+        return v ? v->Get() : -1;
+    };
+    const auto setOn = [](Module* mod, bool on) {
+        OnRenderThread([mod, on] { mod->SetEnabled(on); });
+        WaitTicks(10);
+    };
+    setOn(m, true);
+    const float on = pct();
+    const int before = index(m);
+    std::string reload = "timed out";
+    OnGameThread([&] { reload = mirage::mods::Reload("native-lua"); }, 15.0);
+    if (!reload.empty()) p.Problem("hot reload of native-lua: " + reload);
+    Module* again = modules::Find("Native (Lua)");
+    if (again && !again->Enabled()) setOn(again, true);
+    WaitTicks(10);
+    const float reloaded = pct();
+    const int after = index(again);
+    setOn(again ? again : m, false);
+    const float off = pct();
+    char line[200];
+    std::snprintf(line, sizeof line, "FPctByRange(5, 0, 10): %.3f through the Lua native %d, %.3f after a reload (native %d), %.3f off",
+                  on, before, reloaded, after, off);
+    s.notes.push_back(line);
+    if (std::fabs(on - 0.25f) > 1e-4f) p.Problem(std::string("the Lua native didn't halve the result: ") + line);
+    if (std::fabs(reloaded - 0.25f) > 1e-4f || after != before) p.Problem(std::string("after the reload: ") + line);
+    if (std::fabs(off - 0.5f) > 1e-4f) p.Problem(std::string("off, FPctByRange isn't the original: ") + line);
     End(s);
 }
 
@@ -5032,6 +5174,7 @@ const Named* FeatureList()
         {"Mirage script patch", &TestMirageScriptPatch, true},
         {"Mirage script injection", &TestScriptInjection, false},
         {"Mirage script injection (Lua)", &TestScriptInjectionMods, true},
+        {"Mirage natives (Lua)", &TestNativesLua, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

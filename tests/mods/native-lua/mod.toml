@@ -1,0 +1,4 @@
+# Self-test (step 11): a Lua function registered as a native, called from patched bytecode
+id = "native-lua"
+version = "1.0.0"
+mirage = "^0.1"
