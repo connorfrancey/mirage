@@ -142,8 +142,7 @@ endfunction()
 # Trainer
 
 # TAS / replay
-memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module.cpp features/tas/timeline_view.cpp features/tas/replay_editor.cpp features/tas/macro_library.cpp
-                  tas/engine.cpp tas/replay.cpp tas/tas.cpp
+memenu_feature(tas               tas GAME STAGE 12 FILES tas/engine.cpp tas/replay.cpp tas/tas.cpp
                   tas/timeline.cpp tas/history.cpp tas/input_monitor.cpp tas/splits.cpp tas/memory_map.cpp
                   tas/snapshot.cpp tas/d3d_pins.cpp)
 

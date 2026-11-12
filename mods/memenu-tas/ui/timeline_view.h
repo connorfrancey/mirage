@@ -1,8 +1,8 @@
 #pragma once
-#include "tas/history.h"
-#include "tas/replay.h"
-#include "tas/tas.h"
-#include "tas/timeline.h"
+#include "../tas/history.h"
+#include "../tas/replay.h"
+#include "../tas/tas.h"
+#include "../tas/timeline.h"
 
 #include <imgui.h>
 

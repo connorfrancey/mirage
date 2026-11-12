@@ -40,7 +40,6 @@
 #endif
 #include <shlobj.h>
 #if MEMENU_FEATURE_TAS
-#include "features/tas/timeline_view.h"
 #include "tas/input_monitor.h"
 #include "tas/macro.h"
 #include "tas/engine.h"
@@ -1456,16 +1455,7 @@ void TestTasWorkflow()
     std::error_code ec;
     fs::remove(file, ec);
 
-    // Undo through the editors' shared history, on the replay in the game
-    bool undone = false;
-    tas::WithReplay([&](tas::Replay& r) {
-        tasui::History().Watch(r);
-        tasui::History().Push(r, "self-test bookmark");
-        r.SetMarker(20, "undo me");
-        tasui::History().Watch(r);
-        undone = tasui::History().Undo(r) && !r.MarkerAt(20) && r.MarkerAt(10);
-    });
-    if (!undone) p.Problem("undo didn't take the edit back");
+    // (Undo is the TAS mod's own, in its UI: tests/test_history.cpp covers it)
 
     // 3. Loop, and 4. the session's keys while it plays. The timeline and the replay editor are open meanwhile (drawn
     // with a macro running: they must not trip over it).
@@ -3339,6 +3329,8 @@ void TestMirageFunctionHooks()
     };
 
     std::string why;
+    // First-party mods keep hooks of their own (Speedrun Timer, Keep Key Bindings, the kick tools): only ours count
+    const auto before = mh::GetStats();
     std::vector<int> ids;
     OnGameThread([&] {
         if (!mh::Ready(&why)) return;
@@ -3410,7 +3402,8 @@ void TestMirageFunctionHooks()
         if (!seen.order.empty()) p.Problem("hooks still ran after they were removed");
         if (!plain) p.Problem("unhooked, CheckMaxEffectDistance at the view target answered false");
         const auto st = mh::GetStats();
-        if (st.functions != 0 || st.hooks != 0) p.Problem(std::to_string(st.hooks) + " hooks left after removing them");
+        if (st.functions != before.functions || st.hooks != before.hooks)
+            p.Problem(std::to_string(st.hooks - before.hooks) + " hooks left after removing them");
         s.notes.push_back(std::to_string(st.calls) + " hooked calls, " +
                           std::to_string(st.calls ? st.microseconds / static_cast<double>(st.calls) : 0.0) +
                           " us each around the original (native hooks); UpdateMomentumStats seen " +
@@ -3467,6 +3460,7 @@ void TestMirageModHooks()
 
     set(native, false);
     set(lua, false);
+    const auto baseline = mirage::hooks::GetStats();   // Other mods' own hooks (first-party mods keep some)
     const double bare = calls(kCalls);
     set(native, true);
     const double withNative = calls(kCalls);
@@ -3492,7 +3486,8 @@ void TestMirageModHooks()
         }
         calls(1);
         const auto st = mirage::hooks::GetStats();
-        if (st.hooks != 2) p.Problem("reload " + std::to_string(i) + ": " + std::to_string(st.hooks) + " hooks, not 2");
+        if (st.hooks - baseline.hooks != 2)
+            p.Problem("reload " + std::to_string(i) + ": " + std::to_string(st.hooks - baseline.hooks) + " hooks, not 2");
         if (value(native, "Saw") != 1.f || value(lua, "Saw") != 12.f)
             p.Problem("reload " + std::to_string(i) + ": the order changed (native " + std::to_string(value(native, "Saw")) +
                       ", Lua " + std::to_string(value(lua, "Saw")) + ")");
@@ -3513,8 +3508,8 @@ void TestMirageModHooks()
     // Off: nothing left hooked
     set(native, false);
     set(lua, false);
-    if (mirage::hooks::GetStats().hooks != 0)
-        p.Problem(std::to_string(mirage::hooks::GetStats().hooks) + " hooks left with both modules off");
+    if (const auto left = mirage::hooks::GetStats().hooks - baseline.hooks; left != 0)
+        p.Problem(std::to_string(left) + " hooks left with both modules off");
 
     // Costs. The calls go through ProcessEvent and run the function, so the hooks' share is the difference.
     const double lookupNs = mirage::hooks::UnhookedLookupNanoseconds();

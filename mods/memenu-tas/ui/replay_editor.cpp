@@ -1,6 +1,6 @@
-#include "features/tas/replay_editor.h"
-#include "features/tas/timeline_view.h"      // KeyColor
-#include "tas/timeline.h"
+#include "replay_editor.h"
+#include "timeline_view.h"      // KeyColor
+#include "../tas/timeline.h"
 
 #include <imgui.h>
 

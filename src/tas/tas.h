@@ -147,6 +147,11 @@ void KeyCameraFromView(std::uint32_t frame);
 // ---- the replay ----------------------------------------------------------------------------------------------------------
 // Runs `fn` with the replay locked. Keep it short: the game thread waits for it at the start of each frame.
 void WithReplay(const std::function<void(Replay&)>& fn);
+// The replay for the TAS UI mod (MirageApi tas_replay_*): a number that changes whenever it does, and the replay itself
+// in the .merp format, both ways
+std::uint64_t ReplayRevision();
+std::string ReplayBytes();
+bool SetReplayBytes(const std::string& data, std::string* error);
 // .merp, or JSON (ExportJson's format) when the path ends in .json. Saving to a .json path exports JSON.
 bool LoadFile(const std::filesystem::path& path, std::string* error);
 bool SaveFile(const std::filesystem::path& path, std::string* error);

@@ -1,6 +1,6 @@
 #pragma once
-#include "tas/replay.h"
-#include "tas/tas.h"
+#include "../tas/replay.h"
+#include "../tas/tas.h"
 
 #include <cstddef>
 #include <string>

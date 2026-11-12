@@ -1,0 +1,10 @@
+# A first-party mod: part of the menu, written against the public API and SDK only (native, C++). It ships inside the
+# menu's DLL and is written to its mods folder at startup: edit a copy under another id, not this folder.
+# The TAS engine itself is the runtime's (MirageApi tas_*); replays are in the menu's replays\ folder.
+id = "memenu-tas"
+name = "TAS / Macro"
+version = "1.0.0"
+description = "Record and play back macros and runs, practice mode, frame advance, the timeline and the replay editor"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+entry = "memenu-tas.dll"

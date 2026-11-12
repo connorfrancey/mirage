@@ -1,7 +1,7 @@
-#include "features/tas/macro_library.h"
+#include "macro_library.h"
 
-#include "core/notify.h"
-#include "tas/tas.h"
+#include "../compat/notify.h"
+#include "../tas/tas.h"
 
 #include <algorithm>
 #include <cctype>

@@ -1,16 +1,16 @@
 // The TAS / Macro module: the menu side of tas/tas.h. The panel shows what the session is doing and the buttons that
 // make sense right now; the macro's files are tasui::MacroLibrary, the timeline and the frame editor have their own
 // windows (timeline_view, replay_editor).
-#include "core/keys.h"
-#include "core/module.h"
-#include "core/notify.h"
-#include "game/levels.h"
-#include "gui.h"
-#include "features/tas/macro_library.h"
-#include "features/tas/replay_editor.h"
-#include "features/tas/timeline_view.h"
-#include "tas/splits.h"
-#include "tas/tas.h"
+#include "../compat/keys.h"
+#include "../compat/module.h"
+#include "../compat/notify.h"
+#include "../compat/levels.h"
+#include "../compat/gui.h"
+#include "macro_library.h"
+#include "replay_editor.h"
+#include "timeline_view.h"
+#include "../tas/splits.h"
+#include "../tas/tas.h"
 
 #include <Windows.h>
 #include <imgui.h>
@@ -70,10 +70,10 @@ const struct { const char* label; float speed; } kSpeeds[] = {
 
 class Tas final : public Module {
 public:
-    Tas() : Module("TAS / Macro", "TAS", "Record and play back macros and runs, practice mode, frame advance (.merp)", 10)
+    Tas() : Module("TAS / Macro", "TAS", "Record and play back macros and runs, practice mode, frame advance (.merp)", 10,
+                   MIRAGE_MODULE_ENABLED_BY_DEFAULT | MIRAGE_MODULE_PANEL_OPEN)
     {
-        enabledByDefault = true;
-        expanded = true;
+        levels::Start();
         // Each section shows its controls only while it is open, some of them only when they apply.
         const auto in = [](ctl::Section& section, std::initializer_list<ctl::Setting*> controls) {
             for (ctl::Setting* c : controls) c->VisibleIf([&section] { return section.Get(); });
@@ -109,6 +109,7 @@ public:
 
     void OnRender() override
     {
+        if (!mirage::UseImGui()) return;        // The menu's ImGui (the same version: checked)
         tas::SetOptions(Options());
         status_ = tas::GetStatus();
         ReserveKeys();
@@ -438,8 +439,8 @@ private:
     template <class F>
     void ForEachGameplayMod(F&& f) const
     {
-        modules::ForEach([&](modules::Tab& tab, Module& m) {
-            if (!m.Enabled() || &m == this || m.IsAction()) return;
+        modules::ForEach([&](modules::Tab& tab, modules::ModuleRef& m) {
+            if (!m.Enabled() || m.Name() == "TAS / Macro" || m.IsAction()) return;
             if (tab.name != "Player" && tab.name != "World" && tab.name != "Trainer") return;
             if (m.Name() == "Tool Overlay" || m.Name() == "Speedometer" || m.Name() == "Speedrun Timer") return;
             f(m);
@@ -449,7 +450,7 @@ private:
     std::string GameplayMods() const
     {
         std::string on;
-        ForEachGameplayMod([&](Module& m) {
+        ForEachGameplayMod([&](modules::ModuleRef& m) {
             if (!on.empty()) on += ", ";
             on += m.Name();
         });
@@ -462,7 +463,7 @@ private:
         if (on.empty()) return;
         ImGui::TextColored({1.f, 0.75f, 0.3f, 1.f}, "Changes the game: %s", on.c_str());
         ImGui::SameLine();
-        if (ImGui::SmallButton("Turn off")) ForEachGameplayMod([](Module& m) { m.SetEnabled(false); });
+        if (ImGui::SmallButton("Turn off")) ForEachGameplayMod([](modules::ModuleRef& m) { m.SetEnabled(false); });
         ImGui::SetItemTooltip("Recording or playing with these on makes the run play differently without them");
     }
 
@@ -622,7 +623,7 @@ private:
 
         const float half = (width - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
         ImGui::BeginDisabled(!modsDiffer || GameplayMods().empty());
-        if (ImGui::Button("Turn them off", {half, 0})) ForEachGameplayMod([](Module& m) { m.SetEnabled(false); });
+        if (ImGui::Button("Turn them off", {half, 0})) ForEachGameplayMod([](modules::ModuleRef& m) { m.SetEnabled(false); });
         ImGui::SetItemTooltip("Switch off the modules that change the game (God Mode, No Clip, Game Speed...)");
         ImGui::EndDisabled();
         ImGui::SameLine();
@@ -968,3 +969,5 @@ private:
 MEM_MODULE(Tas)
 
 } // namespace
+
+MIRAGE_MOD()

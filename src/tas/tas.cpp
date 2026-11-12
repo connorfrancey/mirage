@@ -49,6 +49,7 @@ constexpr std::size_t kNoSeek = std::numeric_limits<std::size_t>::max();
 
 // ---- shared state ----------------------------------------------------------------------------------------------------------
 std::mutex g_mutex;                               // the replay and g_status
+std::atomic<std::uint64_t> g_edits{0};             // changes made to the replay as a whole (ReplayRevision)
 Replay g_replay;
 Status g_status;
 
@@ -1823,6 +1824,7 @@ void Clear()
         StopNow("cleared");
         std::lock_guard lock(g_mutex);
         g_replay.Clear();
+        ++g_edits;
         g_savedHash = ContentHash(g_replay);
         s.resolved.clear();
     });
@@ -1832,6 +1834,39 @@ void WithReplay(const std::function<void(Replay&)>& fn)
 {
     std::lock_guard lock(g_mutex);
     fn(g_replay);
+    ++g_edits;
+}
+
+std::uint64_t ReplayRevision()
+{
+    std::lock_guard lock(g_mutex);
+    const Replay& r = g_replay;
+    std::uint64_t h = 1469598103934665603ull;
+    for (const std::uint64_t v : {g_edits.load(), static_cast<std::uint64_t>(r.frames.size()), static_cast<std::uint64_t>(r.events.size()),
+                                  static_cast<std::uint64_t>(r.markers.size()), static_cast<std::uint64_t>(r.camera.size()),
+                                  static_cast<std::uint64_t>(r.names.size()), static_cast<std::uint64_t>(r.rerecords), r.created,
+                                  static_cast<std::uint64_t>(r.syncValidUntil)})
+        h = (h ^ v) * 1099511628211ull;
+    return h;
+}
+
+std::string ReplayBytes()
+{
+    std::lock_guard lock(g_mutex);
+    return g_replay.Serialize();
+}
+
+bool SetReplayBytes(const std::string& data, std::string* error)
+{
+    Replay r;
+    if (!r.Deserialize(data, error)) return false;
+    {
+        std::lock_guard lock(g_mutex);
+        g_replay = std::move(r);
+        ++g_edits;
+    }
+    Post([] { s.resolved.clear(); });       // Names may have moved: resolved again as they are used
+    return true;
 }
 
 bool LoadFile(const std::filesystem::path& path, std::string* error)
@@ -1847,6 +1882,7 @@ bool LoadFile(const std::filesystem::path& path, std::string* error)
         {
             std::lock_guard lock(g_mutex);
             g_replay = std::move(r);
+            ++g_edits;
             g_savedHash = ContentHash(g_replay);
         }
         s.resolved.clear();

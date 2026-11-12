@@ -10,6 +10,7 @@
 #include "runtime/mod_ui.h"
 #include "runtime/mod_io.h"
 #include "runtime/mod_world.h"
+#include "runtime/mod_tas.h"
 #include "sdk/SDK.hpp"
 #include "theme.h"
 #include "runtime/resolve.h"
@@ -708,6 +709,86 @@ namespace mirage::mods
 			if (m->Enabled() != (on != 0)) m->SetEnabled(on != 0);
 			return 1;
 		}
+		void* MIRAGE_CALL ImGuiContext(const char* version, uint32_t ioSize, uint32_t styleSize, uint32_t vertexSize,
+										 void** allocFn, void** freeFn, void** user)
+		{
+			if (!ImGui::GetCurrentContext()) return nullptr;
+			if (!version || std::strcmp(version, IMGUI_VERSION) != 0 || ioSize != sizeof(ImGuiIO) ||
+				styleSize != sizeof(ImGuiStyle) || vertexSize != sizeof(ImDrawVert)) {
+				static std::atomic<bool> told{false};
+				if (!told.exchange(true))
+					spdlog::warn("Mods: a mod built with ImGui {} asked for the menu's ImGui {}: refused (another version)",
+								 version ? version : "?", IMGUI_VERSION);
+				return nullptr;
+			}
+			ImGuiMemAllocFunc a = nullptr;
+			ImGuiMemFreeFunc f = nullptr;
+			void* u = nullptr;
+			ImGui::GetAllocatorFunctions(&a, &f, &u);
+			if (allocFn) *allocFn = reinterpret_cast<void*>(a);
+			if (freeFn) *freeFn = reinterpret_cast<void*>(f);
+			if (user) *user = u;
+			return ImGui::GetCurrentContext();
+		}
+
+		void MIRAGE_CALL SettingDraw(MirageSetting* h, float width)
+		{
+			if (ctl::Setting* s = SettingOf(h); s && ImGui::GetCurrentContext()) {
+				ImGui::PushID(s);
+				s->Show(width > 0.f ? width : ImGui::GetContentRegionAvail().x);
+				ImGui::PopID();
+			}
+		}
+
+		MirageSetting* MIRAGE_CALL SettingChoice(MirageModule* module, const char* name, const char* items, int32_t index,
+												 const char* tooltip)
+		{
+			std::vector<std::string> options;
+			for (const char* p = items; p && *p; p += std::strlen(p) + 1) options.emplace_back(p);
+			if (options.empty()) return nullptr;
+			return MakeSetting<ctl::Combo>(module, name, options, std::clamp<int>(index, 0, static_cast<int>(options.size()) - 1),
+										   std::string(Str(tooltip)));
+		}
+
+		void MIRAGE_CALL ReservedKeys(MirageMod* mod, const int32_t* vks, int32_t count)
+		{
+			if (!mod) return;
+			static std::mutex lock;
+			static std::map<std::string, std::vector<int>> byMod;
+			std::lock_guard guard(lock);
+			auto& keys = byMod[mod->id];
+			keys.assign(vks, vks + std::max(count, 0));
+			std::vector<int> all;
+			for (const auto& [id, k] : byMod) all.insert(all.end(), k.begin(), k.end());
+			modules::SetReservedKeys(std::move(all));
+		}
+
+		uint32_t MIRAGE_CALL ModuleList(char* buffer, uint32_t capacity)
+		{
+			std::string out = "[";
+			const auto quote = [](const std::string& s) {
+				std::string q = "\"";
+				for (char c : s) {
+					if (c == '"' || c == '\\') q += '\\';
+					if (static_cast<unsigned char>(c) >= 0x20) q += c;
+				}
+				return q + "\"";
+			};
+			modules::ForEach([&](modules::Tab& tab, Module& m) {
+				if (m.Hidden()) return;
+				if (out.size() > 1) out += ",";
+				out += "{\"name\":" + quote(m.Name()) + ",\"tab\":" + quote(tab.name) + ",\"enabled\":" +
+					   (m.Enabled() ? "true" : "false") + ",\"action\":" + (m.IsAction() ? "true" : "false") + "}";
+			});
+			out += "]";
+			if (buffer && capacity) {
+				const std::size_t n = std::min<std::size_t>(out.size(), capacity - 1);
+				std::memcpy(buffer, out.data(), n);
+				buffer[n] = '\0';
+			}
+			return static_cast<uint32_t>(out.size());
+		}
+
 		uint32_t MIRAGE_CALL ThemeColor(int32_t which)
 		{
 			const theme::MenuColors& t = theme::Menu();
@@ -786,6 +867,9 @@ namespace mirage::mods
 			SdkGlobals, ModuleState, ThemeColor,
 			game_api::PlayerStateCapture, game_api::PlayerStateApply, game_api::PlayerResetMovement, ModuleSetState,
 			world::DrawActive, world::DrawSet, world::DrawStyle, world::DrawStats, world::WorldToScreen, world::CameraGet,
+			ImGuiContext, SettingDraw, SettingChoice, ReservedKeys,
+			tasapi::Available, tasapi::Status, tasapi::SetOptions, tasapi::Command, tasapi::Record, tasapi::ReplayRevision,
+			tasapi::ReplayGet, tasapi::ReplaySet, tasapi::File, tasapi::Folder, tasapi::Preflight, ModuleList,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

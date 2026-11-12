@@ -342,7 +342,7 @@ std::uint64_t Replay::SyncHash() const
     return sync.empty() ? 0 : Fnv(sync.data(), sync.size() * sizeof(Sync));
 }
 
-bool Replay::Save(const std::filesystem::path& path, std::string* error) const
+std::string Replay::Serialize() const
 {
     Writer w;
     w.Raw(kMagic, sizeof kMagic);
@@ -421,7 +421,12 @@ bool Replay::Save(const std::filesystem::path& path, std::string* error) const
     w.Begin(kEnd);
     w.Put(checksum);
     w.End();
+    return std::string(w.Buffer().data(), w.Buffer().size());
+}
 
+bool Replay::Save(const std::filesystem::path& path, std::string* error) const
+{
+    const std::string data = Serialize();
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
     // Write a temporary file and swap it in, so a crash mid-write never destroys the previous version.
@@ -430,7 +435,7 @@ bool Replay::Save(const std::filesystem::path& path, std::string* error) const
     {
         std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
         if (!out) { Fail(error, "can't write " + tmp.string()); return false; }
-        out.write(w.Buffer().data(), static_cast<std::streamsize>(w.Buffer().size()));
+        out.write(data.data(), static_cast<std::streamsize>(data.size()));
         if (!out) { Fail(error, "write failed: " + tmp.string()); return false; }
     }
     std::filesystem::rename(tmp, path, ec);
@@ -443,6 +448,11 @@ bool Replay::Load(const std::filesystem::path& path, std::string* error)
     std::ifstream in(path, std::ios::binary);
     if (!in) { Fail(error, "can't open " + path.string()); return false; }
     const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    return Deserialize(data, error);
+}
+
+bool Replay::Deserialize(const std::string& data, std::string* error)
+{
 
     if (data.size() < 8 || std::memcmp(data.data(), kMagic, sizeof kMagic) != 0) {
         Fail(error, "not a .merp file");

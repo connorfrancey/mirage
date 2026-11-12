@@ -431,6 +431,22 @@ typedef struct MirageCamera {
     float fov;                  /* Degrees */
 } MirageCamera;
 
+/* tas_command: what to do (the runtime's TAS engine) */
+#define MIRAGE_TAS_PLAY 0
+#define MIRAGE_TAS_RESTART 1
+#define MIRAGE_TAS_STOP 2
+#define MIRAGE_TAS_TOGGLE_PAUSE 3
+#define MIRAGE_TAS_ADVANCE 4          /* arg: frames */
+#define MIRAGE_TAS_TAKE_OVER 5
+#define MIRAGE_TAS_GOTO 6             /* arg: the frame */
+#define MIRAGE_TAS_FRAME_BACK 7       /* arg: frames */
+#define MIRAGE_TAS_GOTO_BOOKMARK 8    /* arg: +1 next, -1 previous */
+#define MIRAGE_TAS_REWIND 9
+#define MIRAGE_TAS_KEY_CAMERA 10      /* arg: the frame: a camera key from the current view */
+#define MIRAGE_TAS_CLEAR 11
+#define MIRAGE_TAS_RESET_SYNC 12
+#define MIRAGE_TAS_UNSAVED 13         /* Returns 1 when the replay has changes not saved to a file */
+
 /* input_key_state: a key as the game gets it */
 typedef struct MirageKeyState {
     uint32_t size;          /* sizeof(MirageKeyState): set it before the call */
@@ -660,6 +676,40 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* world_to_screen)(float x, float y, float z, float* sx, float* sy);
     /* The player's view as the game has it this tick; 0: no camera yet. Any thread. */
     int32_t(MIRAGE_CALL* camera_get)(MirageCamera* out);
+
+    /* ---- The menu's ImGui for a native mod built against the same ImGui (step 9) -----------------------------------
+     * For a mod whose UI is more than MirageUi has (a timeline, a file browser): the menu's ImGui context, when the mod
+     * was built with the same ImGui version and the same struct sizes (else NULL, with the reason in the log). The mod
+     * calls ImGui::SetCurrentContext(ctx) and ImGui::SetAllocatorFunctions(alloc, free, user) in each of its render
+     * callbacks (api/mirage/imgui.hpp does it). MirageUi is the stable way: this one ties the mod to an ImGui version. */
+    void*(MIRAGE_CALL* imgui_context)(const char* version, uint32_t io_size, uint32_t style_size, uint32_t vertex_size,
+                                       void** alloc_fn, void** free_fn, void** user);
+    /* A setting's own control, drawn where the panel is (on_panel; a setting set_visible 0 is only drawn this way) */
+    void(MIRAGE_CALL* setting_draw)(MirageSetting* setting, float width);
+    /* A choice (a combo box): `items` like MirageUi::combo's ("A\0B\0"), `index` the default */
+    MirageSetting*(MIRAGE_CALL* setting_choice)(MirageModule* module, const char* name, const char* items, int32_t index,
+                                                 const char* tooltip);
+    /* Keys the mod is using right now (a TAS session's controls): the menu's own hotkeys don't fire on them. Replaces
+     * the mod's previous set; count 0 clears it. Any thread. */
+    void(MIRAGE_CALL* reserved_keys)(MirageMod* mod, const int32_t* vks, int32_t count);
+
+    /* ---- The TAS engine (step 9): the runtime's (src/tas), for its UI. Options and status are JSON; the replay is in
+     * the .merp format both ways. Any thread (commands run on the game thread). */
+    int32_t(MIRAGE_CALL* tas_available)(void);                                   /* The engine's hooks were found */
+    uint32_t(MIRAGE_CALL* tas_status)(char* json, uint32_t capacity);            /* Full length */
+    void(MIRAGE_CALL* tas_set_options)(const char* json);
+    int32_t(MIRAGE_CALL* tas_command)(int32_t command, int64_t arg);             /* MIRAGE_TAS_* */
+    void(MIRAGE_CALL* tas_record)(int32_t start, const char* command, const char* map, const char* checkpoint);
+    uint64_t(MIRAGE_CALL* tas_replay_revision)(void);                            /* Changes whenever the replay does */
+    uint32_t(MIRAGE_CALL* tas_replay_get)(char* data, uint32_t capacity);        /* Its size; copied only when it fits */
+    int32_t(MIRAGE_CALL* tas_replay_set)(const char* data, uint32_t size);       /* 1: it replaced the replay */
+    int32_t(MIRAGE_CALL* tas_file)(int32_t save, const char* path, char* error, uint32_t capacity);  /* 1: done */
+    uint32_t(MIRAGE_CALL* tas_folder)(int32_t autosaves, char* path, uint32_t capacity);   /* replays\ or its autosaves */
+    uint32_t(MIRAGE_CALL* tas_preflight)(char* json, uint32_t capacity);         /* What may desync a playback */
+
+    /* Every module in the menu (every mod's and the runtime's own), as JSON: [{"name", "tab", "enabled", "action"}, ...]
+     * in the menu's order. Copies up to `capacity` bytes, returns the full length. Any thread. */
+    uint32_t(MIRAGE_CALL* module_list)(char* json, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

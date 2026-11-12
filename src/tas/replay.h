@@ -146,6 +146,9 @@ struct Replay {
     // Identity of the result: FNV-1a over the sync data.
     std::uint64_t SyncHash() const;
 
+    // The .merp format in memory (what Save writes and Load reads): how the TAS engine and its UI mod exchange it
+    std::string Serialize() const;
+    bool Deserialize(const std::string& data, std::string* error);
     bool Save(const std::filesystem::path& path, std::string* error) const;
     bool Load(const std::filesystem::path& path, std::string* error);
     bool ExportJson(const std::filesystem::path& path, std::string* error) const;
