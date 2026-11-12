@@ -152,7 +152,6 @@ memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module
 # World
 
 # Visual
-memenu_feature(info_lines        visual GAME STAGE 7 FILES features/visual/info_lines.cpp)
 
 # Debug
 memenu_feature(collision_view    debug GAME STAGE 11 FILES features/debug/collision_view.cpp)

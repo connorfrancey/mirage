@@ -40,9 +40,6 @@
 #include "game/debug_world.h"
 #include "game/static_world.h"
 #endif
-#if MEMENU_FEATURE_INFO_LINES
-#include "features/visual/info_lines.h"
-#endif
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
 #endif
@@ -430,17 +427,26 @@ Expectation ExpectationFor(Module& m)
                 [] { auto* w = game::World();
                      return Expect(w && std::fabs(w->TimeDilation - 1.f) < 0.01f, "TimeDilation not back to 1"); }};
     }
-#if MEMENU_FEATURE_INFO_LINES
     if (name == "Info Lines") {
-        // The built-in example (a profile without a file), never the player's own: it must parse and evaluate without a
-        // problem, draw lines with a player in the level, and its values must be the game's (x through fmt).
+        // A native first-party mod (mods/memenu-info-lines): what it drew comes from what it shares (status.*), a line
+        // is evaluated by asking it (memenu/info_lines.eval -> eval.*). The built-in example (a profile without a file),
+        // never the player's own: it must parse and evaluate without a problem, draw lines with a player in the level,
+        // and its values must be the game's (x through fmt).
         static std::string savedProfile;
         static bool savedExpanded = false;
-        static unsigned long long editorFramesBefore = 0;
+        static int editorFramesBefore = 0;
         static constexpr const char* kTestProfile = "selftest (built-in example)";
+        static constexpr const char* kLine = "{x:.0f}|{statename}|{map}";
+        const auto text = [](const char* key) {
+            char v[512]{};
+            mirage::mods::game_api::ShareGet("memenu-info-lines", key, v, sizeof v);
+            return std::string(v);
+        };
         // The setting is read on the render thread: changed there too.
         return {[&m] {
-                    editorFramesBefore = info_lines::EditorFrames();
+                    editorFramesBefore = SharedInt("memenu-info-lines", "status.editor_frames");
+                    mirage::mods::Share("info_lines.open_for_test", "1");
+                    mirage::mods::Share("info_lines.eval", kLine);
                     hooks::RunOnRenderThread([&m] {
                         if (auto* t = dynamic_cast<ctl::Text*>(m.FindSetting("Profile"))) {
                             savedProfile = t->Get();
@@ -448,37 +454,34 @@ Expectation ExpectationFor(Module& m)
                         }
                         savedExpanded = m.expanded;
                         m.expanded = true;                      // Its editor is drawn while the menu is open
-                        info_lines::SetEditorOpenForTest(true);
                     });
                 },
-                [] { return WithPlayer([](ATdPlayerPawn* p, ATdPlayerController*) -> std::string {
-                    const info_lines::Status st = info_lines::LastStatus();
-                    if (st.frames == 0) return "it never drew";
-                    if (st.profile != kTestProfile) return "it shows profile '" + st.profile + "', not the test's";
-                    if (!st.errors.empty())
-                        return "the example has problems: line " + std::to_string(st.errors[0].line) + ": " + st.errors[0].message;
-                    if (st.lines == 0) return "the example drew no lines with a player in the level";
-                    std::vector<hud::Error> errors;
-                    const std::string text = info_lines::Evaluate("{x:.0f}|{statename}|{map}", &errors);
-                    if (!errors.empty()) return "evaluating values: " + errors[0].message;
-                    const std::size_t bar = text.find('|');
-                    const double x = std::atof(text.substr(0, bar).c_str());
+                [text] { return WithPlayer([text](ATdPlayerPawn* p, ATdPlayerController*) -> std::string {
+                    WaitFor(2.0, [text] { return text("status.profile") == kTestProfile && text("eval.of") == kLine; });
+                    if (SharedInt("memenu-info-lines", "status.frames") == 0) return "it never drew";
+                    if (text("status.profile") != kTestProfile) return "it shows profile '" + text("status.profile") + "', not the test's";
+                    if (SharedInt("memenu-info-lines", "status.errors") != 0) return "the example has problems: " + text("status.first_error");
+                    if (SharedInt("memenu-info-lines", "status.lines") == 0) return "the example drew no lines with a player in the level";
+                    if (!text("eval.error").empty()) return "evaluating values: " + text("eval.error");
+                    const std::string t = text("eval.text");
+                    const std::size_t bar = t.find('|');
+                    const double x = std::atof(t.substr(0, bar).c_str());
                     if (std::fabs(x - p->Location.X) > 100.0)
-                        return "{x} is " + text.substr(0, bar) + ", the player is at X " + std::to_string(p->Location.X);
-                    if (text.find("|?") != std::string::npos || text.back() == '|')
-                        return "a value is missing: '" + text + "'";
+                        return "{x} is " + t.substr(0, bar) + ", the player is at X " + std::to_string(p->Location.X);
+                    if (t.find("|?") != std::string::npos || t.empty() || t.back() == '|') return "a value is missing: '" + t + "'";
                     return std::string(); }); },
                 [&m] {
                     hooks::RunOnRenderThread([&m] {
                         if (auto* t = dynamic_cast<ctl::Text*>(m.FindSetting("Profile"))) t->Set(savedProfile);
                         m.expanded = savedExpanded;
-                        info_lines::SetEditorOpenForTest(false);
                     });
-                    if (info_lines::EditorFrames() == editorFramesBefore) return std::string("its editor was never drawn");
+                    mirage::mods::Share("info_lines.open_for_test", "");
+                    mirage::mods::Share("info_lines.eval", "");
+                    if (SharedInt("memenu-info-lines", "status.editor_frames") == editorFramesBefore)
+                        return std::string("its editor was never drawn");
                     return std::string();
                 }};
     }
-#endif
 #if MEMENU_FEATURE_MOD_MANAGER
     if (name == "Mod Manager") {
         // Its window is drawn while the menu is open, and lists every mod found (the first-party ones at least)

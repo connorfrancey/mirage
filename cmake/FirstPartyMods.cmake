@@ -9,7 +9,7 @@
 # in MIRAGE_MOD_ALLOWED_LIBS. Never the menu's sources or include paths: what a mod needs from the menu goes into the
 # API (cmake/EmbedMods.cmake also refuses a quoted #include of anything else).
 
-set(MIRAGE_MOD_ALLOWED_LIBS nlohmann_json::nlohmann_json mirage::sdk)   # The SDK is public (sdk/, api/mirage/sdk.hpp)
+set(MIRAGE_MOD_ALLOWED_LIBS nlohmann_json::nlohmann_json mirage::sdk fmt::fmt)   # The SDK is public (sdk/, api/mirage/sdk.hpp)
 
 function(mirage_native_mod id)
   cmake_parse_arguments(PARSE_ARGV 1 M "" "" "SOURCES;LIBS")

@@ -1,0 +1,48 @@
+# A first-party mod: part of the menu, written against the public API and SDK only (native, C++). It ships inside the
+# menu's DLL and is written to its mods folder at startup: edit a copy under another id, not this folder.
+# Profiles: hud\<name>.txt next to this file.
+id = "memenu-info-lines"
+name = "Info Lines"
+version = "1.0.0"
+description = "Your own lines of text on the screen: live values, math, colors, conditions"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+entry = "memenu-info-lines.dll"
+
+[settings.profile]
+type = "string"
+name = "Profile"
+module = "Info Lines"
+default = "default"
+
+[settings.scale]
+type = "float"
+name = "Scale"
+module = "Info Lines"
+description = "Every section's size (on top of its own scale)"
+default = 1.0
+min = 0.5
+max = 3.0
+format = "%.2fx"
+
+[settings.editor_lines]
+type = "int"
+name = "Editor height"
+module = "Info Lines"
+default = 16
+min = 6
+max = 40
+format = "%d lines"
+
+[settings.hide_in_menu]
+type = "bool"
+name = "Hide while the menu is open"
+module = "Info Lines"
+default = false
+
+[settings.show_errors]
+type = "bool"
+name = "Show problems on screen"
+module = "Info Lines"
+description = "A red note at the top while the profile has errors (handy when editing it outside)"
+default = true

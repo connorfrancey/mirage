@@ -1,4 +1,4 @@
-#include "hud/template.h"
+#include "memenu-info-lines/template.h"
 
 #include <gtest/gtest.h>
 

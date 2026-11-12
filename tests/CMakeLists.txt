@@ -54,7 +54,7 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/core/string_cache.cpp
         ${CMAKE_SOURCE_DIR}/src/core/hardware.cpp
         ${CMAKE_SOURCE_DIR}/src/core/shell.cpp
-        ${CMAKE_SOURCE_DIR}/src/hud/template.cpp)
+        ${CMAKE_SOURCE_DIR}/mods/memenu-info-lines/template.cpp)   # A native first-party mod's pure part
 target_include_directories(memenu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/api ${CMAKE_SOURCE_DIR}/mods)
 target_compile_definitions(memenu_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MEMENU_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")

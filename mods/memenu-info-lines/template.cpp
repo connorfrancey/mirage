@@ -1,4 +1,4 @@
-#include "hud/template.h"
+#include "template.h"
 
 #include <fmt/format.h>
 

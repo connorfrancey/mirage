@@ -1,37 +1,26 @@
-#include "features/visual/info_lines.h"
+// Info Lines: the player's own lines of text on the screen, written in the language of template.h. Profiles are text
+// files in this mod's hud\<name>.txt, edited in the menu (or any editor: a changed file is read again). A profile that
+// has no file yet is the built-in example; it is written only once it is edited.
+//
+// A native first-party mod: the public API (mirage/api.h) and SDK (mirage/sdk.hpp) only. What it drew is shared for the
+// menu's self-test (mirage.shared("memenu-info-lines", "status.*")), which also asks it to evaluate a line
+// (memenu/info_lines.eval) and to draw its editor's folded parts open (memenu/info_lines.open_for_test).
+#include "template.h"
 
-#include "core/module.h"
-#include "core/notify.h"
-#include "font.h"
-#include "game/game.h"
-#include "game/player_state.h"
-#include "gui.h"
-#include "paths.h"
-#include "theme.h"
-#include "runtime/mod_game.h"
-
-#include <Windows.h>
-#include <shellapi.h>
-#include <imgui.h>
-#include "sdk/SDK.hpp"
-#include <spdlog/spdlog.h>
+#include "mirage/sdk.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cfloat>
-#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <ctime>
-#include <filesystem>
-#include <fstream>
 #include <functional>
 #include <mutex>
-#include <sstream>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
-// Info Lines: the player's own lines of text on the screen, written in the language of hud/template.h. Profiles are
-// text files in memenu\hud\<name>.txt, edited in the menu (or any editor: a changed file is read again). A profile
-// that has no file yet is the built-in example; it is written only once it is edited.
 namespace {
 
 using hud::Value;
@@ -195,16 +184,19 @@ const VarDef* FindVar(std::string_view name)
     return it == byName.end() ? nullptr : it->second;
 }
 
-hud::Color ToColor(const ImVec4& c)
+// Colors: the API packs them 0xAABBGGRR, the template language 0xRRGGBBAA
+hud::Color FromApi(uint32_t c)
 {
-    const auto ch = [](float v) { return static_cast<hud::Color>(std::clamp(std::lround(v * 255.f), 0L, 255L)); };
-    return (ch(c.x) << 24) | (ch(c.y) << 16) | (ch(c.z) << 8) | ch(c.w);
+    return ((c & 0xFFu) << 24) | (((c >> 8) & 0xFFu) << 16) | (((c >> 16) & 0xFFu) << 8) | ((c >> 24) & 0xFFu);
 }
-
-ImU32 ToImGui(hud::Color c, float alpha = 1.f)
+uint32_t ToApi(hud::Color c, float alpha = 1.f)
 {
-    const auto a = static_cast<int>(static_cast<float>(c & 0xFF) * alpha);
-    return IM_COL32((c >> 24) & 0xFF, (c >> 16) & 0xFF, (c >> 8) & 0xFF, std::clamp(a, 0, 255));
+    const auto a = std::clamp(static_cast<int>(static_cast<float>(c & 0xFF) * alpha), 0, 255);
+    return ((c >> 24) & 0xFFu) | (((c >> 16) & 0xFFu) << 8) | (((c >> 8) & 0xFFu) << 16) | (static_cast<uint32_t>(a) << 24);
+}
+uint32_t Rgba(int r, int g, int b, int a = 255)
+{
+    return static_cast<uint32_t>(r) | (static_cast<uint32_t>(g) << 8) | (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(a) << 24);
 }
 
 class FrameContext final : public hud::Context {
@@ -226,18 +218,18 @@ public:
             error = "on(\"Module name\") takes the name of a module";
             return true;
         }
-        Module* m = modules::Find(args[0].text);
-        if (!m) error = "there is no module '" + args[0].text + "'";
-        else out = Value::Bool(m->Enabled());
+        const int state = mirage::Api().module_state(args[0].text.c_str());
+        if (state < 0) error = "there is no module '" + args[0].text + "'";
+        else out = Value::Bool(state == 1);
         return true;
     }
 
     bool NamedColor(std::string_view name, hud::Color& out) const override
     {
-        const theme::MenuColors& t = theme::Menu();
-        if (name == "accent") out = ToColor(t.accent);
-        else if (name == "text") out = ToColor(t.text);
-        else if (name == "dim") out = ToColor(t.textDim);
+        const MirageApi& api = mirage::Api();
+        if (name == "accent") out = FromApi(api.theme_color(MIRAGE_THEME_ACCENT));
+        else if (name == "text") out = FromApi(api.theme_color(MIRAGE_THEME_TEXT));
+        else if (name == "dim") out = FromApi(api.theme_color(MIRAGE_THEME_TEXT_DIM));
         else return false;
         return true;
     }
@@ -245,13 +237,6 @@ public:
 private:
     const Frame& f_;
 };
-
-// Shared with info_lines::LastStatus / Evaluate (the self-test thread)
-std::atomic<bool> g_openForTest{false};      // info_lines::SetEditorOpenForTest
-std::atomic<unsigned long long> g_editorFrames{0};
-std::mutex g_shareMutex;
-info_lines::Status g_status;
-Frame g_lastFrame;
 
 // Highest value of the last 2.75 s (like the Speedometer's top speed)
 struct Peak {
@@ -264,31 +249,30 @@ struct Peak {
     }
 };
 
-std::filesystem::path Folder() { return paths::Dir() / "hud"; }
+const char* const kFolder = "hud";
+std::string PathOf(const std::string& name) { return std::string(kFolder) + "/" + name + ".txt"; }
 
-std::string ReadFile(const std::filesystem::path& p)
+double SharedNumber(const char* mod, const char* key)
 {
-    std::ifstream in(p, std::ios::binary);
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
+    char v[48]{};
+    mirage::Api().share_get(mod, key, v, sizeof v);
+    return std::atof(v);
 }
-
-int ResizeCallback(ImGuiInputTextCallbackData* data)
+std::string SharedText(const char* mod, const char* key)
 {
-    if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
-        auto* s = static_cast<std::string*>(data->UserData);
-        s->resize(static_cast<std::size_t>(data->BufTextLen));
-        data->Buf = s->data();
-    }
-    return 0;
+    char v[512]{};
+    mirage::Api().share_get(mod, key, v, sizeof v);
+    return v;
 }
+void Share(const char* key, const std::string& value) { mirage::Api().share_set(mirage::Mod(), key, value.c_str()); }
 
-class InfoLines final : public Module {
+class InfoLines final : public mirage::Module {
 public:
     InfoLines() : Module("Info Lines", "Visual", "Your own lines of text on the screen: live values, math, colors, conditions", 30)
     {
-        profileName.VisibleIf([] { return false; });     // Picked with the editor's list
+        mirage::On(MIRAGE_EVENT_LEVEL_LOAD, [this](const MirageEvent& e) { loading_ = e.value == 0; });
+        mirage::On(MIRAGE_EVENT_DEATH, [this](const MirageEvent& e) { if (e.value == 1) ++deaths_; });
+        mirage::On(MIRAGE_EVENT_TICK, [this](const MirageEvent&) { ++ticks_; });
     }
 
     void OnEnable() override
@@ -299,19 +283,15 @@ public:
         topHeight_ = {};
     }
 
-    void OnDisable() override
-    {
-        std::lock_guard lock(g_shareMutex);
-        g_status = {};
-    }
+    void OnDisable() override { frames_ = 0; }
 
     // Game thread: copy what the lines can show
     void OnTick() override
     {
         GameData d;
-        auto* pawn = game::Pawn();
-        auto* controller = game::Controller();
-        auto* world = game::World();
+        auto* pawn = mirage::sdk::Pawn();
+        auto* controller = mirage::sdk::Controller();
+        auto* world = mirage::sdk::World();
         if (pawn && controller) {
             d.hasPawn = true;
             d.x = pawn->Location.X;
@@ -345,12 +325,11 @@ public:
         }
         d.topSpeed = topSpeed_.value;
         d.topHeight = topHeight_.value;
-        d.map = game::MapName();
-        d.loading = game::IsLoading();
-        const game::Status st = game::GetStatus();
-        d.deaths = st.deaths;
-        d.ticks = st.ticks;
-        d.loads = player_state::LoadCount();
+        d.map = mirage::sdk::MapName();
+        d.loading = loading_;
+        d.deaths = deaths_;
+        d.ticks = ticks_;
+        d.loads = static_cast<unsigned>(SharedNumber("memenu", "save_state.loads"));    // The menu's Save State
 
         std::lock_guard lock(gameMutex_);
         game_ = std::move(d);
@@ -366,36 +345,49 @@ public:
         renderErrors_ = errors;
 
         std::size_t lines = 0;
-        const bool hidden = hideInMenu && gui::visible;
-        ImDrawList* dl = ImGui::GetBackgroundDrawList();
+        const bool hidden = mirage::Get<bool>("hide_in_menu") && frame.menuOpen;
         for (const auto& s : sections) {
             lines += s.lines.size();
-            if (!hidden) DrawSection(s, dl);
+            if (!hidden) DrawSection(s);
         }
-        if (showErrors && !hidden) DrawErrorNote(dl);
+        if (mirage::Get<bool>("show_errors") && !hidden) DrawErrorNote();
 
-        std::lock_guard lock(g_shareMutex);
-        g_lastFrame = frame;
-        g_status.frames++;
-        g_status.sections = sections.size();
-        g_status.lines = lines;
-        g_status.profile = loadedName_;
-        g_status.errors = profile_.Errors();
-        g_status.errors.insert(g_status.errors.end(), errors.begin(), errors.end());
+        // For the self-test: what it drew, and a line it was asked to evaluate with this frame's values
+        ++frames_;
+        std::vector<hud::Error> all = profile_.Errors();
+        all.insert(all.end(), errors.begin(), errors.end());
+        Share("status.frames", std::to_string(frames_));
+        Share("status.sections", std::to_string(sections.size()));
+        Share("status.lines", std::to_string(lines));
+        Share("status.profile", loadedName_);
+        Share("status.errors", std::to_string(all.size()));
+        Share("status.first_error", all.empty() ? std::string() : "line " + std::to_string(all[0].line) + ": " + all[0].message);
+        const std::string eval = SharedText("memenu", "info_lines.eval");
+        if (!eval.empty()) {
+            std::vector<hud::Error> evalErrors;
+            Share("eval.text", hud::PlainText(hud::RenderLine(eval, ctx, 0xFFFFFFFF, &evalErrors)));
+            Share("eval.error", evalErrors.empty() ? std::string() : evalErrors[0].message);
+            Share("eval.of", eval);
+        }
+    }
+
+    void OnPanel() override
+    {
+        mirage::SetVisible("profile", false);     // Picked with the editor's list
+        DrawEditor(mirage::Ui().content_width());
     }
 
 private:
-    // ---- Profile files ------------------------------------------------------------------------------------------------
-    static std::filesystem::path PathOf(const std::string& name) { return Folder() / (name + ".txt"); }
+    static bool OpenForTest() { return SharedText("memenu", "info_lines.open_for_test") == "1"; }
 
+    // ---- Profile files ------------------------------------------------------------------------------------------------
     void Load(const std::string& name)
     {
         loadedName_ = name;
-        const auto path = PathOf(name);
-        std::error_code ec;
-        fromFile_ = std::filesystem::exists(path, ec);
-        text_ = fromFile_ ? ReadFile(path) : std::string(kExample);
-        mtime_ = fromFile_ ? std::filesystem::last_write_time(path, ec) : std::filesystem::file_time_type{};
+        std::string text;
+        fromFile_ = mirage::ReadFile(PathOf(name), text);
+        text_ = fromFile_ ? text : std::string(kExample);
+        stamp_ = fromFile_ ? mirage::Api().file_stamp(mirage::Mod(), PathOf(name).c_str()) : 0;
         dirty_ = false;
         Reparse();
     }
@@ -408,45 +400,38 @@ private:
 
     bool Save()
     {
-        std::error_code ec;
-        std::filesystem::create_directories(Folder(), ec);
-        const auto path = PathOf(loadedName_);
-        {
-            std::ofstream out(path, std::ios::binary | std::ios::trunc);
-            out << text_;
-            if (!out) {
-                notify::Push("Info Lines: could not save " + path.string());
-                spdlog::warn("Info Lines: could not write {}", path.string());
-                return false;
-            }
+        if (!mirage::WriteFile(PathOf(loadedName_), text_)) {
+            mirage::Api().notify(mirage::Mod(), ("Info Lines: could not save " + PathOf(loadedName_)).c_str());
+            mirage::Warn("could not write " + PathOf(loadedName_));
+            return false;
         }
-        mtime_ = std::filesystem::last_write_time(path, ec);
+        stamp_ = mirage::Api().file_stamp(mirage::Mod(), PathOf(loadedName_).c_str());
         fromFile_ = true;
         dirty_ = false;
         return true;
     }
 
-    // Once a frame: the picked profile is the loaded one, edits are saved after a moment, a file changed outside is read
-    // again.
+    // Once a frame: the picked profile is the loaded one, edits are saved after a moment, a file changed outside is
+    // read again
     void Sync()
     {
-        if (loadedName_ != profileName.Get() || profileName.Get().empty()) {
-            if (profileName.Get().empty()) profileName.Set("default");
-            if (dirty_) Save();
-            Load(profileName.Get());
+        std::string picked = mirage::Get<std::string>("profile");
+        if (picked.empty()) {
+            picked = "default";
+            mirage::Set("profile", picked);
         }
-        const double now = ImGui::GetTime();
-        if (dirty_ && now - lastEdit_ > 0.8) Save();
-        if (!dirty_ && now - lastCheck_ > 1.0) {
+        if (loadedName_ != picked) {
+            if (dirty_) Save();
+            Load(picked);
+        }
+        const float now = mirage::Ui().time();
+        if (dirty_ && now - lastEdit_ > 0.8f) Save();
+        if (!dirty_ && now - lastCheck_ > 1.f) {
             lastCheck_ = now;
-            std::error_code ec;
-            const auto path = PathOf(loadedName_);
-            if (std::filesystem::exists(path, ec)) {
-                const auto t = std::filesystem::last_write_time(path, ec);
-                if (!ec && (!fromFile_ || t != mtime_)) {
-                    Load(loadedName_);
-                    spdlog::info("Info Lines: {} changed, read again", path.string());
-                }
+            const uint64_t t = mirage::Api().file_stamp(mirage::Mod(), PathOf(loadedName_).c_str());
+            if (t && (!fromFile_ || t != stamp_)) {
+                Load(loadedName_);
+                mirage::Info(PathOf(loadedName_) + " changed, read again");
             }
         }
     }
@@ -454,9 +439,7 @@ private:
     std::vector<std::string> ProfileNames() const
     {
         std::vector<std::string> names{"default"};
-        std::error_code ec;
-        for (const auto& e : std::filesystem::directory_iterator(Folder(), ec))
-            if (e.path().extension() == ".txt") names.push_back(e.path().stem().string());
+        for (const std::string& f : mirage::ListFiles(kFolder, ".txt")) names.push_back(f.substr(0, f.size() - 4));
         names.push_back(loadedName_);
         std::sort(names.begin(), names.end());
         names.erase(std::unique(names.begin(), names.end()), names.end());
@@ -470,38 +453,39 @@ private:
             std::lock_guard lock(gameMutex_);
             f.game = game_;
         }
-        const ImGuiIO& io = ImGui::GetIO();
-        f.fps = io.Framerate;
-        f.frameMs = io.Framerate > 0.f ? 1000.0 / io.Framerate : 0.0;
-        f.menuOpen = gui::visible;
+        const MirageApi& api = mirage::Api();
+        f.fps = api.frame_rate();
+        f.frameMs = f.fps > 0.0 ? 1000.0 / f.fps : 0.0;
+        f.menuOpen = api.menu_open() != 0;
         const std::time_t t = std::time(nullptr);
         localtime_s(&f.local, &t);
-        // The Speedrun Timer is a mod (mods/memenu-speedrun): its run, as it shares it
-        const auto shared = [](const char* name) {
-            char v[48]{};
-            mirage::mods::game_api::ShareGet("memenu-speedrun", name, v, sizeof v);
-            return std::atof(v);
-        };
-        f.runTime = shared("run.lrt");
-        f.runRta = shared("run.rta");
+        f.runTime = SharedNumber("memenu-speedrun", "run.lrt");     // The Speedrun Timer mod's run
+        f.runRta = SharedNumber("memenu-speedrun", "run.rta");
         return f;
     }
 
     // ---- Drawing ------------------------------------------------------------------------------------------------------
-    void DrawSection(const hud::RenderedSection& s, ImDrawList* dl) const
+    static float TextWidth(const std::string& text, float size)
+    {
+        float w = 0.f, h = 0.f;
+        mirage::Api().text_size_sized(text.c_str(), size, &w, &h);
+        return w;
+    }
+
+    void DrawSection(const hud::RenderedSection& s) const
     {
         if (s.lines.empty()) return;
         const hud::SectionStyle& st = s.style;
-        const ImGuiIO& io = ImGui::GetIO();
-        ImFont* font = ImGui::GetFont();
-        const float scale = st.scale * globalScale;
-        const float size = ImGui::GetFontSize() * scale;
+        float W = 0.f, H = 0.f;
+        mirage::Api().screen_size(&W, &H);
+        const float scale = st.scale * mirage::Get<float>("scale");
+        const float size = FontSize() * scale;
         const float gap = size * 0.8f;
 
         const auto width = [&](const std::vector<hud::Segment>& segs) {
             float w = 0.f;
             for (const auto& seg : segs)
-                w += seg.bar ? seg.width * scale : font->CalcTextSizeA(size, FLT_MAX, 0.f, seg.text.c_str()).x;
+                w += seg.bar ? seg.width * scale : TextWidth(seg.text, size);
             return w;
         };
 
@@ -527,7 +511,7 @@ private:
         const float pad = st.padding * scale;
         const float boxW = contentW + 2.f * pad, boxH = contentH + 2.f * pad;
 
-        const float margin = 10.f, W = io.DisplaySize.x, H = io.DisplaySize.y;
+        const float margin = 10.f;
         float x = margin, y = margin;
         using A = hud::Anchor;
         switch (st.anchor) {
@@ -548,8 +532,8 @@ private:
         y = std::floor(y + st.offsetY);
 
         if (st.background > 0.f)
-            dl->AddRectFilled({x, y}, {x + boxW, y + boxH}, IM_COL32(0, 0, 0, static_cast<int>(st.background * 255.f)),
-                              4.f * scale);
+            mirage::Api().draw_rect_rounded(x, y, x + boxW, y + boxH, Rgba(0, 0, 0, static_cast<int>(st.background * 255.f)),
+                                            4.f * scale, 0.f);
 
         const float x0 = x + pad;
         float ly = y + pad;
@@ -560,136 +544,146 @@ private:
                 if (st.align == hud::Align::Center) lx = x0 + (contentW - m[i].left) * 0.5f;
                 else if (st.align == hud::Align::Right) lx = x0 + contentW - m[i].left;
             }
-            DrawSegments(line.left, lx, ly, size, scale, st, dl, font);
-            if (line.hasRight) DrawSegments(line.right, x0 + contentW - m[i].right, ly, size, scale, st, dl, font);
+            DrawSegments(line.left, lx, ly, size, scale, st);
+            if (line.hasRight) DrawSegments(line.right, x0 + contentW - m[i].right, ly, size, scale, st);
             ly += size + spacing;
         }
     }
 
-    static void DrawSegments(const std::vector<hud::Segment>& segs, float x, float y, float size, float scale,
-                             const hud::SectionStyle& st, ImDrawList* dl, ImFont* font)
+    // The menu's text size (the API draws with the menu's font)
+    static float FontSize()
     {
+        float w = 0.f, h = 0.f;
+        mirage::Ui().text_size("A", &w, &h);
+        return h > 0.f ? h : 16.f;
+    }
+
+    static void DrawSegments(const std::vector<hud::Segment>& segs, float x, float y, float size, float scale,
+                             const hud::SectionStyle& st)
+    {
+        const MirageApi& api = mirage::Api();
         x = std::floor(x);
         for (const auto& seg : segs) {
             if (seg.bar) {
                 const float w = seg.width * scale, h = std::max(3.f, size * 0.55f);
                 const float by = std::floor(y + (size - h) * 0.5f);
-                dl->AddRectFilled({x, by}, {x + w, by + h}, IM_COL32(0, 0, 0, 140), 2.f);
+                api.draw_rect_rounded(x, by, x + w, by + h, Rgba(0, 0, 0, 140), 2.f, 0.f);
                 if (seg.fraction > 0.f)
-                    dl->AddRectFilled({x + 1.f, by + 1.f}, {x + 1.f + (w - 2.f) * seg.fraction, by + h - 1.f},
-                                      ToImGui(seg.color), 1.5f);
+                    api.draw_rect_rounded(x + 1.f, by + 1.f, x + 1.f + (w - 2.f) * seg.fraction, by + h - 1.f, ToApi(seg.color), 1.5f, 0.f);
                 x += w;
                 continue;
             }
             const char* text = seg.text.c_str();
             const float alpha = static_cast<float>(seg.color & 0xFF) / 255.f;
-            const ImU32 dark = IM_COL32(0, 0, 0, static_cast<int>(200.f * alpha));
+            const uint32_t dark = Rgba(0, 0, 0, static_cast<int>(200.f * alpha));
             if (st.outline) {
-                for (const ImVec2 d : {ImVec2{-1, 0}, ImVec2{1, 0}, ImVec2{0, -1}, ImVec2{0, 1}})
-                    dl->AddText(font, size, {x + d.x, y + d.y}, dark, text);
+                const float d[4][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+                for (const auto& o : d) api.draw_text_sized(x + o[0], y + o[1], dark, size, text);
             } else if (st.shadow) {
-                dl->AddText(font, size, {x + 1.f, y + 1.f}, dark, text);
+                api.draw_text_sized(x + 1.f, y + 1.f, dark, size, text);
             }
-            dl->AddText(font, size, {x, y}, ToImGui(seg.color), text);
-            x += font->CalcTextSizeA(size, FLT_MAX, 0.f, text).x;
+            api.draw_text_sized(x, y, ToApi(seg.color), size, text);
+            x += TextWidth(seg.text, size);
         }
     }
-
     // A note at the top of the screen while the profile has errors (it may be edited outside the menu)
-    void DrawErrorNote(ImDrawList* dl) const
+    void DrawErrorNote() const
     {
         const std::size_t count = profile_.Errors().size() + renderErrors_.size();
         if (count == 0) return;
         const hud::Error& e = profile_.Errors().empty() ? renderErrors_.front() : profile_.Errors().front();
         const std::string text = "Info Lines (" + loadedName_ + "): " + std::to_string(count) + " problem" +
                                  (count == 1 ? "" : "s") + ", line " + std::to_string(e.line) + ": " + e.message;
-        const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
-        const float x = std::floor((ImGui::GetIO().DisplaySize.x - ts.x) * 0.5f);
-        dl->AddText({x + 1.f, 9.f}, IM_COL32(0, 0, 0, 200), text.c_str());
-        dl->AddText({x, 8.f}, IM_COL32(255, 110, 100, 255), text.c_str());
+        const MirageApi& api = mirage::Api();
+        float W = 0.f, H = 0.f, tw = 0.f, th = 0.f;
+        api.screen_size(&W, &H);
+        api.text_size(text.c_str(), &tw, &th);
+        const float x = std::floor((W - tw) * 0.5f);
+        api.draw_text(x + 1.f, 9.f, Rgba(0, 0, 0, 200), text.c_str());
+        api.draw_text(x, 8.f, Rgba(255, 110, 100), text.c_str());
     }
 
-    // ---- The editor (in the module's settings) ------------------------------------------------------------------------
+    // ---- The editor (in the module's panel) ---------------------------------------------------------------------------
     void DrawEditor(float width)
     {
-        g_editorFrames++;
+        const MirageUi& ui = mirage::Ui();
+        Share("status.editor_frames", std::to_string(++editorFrames_));
         Sync();
-        const theme::MenuColors& tc = theme::Menu();
+        const uint32_t dim = mirage::Api().theme_color(MIRAGE_THEME_TEXT_DIM);
 
         // Profile: pick one, or make a new one from this one
         const std::vector<std::string> names = ProfileNames();
-        ImGui::SetNextItemWidth(width - 110.f);
-        if (ImGui::BeginCombo("##profile", loadedName_.c_str())) {
-            for (const std::string& n : names)
-                if (ImGui::Selectable(n.c_str(), n == loadedName_)) profileName.Set(n);
-            ImGui::EndCombo();
+        std::string items;
+        int index = 0;
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            items += names[i];
+            items.push_back('\0');
+            if (names[i] == loadedName_) index = static_cast<int>(i);
         }
-        ImGui::SetItemTooltip("Profile: memenu\\hud\\<name>.txt");
-        ImGui::SameLine();
-        if (ImGui::Button("New", {48.f, 0.f})) {
+        items.push_back('\0');
+        ui.next_width(width - 110.f);
+        if (ui.combo("##profile", &index, items.c_str())) mirage::Set("profile", names[static_cast<std::size_t>(index)]);
+        if (ui.item_hovered()) ui.tooltip("Profile: hud\\<name>.txt in this mod's folder");
+        ui.same_line(0.f, -1.f);
+        if (ui.button("New", 48.f, 0.f)) {
             int n = 2;
             while (std::find(names.begin(), names.end(), "profile " + std::to_string(n)) != names.end()) ++n;
             const std::string copyOf = text_;
             if (dirty_) Save();
             loadedName_ = "profile " + std::to_string(n);
             text_ = copyOf;
-            profileName.Set(loadedName_);
+            mirage::Set("profile", loadedName_);
             Save();
-            notify::Push("Info Lines: new profile '" + loadedName_ + "'");
+            mirage::Api().notify(mirage::Mod(), ("Info Lines: new profile '" + loadedName_ + "'").c_str());
         }
-        ImGui::SetItemTooltip("A new profile, starting as a copy of this one");
-        ImGui::SameLine();
-        if (ImGui::Button("Folder", {-FLT_MIN, 0.f})) {
-            std::error_code ec;
-            std::filesystem::create_directories(Folder(), ec);
-            ShellExecuteW(nullptr, L"open", Folder().wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-        }
-        ImGui::SetItemTooltip("Open memenu\\hud: edit the profiles with any editor, they are read again when saved");
+        if (ui.item_hovered()) ui.tooltip("A new profile, starting as a copy of this one");
+        ui.same_line(0.f, -1.f);
+        if (ui.button("Folder", ui.content_width(), 0.f)) mirage::Api().file_open_folder(mirage::Mod(), kFolder);
+        if (ui.item_hovered()) ui.tooltip("Open the profiles' folder: edit them with any editor, they are read again when saved");
 
-        // The text
-        if (ImFont* mono = font::Mono()) ImGui::PushFont(mono);
-        const float lineH = ImGui::GetTextLineHeight();
-        const bool edited = ImGui::InputTextMultiline("##text", text_.data(), text_.capacity() + 1,
-                                                      {width, lineH * static_cast<float>(editorLines) + 8.f},
-                                                      ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput,
-                                                      &ResizeCallback, &text_);
-        if (font::Mono()) ImGui::PopFont();
+        // The text: edited in a buffer with room to grow (made larger as it fills)
+        if (buffer_.size() < text_.size() + 4096) buffer_.resize(text_.size() + 16384);
+        std::copy(text_.begin(), text_.end(), buffer_.begin());
+        buffer_[text_.size()] = '\0';
+        ui.font_push(MIRAGE_FONT_MONO);
+        const float lineH = ui.line_height();
+        const bool edited = ui.input_text("##text", buffer_.data(), static_cast<uint32_t>(buffer_.size()), MIRAGE_INPUT_MULTILINE,
+                                          lineH * static_cast<float>(mirage::Get<int>("editor_lines")) + 8.f) != 0;
+        ui.font_pop();
         if (edited) {
+            text_ = buffer_.data();
             Reparse();
             dirty_ = true;
-            lastEdit_ = ImGui::GetTime();
+            lastEdit_ = ui.time();
         }
 
-        ImGui::PushStyleColor(ImGuiCol_Text, tc.textDim);
-        if (dirty_) ImGui::TextUnformatted("Saving...");
-        else if (fromFile_) ImGui::Text("Saved: hud\\%s.txt", loadedName_.c_str());
-        else ImGui::TextUnformatted("The built-in example (saved to a file once you edit it)");
-        ImGui::PopStyleColor();
-        if (!Enabled()) ImGui::TextColored({1.f, 0.75f, 0.35f, 1.f}, "Off: turn it on to see the lines and the values");
+        if (dirty_) ui.text_colored(dim, "Saving...");
+        else if (fromFile_) ui.text_colored(dim, ("Saved: hud\\" + loadedName_ + ".txt").c_str());
+        else ui.text_colored(dim, "The built-in example (saved to a file once you edit it)");
+        if (!Enabled()) ui.text_colored(Rgba(255, 191, 89), "Off: turn it on to see the lines and the values");
 
         // Problems, with their line
         std::vector<hud::Error> problems = profile_.Errors();
         problems.insert(problems.end(), renderErrors_.begin(), renderErrors_.end());
         if (problems.empty()) {
-            ImGui::TextColored({0.45f, 0.85f, 0.5f, 1.f}, "No problems");
+            ui.text_colored(Rgba(115, 217, 128), "No problems");
         } else {
-            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+            ui.color_push(MIRAGE_COLOR_TEXT, Rgba(255, 115, 102));
             for (std::size_t i = 0; i < problems.size() && i < 10; ++i) {
                 const auto& p = problems[i];
-                ImGui::TextColored({1.f, 0.45f, 0.4f, 1.f}, "%s%s", p.line ? ("line " + std::to_string(p.line) + ": ").c_str() : "",
-                                   p.message.c_str());
+                ui.text_wrapped(((p.line ? "line " + std::to_string(p.line) + ": " : std::string()) + p.message).c_str());
             }
-            if (problems.size() > 10) ImGui::TextDisabled("... and %zu more", problems.size() - 10);
-            ImGui::PopTextWrapPos();
+            ui.color_pop(1);
+            if (problems.size() > 10) ui.text_disabled(("... and " + std::to_string(problems.size() - 10) + " more").c_str());
         }
 
-        if (ImGui::Button("Back to the example", {width, 0.f})) {
+        if (ui.button("Back to the example", width, 0.f)) {
             text_ = kExample;
             Reparse();
             dirty_ = true;
-            lastEdit_ = ImGui::GetTime();
+            lastEdit_ = ui.time();
         }
-        ImGui::SetItemTooltip("Replace this profile's text with the built-in example");
+        if (ui.item_hovered()) ui.tooltip("Replace this profile's text with the built-in example");
 
         DrawValues(width);
         DrawReference();
@@ -697,44 +691,46 @@ private:
 
     void DrawValues(float width)
     {
-        if (g_openForTest) ImGui::SetNextItemOpen(true);
-        if (!ImGui::TreeNode("Values")) return;
+        const MirageUi& ui = mirage::Ui();
+        if (OpenForTest()) ui.next_open(1, 1);
+        if (!ui.tree_node("Values", 0)) return;
         const Frame frame = MakeFrame();
-        ImGui::TextDisabled("Click a name to copy {name}");
+        ui.text_disabled("Click a name to copy {name}");
         const char* heading = nullptr;
-        constexpr ImGuiTableFlags kFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit;
-        if (ImGui::BeginTable("##values", 2, kFlags, {width - ImGui::GetTreeNodeToLabelSpacing(), 0.f})) {
-            ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthFixed, 110.f);
-            ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+        if (ui.table_begin("##values", 2, MIRAGE_TABLE_ROW_BG | MIRAGE_TABLE_SIZING_FIXED, width - 20.f, 0.f)) {
+            ui.table_column("name", MIRAGE_COLUMN_FIXED, 110.f);
+            ui.table_column("value", MIRAGE_COLUMN_STRETCH, 0.f);
             for (const VarDef& v : Vars()) {
                 if (!heading || std::string_view(heading) != v.group) {
                     heading = v.group;
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(0);
-                    ImGui::TextColored(theme::Menu().accent, "%s", heading);
+                    ui.table_next_row();
+                    ui.table_next_column();
+                    ui.text_colored(mirage::Api().theme_color(MIRAGE_THEME_ACCENT), heading);
+                    ui.table_next_column();
                 }
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                if (ImGui::Selectable(v.name)) {
-                    ImGui::SetClipboardText((std::string("{") + v.name + "}").c_str());
-                    notify::Push(std::string("Copied {") + v.name + "}");
+                ui.table_next_row();
+                ui.table_next_column();
+                if (ui.selectable(v.name, 0, 0.f, 0.f)) {
+                    ui.clipboard_set((std::string("{") + v.name + "}").c_str());
+                    mirage::Api().notify(mirage::Mod(), (std::string("Copied {") + v.name + "}").c_str());
                 }
-                ImGui::SetItemTooltip("%s", v.help);
-                ImGui::TableSetColumnIndex(1);
+                if (ui.item_hovered()) ui.tooltip(v.help);
+                ui.table_next_column();
                 std::string text, error;
                 hud::FormatValue(v.get(frame), {}, text, error);
-                ImGui::TextUnformatted(Enabled() ? text.c_str() : "-");
+                ui.text(Enabled() ? text.c_str() : "-");
             }
-            ImGui::EndTable();
+            ui.table_end();
         }
-        ImGui::TreePop();
+        ui.tree_pop();
     }
 
     static void DrawReference()
     {
-        if (g_openForTest) ImGui::SetNextItemOpen(true);
-        if (ImGui::TreeNode("Functions")) {
-            ImGui::TextUnformatted(
+        const MirageUi& ui = mirage::Ui();
+        if (OpenForTest()) ui.next_open(1, 1);
+        if (ui.tree_node("Functions", 0)) {
+            ui.text(
                 "if(cond, a, b)        a when cond is true, else b\n"
                 "abs floor ceil sqrt sign (x)\n"
                 "min(a, b, ...)  max(a, b, ...)  clamp(x, lo, hi)\n"
@@ -744,11 +740,11 @@ private:
                 "bar(fraction[, width[, color]])\n"
                 "color(\"red\")  rgb(r, g, b[, a])  mix(c1, c2, t)\n"
                 "on(\"Module name\")     that module is on");
-            ImGui::TreePop();
+            ui.tree_pop();
         }
-        if (g_openForTest) ImGui::SetNextItemOpen(true);
-        if (ImGui::TreeNode("Formatting")) {
-            ImGui::TextUnformatted(
+        if (OpenForTest()) ui.next_open(1, 1);
+        if (ui.tree_node("Formatting", 0)) {
+            ui.text(
                 "{value:spec} takes fmt's format specs:\n"
                 "  {speed:.1f}   one decimal       {x:>9.2f}  right in 9\n"
                 "  {health:03d}  zero padded       {map:^12}  centered\n"
@@ -759,54 +755,31 @@ private:
                 "{{ and }} are literal braces");
             std::string names;
             for (const std::string& n : hud::ColorNames()) names += n + " ";
-            ImGui::TextWrapped("Color names: %saccent text dim", names.c_str());
-            ImGui::TreePop();
+            ui.text_wrapped(("Color names: " + names + "accent text dim").c_str());
+            ui.tree_pop();
         }
     }
 
     std::mutex gameMutex_;
     GameData game_;                     // Written by OnTick
     Peak topSpeed_, topHeight_;         // Game thread
+    bool loading_ = false;              // Events (game thread)
+    unsigned deaths_ = 0;
+    unsigned long long ticks_ = 0;
 
     // Render thread (OnRender and the editor)
     std::string loadedName_;
     std::string text_;
+    std::vector<char> buffer_;
     hud::Profile profile_;
     std::vector<hud::Error> renderErrors_;
     bool fromFile_ = false, dirty_ = false;
-    double lastEdit_ = 0.0, lastCheck_ = 0.0;
-    std::filesystem::file_time_type mtime_{};
-
-    ctl::Text profileName{this, "Profile", "default"};
-    ctl::Separator editorTitle{this, "Lines"};
-    ctl::Custom editor{this, [this](float w) { DrawEditor(w); }};
-    ctl::Separator lookTitle{this, "Look"};
-    ctl::Slider globalScale{this, "Scale", 1.f, 0.5f, 3.f, "%.2fx", 0.1f, "Every section's size (on top of its own scale)"};
-    ctl::SliderInt editorLines{this, "Editor height", 16, 6, 40, "%d lines", 2};
-    ctl::Checkbox hideInMenu{this, "Hide while the menu is open", false};
-    ctl::Checkbox showErrors{this, "Show problems on screen", true,
-                             "A red note at the top while the profile has errors (handy when editing it outside)"};
+    float lastEdit_ = 0.f, lastCheck_ = 0.f;
+    uint64_t stamp_ = 0;
+    unsigned long long frames_ = 0, editorFrames_ = 0;
 };
-MEM_MODULE(InfoLines)
+MIRAGE_MODULE(InfoLines)
 
 } // namespace
 
-info_lines::Status info_lines::LastStatus()
-{
-    std::lock_guard lock(g_shareMutex);
-    return g_status;
-}
-
-std::string info_lines::Evaluate(const std::string& line, std::vector<hud::Error>* errors)
-{
-    Frame frame;
-    {
-        std::lock_guard lock(g_shareMutex);
-        frame = g_lastFrame;
-    }
-    FrameContext ctx(frame);
-    return hud::PlainText(hud::RenderLine(line, ctx, 0xFFFFFFFF, errors));
-}
-
-void info_lines::SetEditorOpenForTest(bool open) { g_openForTest = open; }
-unsigned long long info_lines::EditorFrames() { return g_editorFrames.load(); }
+MIRAGE_MOD()
