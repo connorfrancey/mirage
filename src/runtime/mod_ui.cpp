@@ -5,6 +5,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include "font.h"
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -417,6 +419,22 @@ namespace mirage::mods::ui
 			t_styles -= count;
 		}
 
+		thread_local int t_fonts = 0;
+		void MIRAGE_CALL FontPush(int32_t font)
+		{
+			if (!Ready()) return;
+			ImFont* f = font == MIRAGE_FONT_MONO ? font::Mono() : nullptr;
+			ImGui::PushFont(f ? f : ImGui::GetFont());
+			++t_fonts;
+		}
+		void MIRAGE_CALL FontPop()
+		{
+			if (!Ready() || t_fonts <= 0) return;
+			ImGui::PopFont();
+			--t_fonts;
+		}
+		void MIRAGE_CALL ClipboardSet(const char* t) { if (Ready() && t) ImGui::SetClipboardText(t); }
+
 		const MirageUi kUi = {
 			sizeof(MirageUi),
 			WindowBegin, WindowEnd, WindowNextPos, WindowNextSize, WindowNextBgAlpha, ChildBegin, ChildEnd,
@@ -433,7 +451,7 @@ namespace mirage::mods::ui
 			WindowDrawRect, WindowDrawText, WindowDrawLine, WindowDrawCircle,
 			KeyPressed, WantsKeyboard, MousePos, Time, DeltaTime,
 			NextOpen, InputTextHint, AlignTextToFrame, TextSize, FrameHeight, WindowRect, OverlayRect, WindowDrawTextSized, StylePush,
-			StylePop,
+			StylePop, FontPush, FontPop, ClipboardSet,
 		};
 	}
 

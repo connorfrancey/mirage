@@ -355,13 +355,26 @@ struct MirageUi {
     /* Style of what comes next until style_pop: MIRAGE_STYLE_* (x, and y where it has one) */
     void(MIRAGE_CALL* style_push)(int32_t what, float x, float y);
     void(MIRAGE_CALL* style_pop)(int32_t count);
+    void(MIRAGE_CALL* font_push)(int32_t font);                      /* MIRAGE_FONT_*; pop with font_pop */
+    void(MIRAGE_CALL* font_pop)(void);
+    void(MIRAGE_CALL* clipboard_set)(const char* text);
 };
+
+/* font_push */
+#define MIRAGE_FONT_MENU 0
+#define MIRAGE_FONT_MONO 1        /* Monospace (the console's) */
 
 /* style_push: what */
 #define MIRAGE_STYLE_WINDOW_PADDING 0     /* x, y */
 #define MIRAGE_STYLE_WINDOW_BORDER 1      /* x: the border's thickness (0: none) */
 #define MIRAGE_STYLE_ITEM_SPACING 2       /* x, y */
 #define MIRAGE_STYLE_FRAME_PADDING 3      /* x, y */
+
+/* theme_color: which */
+#define MIRAGE_THEME_ACCENT 0
+#define MIRAGE_THEME_TEXT 1
+#define MIRAGE_THEME_TEXT_DIM 2
+#define MIRAGE_THEME_PANEL 3      /* A settings panel's background */
 
 /* input_key_state: a key as the game gets it */
 typedef struct MirageKeyState {
@@ -557,6 +570,17 @@ typedef struct MirageApi {
     uint32_t(MIRAGE_CALL* file_list)(MirageMod* mod, const char* folder, const char* extension, char* buffer, uint32_t capacity);
     uint64_t(MIRAGE_CALL* file_stamp)(MirageMod* mod, const char* path);            /* Last write; 0: no such file */
     void(MIRAGE_CALL* file_open_folder)(MirageMod* mod, const char* folder);        /* In Explorer (made first) */
+
+    /* ---- The generated SDK (sdk/, step 3) in a native mod. The SDK's headers are public: a native mod that links
+     * mirage::sdk sets its globals from these once (in mirage_mod_load), then reads game objects directly:
+     *     void* names; void* objects; api->sdk_globals(&names, &objects);
+     *     Classes::FName::GNames = (decltype(Classes::FName::GNames))names; ... GObjects likewise
+     * Memory the SDK reaches is the game's: the game thread only, like every game object. */
+    void(MIRAGE_CALL* sdk_globals)(void** gnames, void** gobjects);
+
+    /* ---- The menu (step 9) */
+    int32_t(MIRAGE_CALL* module_state)(const char* name);     /* Any module, by name: 1 on, 0 off, -1 no such module */
+    uint32_t(MIRAGE_CALL* theme_color)(int32_t which);        /* MIRAGE_THEME_*, packed like the draw colors */
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

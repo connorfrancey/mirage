@@ -142,7 +142,6 @@ endfunction()
 # Trainer
 memenu_feature(save_state        trainer GAME STAGE 9  FILES features/trainer/save_state.cpp)
 memenu_feature(save_states       trainer GAME STAGE 9  FILES features/trainer/save_states.cpp)
-memenu_feature(speedrun_timer    trainer GAME STAGE 7  FILES features/trainer/speedrun_timer.cpp speedrun/live.cpp speedrun/timer.cpp)
 
 # TAS / replay
 memenu_feature(tas               tas GAME STAGE 12 FILES features/tas/tas_module.cpp features/tas/timeline_view.cpp features/tas/replay_editor.cpp features/tas/macro_library.cpp

@@ -9,6 +9,8 @@
 #include "runtime/mod_lua.h"
 #include "runtime/mod_ui.h"
 #include "runtime/mod_io.h"
+#include "sdk/SDK.hpp"
+#include "theme.h"
 #include "runtime/resolve.h"
 
 #include <imgui.h>
@@ -688,6 +690,24 @@ namespace mirage::mods
 
 		const MirageUi* MIRAGE_CALL Ui() { return ui::Table(); }
 
+		void MIRAGE_CALL SdkGlobals(void** names, void** objects)
+		{
+			if (names) *names = Classes::FName::GNames;
+			if (objects) *objects = Classes::UObject::GObjects;
+		}
+		int32_t MIRAGE_CALL ModuleState(const char* name)
+		{
+			const Module* m = name ? modules::Find(name) : nullptr;
+			return m ? (m->Enabled() ? 1 : 0) : -1;
+		}
+		uint32_t MIRAGE_CALL ThemeColor(int32_t which)
+		{
+			const theme::MenuColors& t = theme::Menu();
+			const ImVec4 c = which == MIRAGE_THEME_ACCENT ? t.accent : which == MIRAGE_THEME_TEXT ? t.text
+						   : which == MIRAGE_THEME_TEXT_DIM ? t.textDim : t.settingsBg;
+			return ImGui::ColorConvertFloat4ToU32(c);
+		}
+
 		void MIRAGE_CALL SettingSetVisible(MirageSetting* h, int32_t visible)
 		{
 			ctl::Setting* s = SettingOf(h);
@@ -755,6 +775,7 @@ namespace mirage::mods
 			Ui, SettingSetVisible, DrawTextSized, TextSizeSized, DrawRectRounded, DrawTriangleFilled,
 			io::InputKeyState, io::InputMouse, io::InputKps, io::InputNow, io::InputResetCounts, io::TasSession,
 			io::FileRead, io::FileWrite, io::FileList, io::FileStamp, io::FileOpenFolder,
+			SdkGlobals, ModuleState, ThemeColor,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

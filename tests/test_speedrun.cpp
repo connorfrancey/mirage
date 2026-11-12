@@ -1,5 +1,5 @@
-// The speedrun timer's bookkeeping (speedrun/timer.h): load removal, splits, personal best and best segments.
-#include "speedrun/timer.h"
+// The speedrun timer's bookkeeping (mods/memenu-speedrun/timer.h): load removal, splits, personal best and best segments.
+#include "memenu-speedrun/timer.h"
 
 #include <gtest/gtest.h>
 

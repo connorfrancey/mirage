@@ -122,6 +122,9 @@ MIRAGE_AT(input_key_state, 344);
 MIRAGE_AT(tas_session, 364);
 MIRAGE_AT(file_read, 368);
 MIRAGE_AT(file_open_folder, 384);
+MIRAGE_AT(sdk_globals, 388);
+MIRAGE_AT(module_state, 392);
+MIRAGE_AT(theme_color, 396);
 static_assert(sizeof(MirageKeyState) == 32 && offsetof(MirageKeyState, down) == 16);   // doubles: 8-aligned on Windows x86
 static_assert(offsetof(MirageModuleDesc, on_panel) == 52, "MirageModuleDesc moved");
 // MirageUi: its own append-only table

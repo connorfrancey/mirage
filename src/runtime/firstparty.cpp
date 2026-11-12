@@ -14,7 +14,7 @@
 namespace mirage::firstparty
 {
 	void MigrateKeyBindings(const std::filesystem::path& modsDir);
-	void MigrateInputLayouts(const std::filesystem::path& modsDir);
+	void MigrateFolder(const std::filesystem::path& modsDir, const char* folder, const char* mod);
 
 	namespace
 	{
@@ -69,7 +69,8 @@ namespace mirage::firstparty
 		}
 		if (written) spdlog::info("Mods: {} first-party mod file(s) written ({} mods)", written, mods.size());
 		MigrateKeyBindings(modsDir);
-		MigrateInputLayouts(modsDir);
+		MigrateFolder(modsDir, "input_layouts", "memenu-input-overlay");
+		MigrateFolder(modsDir, "speedrun", "memenu-speedrun");
 		return written;
 	}
 
@@ -109,15 +110,16 @@ namespace mirage::firstparty
 		spdlog::info("Mods: {} kept key bindings moved into memenu-misc's config", list.size());
 	}
 
-	// Input Overlay was native and read <menu folder>/input_layouts/; it is mods/memenu-input-overlay now, reading its own
-	// input_layouts/. Once: the player's layouts are copied there (the old folder renamed .migrated)
-	void MigrateInputLayouts(const std::filesystem::path& modsDir)
+	// Features that became first-party mods kept files in <menu folder>/<folder>/ (Input Overlay's input_layouts, the
+	// Speedrun Timer's speedrun records); the mods keep them in their own folder. Once: the player's files are copied
+	// there (none replaced) and the old folder renamed .migrated
+	void MigrateFolder(const std::filesystem::path& modsDir, const char* folder, const char* mod)
 	{
 		namespace fs = std::filesystem;
-		const fs::path old = modsDir.parent_path() / "input_layouts";
+		const fs::path old = modsDir.parent_path() / folder;
 		std::error_code ec;
 		if (!fs::is_directory(old, ec)) return;
-		const fs::path target = modsDir / "memenu-input-overlay" / "input_layouts";
+		const fs::path target = modsDir / mod / folder;
 		fs::create_directories(target, ec);
 		int moved = 0;
 		for (const auto& e : fs::directory_iterator(old, ec)) {
@@ -125,7 +127,7 @@ namespace mirage::firstparty
 			fs::copy_file(e.path(), target / e.path().filename(), ec);
 			if (!ec) ++moved;
 		}
-		fs::rename(old, old.parent_path() / "input_layouts.migrated", ec);
-		spdlog::info("Mods: {} input layout(s) moved into memenu-input-overlay", moved);
+		fs::rename(old, old.parent_path() / (std::string(folder) + ".migrated"), ec);
+		spdlog::info("Mods: {} file(s) of {} moved into {}", moved, folder, mod);
 	}
 }

@@ -1,5 +1,5 @@
 #pragma once
-#include "speedrun/timer.h"
+#include "timer.h"
 
 #include <string>
 #include <vector>

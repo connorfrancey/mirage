@@ -36,9 +36,6 @@
 #include "runtime/mods.h"
 #include "runtime/resolve.h"
 #include "runtime/packages.h"
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
-#include "speedrun/live.h"
-#endif
 #if MEMENU_FEATURE_COLLISION_VIEW
 #include "game/debug_world.h"
 #include "game/static_world.h"
@@ -2948,15 +2945,32 @@ void TestCollisionStatic()
 }
 #endif
 
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
-// The speedrun timer against the game:
-//   1. ProcessEvent is hooked and the game's level completed event (the auto split) was found
+// The speedrun timer (mods/memenu-speedrun, a native first-party mod) against the game, through what it shares
+// (memenu-speedrun/run.*) and the commands the menu hands it (memenu/speedrun.command):
+//   1. the game's level completed event (the auto split) is hooked
 //   2. reloading the level starts an individual level run (auto start)
 //   3. a second reload while it runs (auto reset off) is not counted: real time grows, load removed time doesn't
 //   4. a manual split finishes it (one segment) and sets a personal best; undo takes it back
 // The level's record file is put back the way it was.
+namespace speedrun_test
+{
+    std::string Get(const char* key)
+    {
+        char v[256]{};
+        mirage::mods::game_api::ShareGet("memenu-speedrun", key, v, sizeof v);
+        return v;
+    }
+    double Num(const char* key) { return std::atof(Get(key).c_str()); }
+    void Command(const char* what)
+    {
+        static int n = 0;
+        mirage::mods::Share("speedrun.command", std::to_string(++n) + " " + what);
+    }
+}
+
 void TestSpeedrunTimer()
 {
+    using namespace speedrun_test;
     Step& s = Begin("Speedrun timer");
     Probe p(s);
     const auto fail = [&](const std::string& why) {
@@ -2965,12 +2979,12 @@ void TestSpeedrunTimer()
         End(s);
     };
 
-    Module* timer = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "Speedrun Timer") timer = &m; });
+    Module* timer = modules::Find("Speedrun Timer");
     auto* category = timer ? dynamic_cast<ctl::Combo*>(timer->FindSetting("Category")) : nullptr;
     auto* autoStart = timer ? dynamic_cast<ctl::Checkbox*>(timer->FindSetting("Auto start")) : nullptr;
     auto* autoReset = timer ? dynamic_cast<ctl::Checkbox*>(timer->FindSetting("Auto reset")) : nullptr;
     if (!category || !autoStart || !autoReset) return fail("the Speedrun Timer module or its controls were not found");
+    constexpr int kIndividualLevel = 3, kAnyPercent = 0;
 
     const auto maps = levels::Maps();
     int index = -1;
@@ -2983,24 +2997,22 @@ void TestSpeedrunTimer()
     const int categoryWas = category->Get();
     const bool autoStartWas = autoStart->Get(), autoResetWas = autoReset->Get();
     OnRenderThread([&] {
-        category->Set(static_cast<int>(speedrun::Category::IndividualLevel));
+        category->Set(kIndividualLevel);
         autoStart->Set(true);
         autoReset->Set(true);
         if (timer->Enabled()) timer->SetEnabled(false);     // A clean start: no run left from before
         timer->SetEnabled(true);
     });
     WaitTicks(10);
-    speedrun::Reset();
+    Command("reset");
     WaitTicks(5);
 
-    if (!WaitFor(10.0, [] { return game::ScriptEventsReady(); }))
-        p.Problem("the level completed event is not watched (no auto splits): see the log for ProcessEvent");
-    else s.notes.push_back("ProcessEvent hooked, level completed event found");
+    if (!WaitFor(10.0, [] { return Get("run.hooked") == "1"; }))
+        p.Problem("the level completed event is not hooked (no auto splits): see the log");
+    else s.notes.push_back("level completed event hooked");
 
-    // Its record file, kept to put back
-    const std::string map = speedrun::Snapshot().map;
-    const std::string title = speedrun::ChapterTitle(map);
-    const auto file = paths::Dir() / "speedrun" / (speedrun::FileName("IL - " + (title.empty() ? map : title)) + ".json");
+    // Its record file (in the mod's folder), kept to put back
+    const auto file = paths::Dir() / "mods" / "memenu-speedrun" / std::filesystem::path(Get("run.file"));
     std::string fileWas;
     const bool hadFile = std::filesystem::exists(file);
     if (hadFile) {
@@ -3020,47 +3032,48 @@ void TestSpeedrunTimer()
     };
 
     if (reload()) {
-        WaitFor(5.0, [] { const auto sv = speedrun::Snapshot(); return sv.timer.Running() && sv.timer.Lrt(sv.now) > 0.1; });
-        auto v = speedrun::Snapshot();
-        if (!v.timer.Running()) p.Problem("no run started when the level loaded (map '" + v.map + "', last: " + v.lastEvent + ")");
+        WaitFor(5.0, [] { return Get("run.phase") == "running" && Num("run.lrt") > 0.1; });
+        if (Get("run.phase") != "running")
+            p.Problem("no run started when the level loaded (map '" + Get("run.map") + "', last: " + Get("run.event") + ")");
         else {
-            s.notes.push_back("started: " + v.lastEvent);
+            s.notes.push_back("started: " + Get("run.event"));
             OnRenderThread([&] { autoReset->Set(false); });
             WaitTicks(3);
-            v = speedrun::Snapshot();
-            const double lrt0 = v.timer.Lrt(v.now), rta0 = v.timer.Rta(v.now);
+            const double lrt0 = Num("run.lrt"), rta0 = Num("run.rta");
             if (reload()) {
-                v = speedrun::Snapshot();
-                const double lrt = v.timer.Lrt(v.now) - lrt0, rta = v.timer.Rta(v.now) - rta0;
+                WaitTicks(2);
+                const double lrt = Num("run.lrt") - lrt0, rta = Num("run.rta") - rta0;
                 char buf[160];
                 std::snprintf(buf, sizeof buf, "across a reload: real time +%.2f s, load removed time +%.2f s", rta, lrt);
                 s.notes.push_back(buf);
-                if (!v.timer.Running()) p.Problem("the run stopped on a reload with auto reset off");
+                if (Get("run.phase") != "running") p.Problem("the run stopped on a reload with auto reset off");
                 else if (rta - lrt < 0.3) p.Problem(std::string("the load was not removed: ") + buf);
                 else if (lrt <= 0.0) p.Problem(std::string("the load removed time did not move: ") + buf);
 
-                const int completedBefore = v.comparison.completed;
-                speedrun::StartOrSplit();               // The only segment: finishes the run
+                const int completedBefore = std::atoi(Get("run.completed").c_str());
+                Command("start_or_split");               // The only segment: finishes the run
                 WaitTicks(5);
-                v = speedrun::Snapshot();
-                if (v.timer.GetPhase() != speedrun::Timer::Phase::Finished) p.Problem("a split on the only segment did not finish the run");
-                else if (v.comparison.completed != completedBefore + 1) p.Problem("the finished run was not counted");
-                else if (v.comparison.PbTime() < 0.0) p.Problem("the finished run left no personal best");
-                else s.notes.push_back("finished in " + speedrun::Format(v.timer.FinalLrt(), 3) + (v.newPb ? ", a personal best" : ""));
+                if (Get("run.phase") != "finished") p.Problem("a split on the only segment did not finish the run");
+                else if (std::atoi(Get("run.completed").c_str()) != completedBefore + 1) p.Problem("the finished run was not counted");
+                else if (Num("run.pb") < 0.0) p.Problem("the finished run left no personal best");
+                else {
+                    char fin[96];
+                    std::snprintf(fin, sizeof fin, "finished in %.3f s%s", Num("run.lrt"), Get("run.new_pb") == "1" ? ", a personal best" : "");
+                    s.notes.push_back(fin);
+                }
 
-                speedrun::Undo();
+                Command("undo");
                 WaitTicks(5);
-                v = speedrun::Snapshot();
-                if (!v.timer.Running()) p.Problem("undoing the final split did not resume the run");
-                else if (v.comparison.completed != completedBefore) p.Problem("undoing the final split did not take back the finish");
+                if (Get("run.phase") != "running") p.Problem("undoing the final split did not resume the run");
+                else if (std::atoi(Get("run.completed").c_str()) != completedBefore) p.Problem("undoing the final split did not take back the finish");
             }
         }
     }
 
     // Back as it was: a different category first, so the restored file is read again when the old one comes back
-    speedrun::Reset();
+    Command("reset");
     WaitTicks(3);
-    OnRenderThread([&] { category->Set(static_cast<int>(speedrun::Category::AnyPercent)); });
+    OnRenderThread([&] { category->Set(kAnyPercent); });
     WaitTicks(5);
     std::error_code ec;
     if (hadFile) {
@@ -3077,7 +3090,6 @@ void TestSpeedrunTimer()
     p.Check(1, true);
     End(s);
 }
-#endif
 #endif
 
 // Setting values of every module, to put back after the test
@@ -4234,9 +4246,7 @@ const Named* FeatureList()
         {"Collision view inspect", &TestCollisionInspect, false},
         {"Collision view static geometry", &TestCollisionStatic, false},
 #endif
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
         {"Speedrun timer", &TestSpeedrunTimer, false},
-#endif
         {"Engine state hook", &TestEngineStateHook, false},
         {"Mirage runtime", &TestMirageRuntime, false},
         {"Mirage layouts", &TestMirageLayouts, false},

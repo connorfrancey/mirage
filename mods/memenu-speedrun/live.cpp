@@ -1,15 +1,8 @@
-#include "speedrun/live.h"
+#include "live.h"
 
-#include "core/keybinds.h"
-#include "core/keys.h"
-#include "core/notify.h"
-#include "game/game.h"
-#include "game/uobject.h"
-#include "paths.h"
+#include "mirage/sdk.hpp"
 
 #include <Windows.h>
-#include <spdlog/spdlog.h>
-#include "sdk/SDK.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -36,12 +29,12 @@ const struct { const char* map; const char* title; } kChapters[] = {
 };
 constexpr int kFinalChapter = 9;
 constexpr const char* kMenuMap = "tdmainmenu";
-constexpr const char* kLevelCompleted = "Function TdGame.SeqAct_TdLevelCompleted.Activated";
+constexpr const char* kLevelCompleted = "TdGame.SeqAct_TdLevelCompleted.Activated";
 // A new game: the difficulty screen's accept. Accepting writes the profile, and the game starts once that completes;
 // both are delegates the engine calls through ProcessEvent. Either one counts (whichever the game version calls).
 constexpr const char* kNewGameEvents[] = {
-    "Function TdGame.TdUIScene_DifficultySettings.OnProfileWriteComplete",
-    "Function TdGame.TdUIScene_DifficultySettings.OnStartGame",
+    "TdGame.TdUIScene_DifficultySettings.OnProfileWriteComplete",
+    "TdGame.TdUIScene_DifficultySettings.OnStartGame",
 };
 // Where Faith grabs the helicopter at the end of the Shard: the end of a story run. The spot and radius are the ones
 // Mirror's Edge No Loads (fatalis' LiveSplit component, the community's timer) ends runs at.
@@ -80,16 +73,13 @@ bool g_newGameSeen = false;     // The new game event worked once: Prologue load
 int g_keyWas[4] = {};
 unsigned g_ticks = 0;
 
-fs::path FileFor(const std::string& key) { return paths::Dir() / "speedrun" / (FileName(key) + ".json"); }
+// The records: speedrun/<category>.json in this mod's folder
+std::string FileFor(const std::string& key) { return "speedrun/" + FileName(key) + ".json"; }
 
 void Save()
 {
     if (g_cmpKey.empty()) return;
-    std::error_code ec;
-    fs::create_directories(FileFor(g_cmpKey).parent_path(), ec);
-    std::ofstream out(FileFor(g_cmpKey), std::ios::binary | std::ios::trunc);
-    if (out) out << g_cmp.ToJson();
-    else spdlog::warn("Speedrun: could not save {}", FileFor(g_cmpKey).string());
+    if (!mirage::WriteFile(FileFor(g_cmpKey), g_cmp.ToJson())) mirage::Warn("could not save " + FileFor(g_cmpKey));
 }
 
 // Which file a run of the current category in `map` compares against, and its segments.
@@ -111,11 +101,8 @@ void Load(const std::string& key, std::vector<std::string> names)
 {
     if (key == g_cmpKey) return;
     Comparison c;
-    if (std::ifstream in(FileFor(key), std::ios::binary); in) {
-        std::stringstream ss;
-        ss << in.rdbuf();
-        if (!Comparison::FromJson(ss.str(), c)) spdlog::warn("Speedrun: {} is not valid, starting over", FileFor(key).string());
-    }
+    if (std::string text; mirage::ReadFile(FileFor(key), text) && !Comparison::FromJson(text, c))
+        mirage::Warn(FileFor(key) + " is not valid, starting over");
     c.category = key;
     c.EnsureSegments(names);
     g_cmp = std::move(c);
@@ -126,7 +113,7 @@ void Load(const std::string& key, std::vector<std::string> names)
 
 void Event(std::string text)
 {
-    spdlog::info("Speedrun: {}", text);
+    mirage::Info(text);
     g_lastEvent = std::move(text);
 }
 
@@ -156,7 +143,7 @@ void FinishRun(const std::string& name, double now)
     g_newPb = g_cmp.Finish(g_timer.Splits());
     Save();
     Event("finished " + g_cmpKey + " in " + Format(g_timer.FinalLrt(), 3) + (g_newPb ? " (personal best)" : ""));
-    if (g_newPb) notify::Push("Personal best! " + Format(g_timer.FinalLrt(), 2));
+    if (g_newPb) mirage::Api().notify(mirage::Mod(), ("Personal best! " + Format(g_timer.FinalLrt(), 2)).c_str());
 }
 
 std::string NextName()
@@ -208,18 +195,19 @@ void OnLevelLoad(bool finished)
     }
 }
 
-void OnLevelCompleted(Classes::UObject* self, void* /*params*/)
+void OnLevelCompleted(mirage::Call& call)
 {
     const double now = Now();
     std::string next;
-    if (self && game::IsA(self, Classes::USeqAct_TdLevelCompleted::StaticClass())) {
-        const auto& s = static_cast<Classes::USeqAct_TdLevelCompleted*>(self)->NextLevelName;
+    if (auto* self = mirage::sdk::As<Classes::USeqAct_TdLevelCompleted>(call.ObjectHandle());
+        self && mirage::sdk::IsA(self, "SeqAct_TdLevelCompleted")) {
+        const auto& s = self->NextLevelName;
         if (s.IsValid()) next = s.ToString();
     }
-    const std::string map = Lower(game::MapName());
+    const std::string map = Lower(mirage::sdk::MapName());
 
     std::lock_guard lock(g_mutex);
-    spdlog::info("Speedrun: level completed in {} (next: {})", map, next.empty() ? "none" : next);
+    mirage::Info("level completed in " + map + " (next: " + (next.empty() ? "none" : next) + ")");
     if (!g_options.enabled || map.empty() || map == g_completedHere) return;
     g_completedHere = map;
     if (!g_timer.Running()) return;
@@ -237,13 +225,13 @@ void OnLevelCompleted(Classes::UObject* self, void* /*params*/)
     Event("split " + g_names[chapter] + " at " + Format(g_timer.Splits().back().time, 3));
 }
 
-void OnNewGame(Classes::UObject* /*self*/, void* /*params*/)
+void OnNewGame(mirage::Call&)
 {
     const double now = Now();
     std::lock_guard lock(g_mutex);
     if (!g_options.enabled || !IsStory(g_options.category) || g_map != kMenuMap) return;
     if (g_newGameStart) return;                 // The second of the two events of one new game
-    spdlog::info("Speedrun: new game");
+    mirage::Info("new game");
     g_newGameSeen = true;
     const auto phase = g_timer.GetPhase();
     if (phase == Timer::Phase::Idle ? g_options.autoStart : g_options.autoReset) {
@@ -257,7 +245,7 @@ void CheckHeliGrab(double now)
 {
     if (!g_options.autoFinish || !IsStory(g_options.category) || !g_timer.Running()) return;
     if (ChapterIndex(g_map) != kFinalChapter) return;
-    const auto* pawn = game::Pawn();
+    const auto* pawn = mirage::sdk::Pawn();
     if (!pawn) return;
     const float dx = pawn->Location.X - kHeliGrab[0], dy = pawn->Location.Y - kHeliGrab[1],
                 dz = pawn->Location.Z - kHeliGrab[2];
@@ -271,26 +259,38 @@ void CheckHeliGrab(double now)
 bool InMenuOrPaused()
 {
     if (g_map == kMenuMap && !g_newGameStart) return true;
-    const auto* world = game::World();
+    const auto* world = mirage::sdk::World();
     return world && world->Pauser;
 }
 
+bool g_levelCompletedHooked = false;
+
+// Function hooks and the level load event: once, from the first tick (the mod's unload removes them)
 void Register()
 {
     if (g_registered) return;
     g_registered = true;
-    game::OnLevelLoad(&OnLevelLoad);
-    if (!game::OnScriptEvent(kLevelCompleted, &OnLevelCompleted))
-        spdlog::warn("Speedrun: no auto splits (the level completed event can't be watched)");
+    mirage::On(MIRAGE_EVENT_LEVEL_LOAD, [](const MirageEvent& e) { OnLevelLoad(e.value != 0); });
+    g_levelCompletedHooked = mirage::Hook(kLevelCompleted, MIRAGE_HOOK_BEFORE, 0, &OnLevelCompleted) != nullptr;
+    if (!g_levelCompletedHooked) mirage::Warn("no auto splits (the level completed event can't be watched)");
     for (const char* e : kNewGameEvents)
-        if (!game::OnScriptEvent(e, &OnNewGame)) spdlog::warn("Speedrun: {} can't be watched", e);
+        if (!mirage::Hook(e, MIRAGE_HOOK_BEFORE, 0, &OnNewGame)) mirage::Warn(std::string(e) + " can't be watched");
+}
+
+// A key held down, while the game has the focus
+bool KeyDown(int vk)
+{
+    if (!vk || (GetAsyncKeyState(vk) & 0x8000) == 0) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &pid);
+    return pid == GetCurrentProcessId() && !mirage::Api().menu_open();
 }
 
 void PollKeys(const Options& o, double now)
 {
     const int vk[4] = {o.keySplit, o.keyReset, o.keyUndo, o.keySkip};
     for (int i = 0; i < 4; ++i) {
-        const bool down = vk[i] && keys::Down(vk[i]) && !keybinds::Armed();
+        const bool down = KeyDown(vk[i]);
         const bool pressed = down && !g_keyWas[i];
         g_keyWas[i] = down;
         if (!pressed) continue;
@@ -380,15 +380,16 @@ void Tick()
     if (!o.enabled) return;
     Register();
     if (g_ticks++ % 30 == 0) {
-        const bool hooked = game::ScriptEventsReady();
+        const bool hooked = g_levelCompletedHooked;
         std::lock_guard lock(g_mutex);
         g_hooked = hooked;
     }
 
     std::string map;
     const bool readMap = g_mapPending || g_map.empty();
-    if (readMap) map = Lower(game::MapName());
-    const bool blocking = game::BlockingLoad();
+    if (readMap) map = Lower(mirage::sdk::MapName());
+    const auto* world = mirage::sdk::World();
+    const bool blocking = world && world->bRequestedBlockOnAsyncLoading;
 
     std::vector<std::function<void(double)>> commands;
     {

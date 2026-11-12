@@ -1,0 +1,240 @@
+# A first-party mod: part of the menu, written against the public API and SDK only (native, C++). It ships inside the
+# menu's DLL and is written to memenu\mods\memenu-speedrun at startup: edit a copy under another id, not this folder.
+# Records: speedrun\<category>.json next to this file.
+id = "memenu-speedrun"
+name = "Speedrun Timer"
+version = "1.0.0"
+description = "Load removed timer with auto splits on chapter ends and personal bests"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+entry = "memenu-speedrun.dll"
+
+[settings.section_run]
+type = "bool"
+name = "Run"
+module = "Speedrun Timer"
+default = true
+
+[settings.category]
+type = "choice"
+name = "Category"
+module = "Speedrun Timer"
+description = "Story categories start with a new game and end when Faith grabs the helicopter. Individual level: starts when you enter a level and ends when it's completed. Each has its own personal best."
+options = ["Any%", "Glitchless", "100%", "Individual level"]
+default = "Any%"
+
+[settings.section_auto]
+type = "bool"
+name = "Automatic"
+module = "Speedrun Timer"
+default = false
+
+[settings.auto_start]
+type = "bool"
+name = "Auto start"
+module = "Speedrun Timer"
+description = "Story: on a new game. Individual level: when a level loads."
+default = true
+
+[settings.auto_split]
+type = "bool"
+name = "Auto split"
+module = "Speedrun Timer"
+description = "When the game completes a chapter"
+default = true
+
+[settings.auto_finish]
+type = "bool"
+name = "Auto stop"
+module = "Speedrun Timer"
+description = "Story: when Faith grabs the helicopter. Individual level: when the level is completed."
+default = true
+
+[settings.auto_reset]
+type = "bool"
+name = "Auto reset"
+module = "Speedrun Timer"
+description = "Story: on a new game. Individual level: whenever the level is loaded again (restart, checkpoint)."
+default = true
+
+[settings.remove_loads]
+type = "bool"
+name = "Remove loads"
+module = "Speedrun Timer"
+description = "The timer stands still while a level loads and while the game waits on streaming"
+default = true
+
+[settings.pause_in_menus]
+type = "bool"
+name = "Stop in menus"
+module = "Speedrun Timer"
+description = "The timer stands still while the game is paused and in the main menu"
+default = true
+
+[settings.section_show]
+type = "bool"
+name = "Show"
+module = "Speedrun Timer"
+default = false
+
+[settings.show_splits]
+type = "bool"
+name = "Splits"
+module = "Speedrun Timer"
+default = true
+
+[settings.split_rows]
+type = "int"
+name = "Split rows"
+module = "Speedrun Timer"
+default = 10
+min = 2
+max = 12
+
+[settings.show_segment]
+type = "bool"
+name = "Segment timer"
+module = "Speedrun Timer"
+description = "Time in the current chapter"
+default = true
+
+[settings.show_last_split]
+type = "bool"
+name = "Last split"
+module = "Speedrun Timer"
+description = "How long the last chapter took"
+default = false
+
+[settings.show_rta]
+type = "bool"
+name = "Real time"
+module = "Speedrun Timer"
+description = "Loads included"
+default = false
+
+[settings.show_pb]
+type = "bool"
+name = "Personal best"
+module = "Speedrun Timer"
+default = false
+
+[settings.show_sob]
+type = "bool"
+name = "Sum of best"
+module = "Speedrun Timer"
+default = false
+
+[settings.simple]
+type = "bool"
+name = "Simple"
+module = "Speedrun Timer"
+description = "No labels, just the times"
+default = false
+
+[settings.decimals]
+type = "int"
+name = "Decimals"
+module = "Speedrun Timer"
+default = 2
+min = 0
+max = 3
+
+[settings.hide_while_running]
+type = "bool"
+name = "Hide while running"
+module = "Speedrun Timer"
+description = "Only show the timer when no run is going (or the menu is open)"
+default = false
+
+[settings.section_look]
+type = "bool"
+name = "Look"
+module = "Speedrun Timer"
+default = false
+
+[settings.width]
+type = "float"
+name = "Width"
+module = "Speedrun Timer"
+default = 250.0
+min = 160.0
+max = 500.0
+format = "%.0f"
+
+[settings.timer_size]
+type = "float"
+name = "Timer size"
+module = "Speedrun Timer"
+default = 40.0
+min = 16.0
+max = 96.0
+format = "%.0f px"
+
+[settings.opacity]
+type = "float"
+name = "Opacity"
+module = "Speedrun Timer"
+default = 0.55
+min = 0.0
+max = 1.0
+format = "%.2f"
+
+[settings.title_bar]
+type = "bool"
+name = "Title bar"
+module = "Speedrun Timer"
+default = false
+
+[settings.ahead_color]
+type = "color"
+name = "Ahead"
+module = "Speedrun Timer"
+default = "#4DD973"
+
+[settings.behind_color]
+type = "color"
+name = "Behind"
+module = "Speedrun Timer"
+default = "#F25959"
+
+[settings.gold_color]
+type = "color"
+name = "Best segment"
+module = "Speedrun Timer"
+default = "#FFD140"
+
+[settings.section_keys]
+type = "bool"
+name = "Keys"
+module = "Speedrun Timer"
+default = false
+
+[settings.key_split]
+type = "key"
+name = "Start / split"
+module = "Speedrun Timer"
+default = 97
+
+[settings.key_reset]
+type = "key"
+name = "Reset"
+module = "Speedrun Timer"
+default = 99
+
+[settings.key_undo]
+type = "key"
+name = "Undo split"
+module = "Speedrun Timer"
+default = 104
+
+[settings.key_skip]
+type = "key"
+name = "Skip split"
+module = "Speedrun Timer"
+default = 98
+
+[settings.section_records]
+type = "bool"
+name = "Records"
+module = "Speedrun Timer"
+default = false

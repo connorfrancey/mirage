@@ -8,9 +8,7 @@
 #include "gui.h"
 #include "paths.h"
 #include "theme.h"
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
-#include "speedrun/live.h"
-#endif
+#include "runtime/mod_game.h"
 
 #include <Windows.h>
 #include <shellapi.h>
@@ -113,9 +111,7 @@ struct Frame {          // Everything a line can show, for one frame
     double fps = 0, frameMs = 0;
     bool menuOpen = false;
     std::tm local{};
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
     double runTime = 0, runRta = 0;
-#endif
 };
 
 struct VarDef {
@@ -165,10 +161,8 @@ const std::vector<VarDef>& Vars()
         {"loads", "World", "Save states loaded", [](F f) { return Value::Num(f.game.loads); }},
         {"ticks", "World", "Engine ticks since the menu loaded", [](F f) { return Value::Num(static_cast<double>(f.game.ticks)); }},
 
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
         {"runtime", "Speedrun", "Speedrun timer, loads removed (seconds: use time(runtime))", [](F f) { return Value::Num(f.runTime); }},
         {"runrta", "Speedrun", "Speedrun timer, real time (seconds)", [](F f) { return Value::Num(f.runRta); }},
-#endif
 
         {"fps", "Menu", "Frames per second", [](F f) { return Value::Num(f.fps); }},
         {"frametime", "Menu", "Milliseconds per frame", [](F f) { return Value::Num(f.frameMs); }},
@@ -482,12 +476,14 @@ private:
         f.menuOpen = gui::visible;
         const std::time_t t = std::time(nullptr);
         localtime_s(&f.local, &t);
-#if MEMENU_FEATURE_SPEEDRUN_TIMER
-        const speedrun::View run = speedrun::Snapshot();
-        const double now = speedrun::Now();
-        f.runTime = run.timer.Lrt(now);
-        f.runRta = run.timer.Rta(now);
-#endif
+        // The Speedrun Timer is a mod (mods/memenu-speedrun): its run, as it shares it
+        const auto shared = [](const char* name) {
+            char v[48]{};
+            mirage::mods::game_api::ShareGet("memenu-speedrun", name, v, sizeof v);
+            return std::atof(v);
+        };
+        f.runTime = shared("run.lrt");
+        f.runRta = shared("run.rta");
         return f;
     }
 

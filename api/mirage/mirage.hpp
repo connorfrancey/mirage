@@ -394,6 +394,7 @@ namespace mirage
 	public:
 		explicit Call(MirageCall* c) : c_(c) {}
 		Object Self() const { return Object(Api().call_object(c_)); }
+		MirageObject* ObjectHandle() const { return Api().call_object(c_); }	// For mirage::sdk::As<T>
 		std::string Function() const { return Api().call_function(c_); }
 		void Skip() const { Api().call_skip(c_); }
 		template <class T>

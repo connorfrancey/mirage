@@ -1,4 +1,4 @@
-#include "speedrun/timer.h"
+#include "timer.h"
 
 #include <nlohmann/json.hpp>
 
