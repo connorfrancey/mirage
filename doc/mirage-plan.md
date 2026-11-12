@@ -410,6 +410,171 @@ that is no longer the game's: to look into with the TAS (not step 9).
 **Milestone:** someone who has never seen the code builds, tests and publishes a mod with only the docs and the CLI;
 a release candidate installs, finds a mod in the index, installs and updates it.
 
+## Beyond 1.0: steps 11–20
+
+Steps 1–10 make Mirage a loader that can run the menu's own features as mods. Steps 11–20 make it a platform: mods
+that add to the game rather than adjust it (new classes, levels, UI, sounds, multiplayer), mods that build on each
+other, and the tools to write and debug them inside the running game. Each keeps the rules of 1–10: everything goes
+through the API (appended, never changed), every capability has an in-game self-test, and nothing breaks the TAS's
+determinism or the 62 fps cap.
+
+### 11. Script injection and mod-defined natives
+
+Finishes what step 8 left out: calling a mod's code from inside UnrealScript, not only before or after a function.
+
+- **Injection points** (mixin-style, like Fabric's Mixin): at a function's head, before each `return`, before or after
+  a call to a named function, or at a bytecode offset found by a pattern over decoded tokens. The assembler (step 8)
+  splices a call to a stub native in, re-lays out jump offsets, and keeps the original bytes for unpatching.
+- **Locals and the return value:** the injected callback gets the frame (`FFrame::Locals`, already found), reads and
+  writes locals and out parameters by name through reflection, and can return early with a value or cancel the call.
+- **New natives:** a mod registers a C or Lua function as a native under a free `iNative`/`Func` slot and declares it on
+  a class, so patched bytecode (and step 12's new classes) can call mod code like engine code.
+- **Conflicts:** several mods injecting into one function are ordered by priority and dependency; the mod manager shows
+  each function's injections and who owns them; a failed pattern match disables that mod's injection, never the game.
+
+**Milestone:** a Lua mod injects into the middle of a TdGame function (changing a local before a branch), a second mod
+injects into the same function, both run in the declared order, and hot reload unpatches and repatches with the
+original bytecode byte-identical in between. Cost of an injection point measured (target: within 2x a function hook).
+
+### 12. New classes, objects and an UnrealScript compiler
+
+- **Runtime classes:** a mod defines a class (a subclass of an existing one: an `Actor`, a `TdPawn`, a weapon) with new
+  properties, default values and functions (Lua, native, or step 11 natives); the runtime builds the `UClass`, its
+  property chain, layout (step 2's link rules) and default object in the engine's memory, so `Spawn` and the engine's
+  own reflection treat it like a cooked class.
+- **UnrealScript source:** an `.uc` compiler on UnrealLib (parser and type checker over the live class tree, codegen
+  through the step 8 encoder), for mods that want to write script the way the game was written. Covers the subset the
+  decompiler's output uses, so decompile → edit → recompile round-trips every TdGame function.
+- **States:** new states and state code on new and existing classes (`FStateFrame` already mapped).
+- **Lifetime:** classes and objects of a mod are tracked; unloading the mod destroys its actors and unregisters its
+  classes; GC roots for objects a mod holds (`mirage.keep(obj)`), weak handles everywhere else.
+
+**Milestone:** a mod adds `MirageBouncePad` (a new placeable actor class with a touch event and a property), spawns
+it in Prologue, the player bounces; the same class written in `.uc` and compiled in the game behaves identically; the
+corpus round-trip (decompile + compile every TdGame function) is byte-identical for an agreed share, the rest listed.
+
+### 13. Levels and world building
+
+- **Level additions:** a mod places actors into an existing level without a new package (a TOML/T3D layer: class,
+  location, rotation, properties), spawned on level load and on every checkpoint restart, removed on unload.
+- **Streamed sublevels from mods:** a mod's package becomes a streaming level of an existing map (`StreamingLevels`
+  appended at load), with its own trigger volumes; loaded deterministically under the TAS (step 9's blocking load).
+- **New maps:** a mod's `.me1` / `.upk` map shows in level select (UIDataProvider_TdMaps entries appended), with
+  checkpoints, time-trial routes (start, checkpoints, finish, ghost) and the speedrun timer's splits.
+- **In-game editor:** a free camera placement mode in the menu (pick a class, place, gizmo for move/rotate/scale, edit
+  properties, save the layer to the mod's folder); the Collision View draws what was placed.
+
+**Milestone:** a mod adds a new time-trial route to an existing map and a new small map built with the 2008 editor;
+both appear in level select, play, restart from checkpoints, and a TAS of each records and plays back verified.
+
+### 14. Mods for mods: services, events and versioned interfaces
+
+`share_set` / `share_get` (step 9) pass values; this lets mods build on each other's code.
+
+- **Services:** a mod exports a named, versioned interface (a C function table or a Lua table) declared in `mod.toml`
+  (`[provides] "inventory" = "1.2.0"`); dependents ask for it by name and semver range and get it after the provider
+  started (step 5's resolver orders them; a missing provider is a load error naming it).
+- **Custom events:** mods declare their own events (`"parkour:combo"`), others subscribe; the same dispatch, budgets
+  and crash attribution as the runtime's events.
+- **Settings and UI of other mods:** a mod may add a page to another's panel or a column to the mod manager through a
+  provider's service, not by reaching into it.
+- **Library mods:** mods with no modules of their own (a math library, a UI kit, a pattern database), loaded only when
+  something depends on them.
+
+**Milestone:** a library mod provides a "trick scoring" service; two independent mods (a HUD and a Lua challenge mode)
+use it at once; upgrading the library across a minor version keeps both working, a major version is refused with the
+reason in the mod manager.
+
+### 15. Engine-level hooks: functions in the executable
+
+Function hooks (step 6) cover UnrealScript and natives with a `UFunction`; most of the engine (physics, movement,
+rendering, streaming, audio) is C++ with no `UFunction`.
+
+- **A symbol database:** engine functions named by signature (pattern + verification), collected from the Ghidra work
+  already done, shipped as data (`symbols.toml`, versioned with the game build), extendable by mods.
+- **Detours through the runtime:** a mod hooks an engine function by symbol name: before / after / replace, with typed
+  arguments for known signatures, and one owner (the runtime) for every detour (MinHook today), chained in priority
+  order. Mid-function hooks (register context in, registers out) for the places with no clean boundary.
+- **Safety:** detours installed only with the game thread parked at a frame boundary; each one is SEH-wrapped and
+  attributed; a crash inside one removes it and names the mod; the TAS treats detour trampolines as runtime memory.
+
+**Milestone:** a native mod changes the player's ground friction by hooking the physics step by symbol name, a Lua mod
+hooks the same function after it, both unload cleanly, and the self-test crashes inside a test detour on purpose and the
+game keeps running with the detour gone and the mod named.
+
+### 16. Rendering and the game's UI
+
+- **Render hooks:** draw callbacks at named points of the frame (after the world, after post process, before the HUD,
+  after everything), a D3D9 device and state block handed to native mods, render targets and textures a mod owns.
+- **Shaders and post process:** a mod ships HLSL (compiled at build time by the CLI, or at load), applied as a full-screen
+  pass or replacing a material's pixel shader; parameters animatable from Lua (a "runner vision" filter, colour grading).
+- **Scaleform:** the game's menus and HUD are GFx movies: list, read and replace them (a mod ships its own `.gfx`),
+  call ActionScript functions and set variables from Lua, and receive `fscommand`s. A mod adds a page to the game's own
+  options menu.
+- **Models and materials at runtime:** load a mesh and textures from a mod's files (glTF/FBX converted by the CLI
+  through UnrealLib), swap the player's arms and body (step 7's texture path extended to meshes).
+
+**Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (Scaleform), another swaps
+Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.
+
+### 17. Audio, input and controllers
+
+- **Sound:** play WAV/OGG from a mod's folder at a location or on the HUD (through the game's audio device so volume
+  sliders apply), replace a `SoundCue` by path like textures, and music that follows the level.
+- **Input actions:** a mod declares actions in `mod.toml` (`[actions.dash] default = "Q"`); they appear in the game's
+  own key-binding screen next to the game's and are saved with the profile (survives step 9's Keep Key Bindings).
+- **Controllers:** XInput read for mods (sticks, triggers, rumble) and bindable to actions; the TAS records them like
+  keys.
+
+**Milestone:** a mod adds a "dash" action bound in the game's own controls menu to a key and a gamepad button, plays a
+mod sound on use, and a TAS of it plays back verified.
+
+### 18. Multiplayer for mods
+
+The menu's history includes mmultiplayer; this makes multiplayer a service every mod can use.
+
+- **Sessions:** host / join through a relay or direct UDP, lobby with the mod list (joining requires the same mods and
+  versions; the mod manager offers to install what's missing from the index).
+- **Replication:** mods mark values and objects as replicated (owner, rate, interpolation) and send RPCs; players see
+  each other's ghosts with animation (the existing pose capture), tags, and their mods' visuals.
+- **Modes as mods:** race (shared start, ghosts, finish order), tag, and co-op challenges written in Lua against the API.
+- **Rules:** no mod code runs on the network thread; message budgets per mod; malformed packets are dropped and logged.
+
+**Milestone:** two machines join a session, see each other move, run a race mode written in Lua to a shared finish
+with matching times; a mod mismatch on join names the missing mod and installs it.
+
+### 19. Determinism, replays and verification with mods
+
+- **Mods in snapshots:** mods opt in to being rewound (`mirage.tas.state(...)`: the values to keep, or a serialise /
+  restore pair); a TAS rewind restores them with the game, so mods with gameplay state (scoring, timers, new actors from
+  step 12) work in practice mode. Mod memory stays out of the snapshot by default (step 5's rule).
+- **Deterministic mod API:** mod randomness through `mirage.random` (seeded by the session), time through the game's
+  clock, never the wall clock while a session runs; a lint in the CLI flags what isn't.
+- **Replays record their mods:** a `.merp` stores each loaded mod's id, version and hash and its declared gameplay
+  effect; playback warns or refuses on a mismatch (step 9's Preflight extended).
+- **Verified categories:** a run verified by the menu (step 4 of the TAS) carries a signed summary: mods loaded and
+  whether each is "cosmetic" (draws only, declared and checked: no writes, no hooks that return values) or "gameplay".
+
+**Milestone:** a challenge mod with a score and its own spawned actors is recorded with practice-mode rewinds, plays
+back verified, and the same replay with the mod at another version reports the mismatch before it starts.
+
+### 20. A mod developer's environment in the game
+
+- **Lua debugger:** breakpoints, stepping and variable views over the Debug Adapter Protocol, so VS Code attaches to
+  the running game; the game pauses at a frame boundary on a break (the TAS's pause path), never mid-frame.
+- **Object inspector:** browse live objects, classes and their properties (step 2's model), edit values, watch them per
+  frame, follow references; jump from an object to its decompiled script (step 8) and its hooks and injections.
+- **Profiler per mod:** time per callback, hook and injection, Lua memory, allocations; budgets shown in the mod
+  manager and warnings when a mod costs frames.
+- **Native hot reload with state:** a native mod's DLL rebuilt by the CLI is swapped in at a frame boundary with its
+  state carried over (a serialise / restore pair, like step 19's).
+- **Permissions:** `mod.toml` declares what a mod uses (files outside its folder, network, engine hooks, process memory);
+  the mod manager shows them at install and the runtime refuses what wasn't declared; signed releases in the index.
+
+**Milestone:** a mod author breaks in a Lua hook from VS Code, inspects a locals table and the player object, changes
+a property in the inspector, reloads a native DLL without losing state, and the profiler names the slowest callback;
+a mod that opens a socket without declaring `network` is refused and says why.
+
 ## Order and dependencies
 
 ```
@@ -420,6 +585,20 @@ a release candidate installs, finds a mod in the index, installs and updates it.
 
 Steps 4–6 (the loader) and 7–8 (content and script through UnrealLib) can run in parallel once step 2 exists. Step 9
 waits for 3 and 6 because the features need the generated SDK and shared hooks.
+
+Steps 11–20:
+
+```
+8 ─► 11 ─► 12 ─► 13
+6 ─► 14 ─► 15 ─► 16 ─► 17
+           14 ─► 18
+9 (TAS) ─► 19 ◄─ 12
+10 ─► 20 (needs 11, 14, 15 for the inspector and profiler views)
+```
+
+11 (injection, natives) is what 12 (new classes) calls into, and 12 is what 13 (levels) places. 14 (services) comes
+before 15–18 so the engine hooks, rendering, audio and multiplayer are offered as services mods can depend on and
+version. 19 waits for 12 because new actors are what make mod state worth rewinding.
 
 ## Risks
 
@@ -433,6 +612,10 @@ waits for 3 and 6 because the features need the generated SDK and shared hooks.
 | Byte-identical bytecode encoding is harder than decoding (jump offsets, labels) | Prove it on the full corpus before any runtime patching relies on it |
 | A Lua mod freezes or bloats the game | Per-mod instruction budget and memory limit; the mod is stopped and named |
 | Lua in hot hooks costs frame time | Lua runs only for functions a Lua mod hooks; the cost per call is measured (step 6) |
+| Injected bytecode or runtime classes corrupt the engine in ways that crash much later (GC, serialisation) | Every injection and class verified against the live model before use; the GC and save paths exercised by the self-test with them present; nothing a mod creates is ever saved into the game's own packages or save game |
+| The UnrealScript compiler is a project of its own | Scope it to round-tripping the decompiler's output (step 12 milestone), not the whole 2008 language |
+| Engine symbols differ between game builds (Steam, Origin, GOG) | `symbols.toml` keyed by build hash; a symbol that doesn't verify is absent, never guessed; mods that need it don't load |
+| Multiplayer and mod services widen what a bad mod can do | Step 20's permissions; network off unless declared; per-mod message budgets |
 
 ## Decisions
 
