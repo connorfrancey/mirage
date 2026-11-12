@@ -3,9 +3,9 @@
 Mirage turns the Mirror's Edge menu into a mod loader in the spirit of Fabric (a loader plus a hook system, with
 everything else in mods) and Geode (a native runtime with a stable API, an in-game mod manager and tooling). The menu's
 own features become the first mods built on it. UnrealLib (`C:\dev\cpp\lib\UnrealLib`, the C++ UELib port) is the
-foundation for everything that has to understand the game's packages and script. Mods are written in **Lua** (the
-default: no compiler, hot reload, sandboxed) or as native DLLs (for what Lua is too slow or too limited for); both use
-the same API.
+foundation for everything that has to understand the game's packages and script. Mods are written in **Lua** (no
+compiler, hot reload, sandboxed), **C#** (.NET, scripts compiled in the game or built assemblies, hot reload; see
+`doc/csharp-mods.md`) or as native DLLs (for what the others are too slow or too limited for); all use the same API.
 
 ## Where we start
 
@@ -575,6 +575,278 @@ back verified, and the same replay with the mod at another version reports the m
 a property in the inspector, reloads a native DLL without losing state, and the profiler names the slowest callback;
 a mod that opens a socket without declaring `network` is refused and says why.
 
+## Steps 21–40: an ecosystem
+
+Steps 11–20 make Mirage a platform. Steps 21–40 make it one people can live on: three languages that are equally
+first-class, a loader that stays fast and recoverable with a hundred mods installed, the game systems a content mod
+needs that 11–20 don't reach (Kismet, AI, movement, saves), and the outside world: profiles, packages, stream tools,
+leaderboards and a stable ABI for years. The rules of 1–20 hold, plus one: **every step names its cost** (load time,
+frame time, address space) with a number measured in the self-test, because the game is a 32-bit process and every
+new capability competes for the same 2 GB.
+
+### Platform and languages
+
+#### 21. C# at parity with Lua and native
+
+C# mods (.NET 10 x86 through hostfxr, `doc/csharp-mods.md`) run, hot reload and compile scripts in the game; their
+API is a friendly subset with the rest behind raw function pointers.
+
+- **Full API coverage:** the UI layer (`MirageUi`), script patching, detours, the TAS service and step 14's services
+  get C# wrappers; a generated test (like `tests/test_abi.cpp`) fails the build when `api.h` grows without them.
+- **Typed game objects:** a generator over the SDK (`sdk/`) emits C# structs and wrappers (`TdPawn.Velocity`,
+  `TdPlayerController.AttackPress()`) on top of the path API, so mods get compile-time names; the cost of a typed read
+  is measured against the path read (~10 µs today) and must be at most a tenth of it.
+- **Shipping:** the installer ships `memenu\dotnet` (only when the player has a C# mod or opts in: ~70 MB on disk);
+  Mirage.dll on NuGet with a `dotnet new mirage-mod` template; compiled scripts cached on disk by source hash, so a
+  restart doesn't pay Roslyn again (1.2 s now).
+- **Debugging:** Visual Studio and VS Code attach to the game's managed runtime (breakpoints in a mod's `.cs`, scripts
+  included through their in-memory PDBs).
+
+**Milestone:** a first-party Lua mod (memenu-trainer) is ported to C# with typed objects and passes the same
+self-test; a breakpoint in its OnTick hits from VS Code; a second start with only script mods doesn't load Roslyn.
+
+#### 22. The in-game IDE
+
+The script editor (`features/misc/script_editor.cpp`) grows into what a mod author needs without leaving the game.
+
+- **Editing:** syntax highlighting, line numbers, find / replace and bracket matching (an ImGui text editor widget,
+  measured: under 1 ms a frame for a 2,000-line file); multiple cursors are out of scope.
+- **Language services:** completion, signature help and hover docs from Roslyn for C# (the SDK and Mirage API
+  included) and from the API's own declarations for Lua; go to definition into the generated SDK and the decompiled
+  script (step 8).
+- **Live values:** an expression watch over the running mod (Lua and C#), and "run selection" in a REPL against the
+  mod's own state; the console's Lua and C# commands share it.
+- **Project shape:** new file, rename, templates per kind (module, hook, event handler, HUD), and "export as project"
+  (a `.csproj` or a folder ready for the CLI of step 10).
+
+**Milestone:** a new C# mod is written in the game from template to a working HUD with completion only (no external
+editor), errors jump to their line, and the editor never drops the frame rate below the 62 cap.
+
+#### 23. A hundred mods: start-up, memory and budgets
+
+- **Start-up budget:** loading is measured per mod and per phase; mods load in parallel where their dependencies allow
+  (parsing, Lua compile, C# compile on workers; only the publish on the game thread). Target: 100 small mods add under
+  2 s to the start and under 100 MB of address space.
+- **Lazy mods:** a mod declares `load = "on-demand"` and loads the first time one of its modules is switched on, a
+  service is asked for, or its event fires; library mods (step 14) are on-demand by default.
+- **Address-space accounting per mod:** the memory manager (`runtime/mem`) attributes Lua heaps, C# contexts, textures
+  and native DLL images to their mod; the mod manager shows them; low address space unloads on-demand mods first.
+- **Frame budgets:** each mod's tick and render time is tracked (step 20's profiler); a mod over its budget for a
+  sustained period is throttled to the scheduler's Background priority and named, never silently.
+
+**Milestone:** a generated set of 100 mods (Lua, C#, native, content) starts within the budget, the memory report
+attributes every MB to a mod or the runtime, and one deliberately slow mod is throttled and named while the rest keep
+their frame time.
+
+#### 24. Safe mode, bisection and undoable mods
+
+- **Safe mode:** a start after a crash during the previous start (or Shift held at launch) loads no mods and says why;
+  the mod manager offers to bisect.
+- **Automatic bisection:** the runtime restarts the game with half the suspected mods, using the crash records and
+  the dependency graph, until it names the mod (or pair of mods) that crashes; the player confirms each restart.
+- **Transactions:** everything a mod changes through the API (properties, defaults, textures, script patches, spawned
+  actors, detours) is recorded in its change log; unloading reverts the log exactly, and a "what did this mod change?"
+  view lists it.
+
+**Milestone:** two mods that crash only together are found by bisection in at most 4 restarts; every change of a test
+mod is listed and reverted byte-identically on unload, checked against a snapshot of the touched memory.
+
+#### 25. Static analysis and conflict detection
+
+- **Before loading:** a mod's touch set is read without running it: the functions it hooks or injects into, the
+  properties and defaults it writes, the textures and packages it replaces (from `mod.toml`, content folders, script
+  patches, and the API calls found in Lua and C# sources and IL).
+- **Conflicts:** overlapping touch sets are shown in the mod manager before the conflict happens ("both replace
+  `T_Faith_Body`", "both skip `TdPawn.TakeDamage`"), with the load order deciding and a per-pair override.
+- **Lints:** the CLI warns on what tends to break (writes every tick, hooks on hot functions without a filter, wall-clock
+  time in gameplay code: step 19's determinism lint).
+
+**Milestone:** the conflicts between the first-party mods and a set of deliberately overlapping test mods are all
+reported before load, with no false positives on the first-party set.
+
+#### 26. Game builds and compatibility
+
+- **Build detection:** the Steam, EA app / Origin and GOG executables (and their patches) identified by hash; the
+  runtime knows which offsets, patterns, SDK and `symbols.toml` (step 15) belong to which build.
+- **Per-build data:** the SDK generator (step 3) and the symbol database run per build; layouts that differ are data,
+  never `#ifdef`s; a mod declares `game = [...]` builds or relies on the API, which hides the difference.
+- **CI on every build:** game-test runs against each supported executable the developer owns; the README lists what
+  passes.
+
+**Milestone:** the full self-test passes on two different game builds from one menu DLL; a mod built against one runs
+on the other with no change, and one declaring a build it isn't on says so instead of loading.
+
+#### 27. Profiles and load sets
+
+- **Profiles:** named sets of enabled mods with their settings (`profiles\<name>.toml`): "Speedrun (legal)", "Practice",
+  "Content"; switching reloads only what differs (hot reload where possible, a restart only for what can't).
+- **Category rules:** a speedrun profile can be locked to a category's allowed mods and versions (the list published
+  with step 37), and the TAS / timer show the active profile.
+- **Sharing:** a profile exports as one code or file with mod ids, versions and hashes; importing installs what's
+  missing from the index.
+
+**Milestone:** switching from a 30-mod content profile to the speedrun profile takes under 3 s without a restart, and a
+shared profile imported on a clean install reproduces the exact mod set and settings.
+
+#### 28. Packages, updates and rollbacks
+
+Answers the open question of a packaged format.
+
+- **`.mirage` packages:** a zip with `mod.toml` at its root, read in place (no unpacking; the content VFS reads from
+  it), hashes per file, an optional signature (step 20); folders keep working for development.
+- **Updates:** delta downloads from the index, applied at the next start (never under a running mod), with the previous
+  version kept: one-click rollback, and automatic rollback when the new version crashes on its first start.
+- **Dependencies:** installing a mod installs what it requires (semver-resolved against the index), and removing one
+  offers to remove what nothing else needs.
+
+**Milestone:** a mod is updated, crashes on start, and is rolled back automatically with the reason shown; a package
+installs with its two dependencies from a clean state, and the folder form and the package form load identically.
+
+### Game systems for content mods
+
+#### 29. Kismet and mission scripting
+
+The game's levels are driven by Kismet sequences (triggers, matinee, objectives); 11–13 reach script and actors, not the
+sequences that tie them together.
+
+- **Read:** the live sequence graph of a level (objects, links, variables) through the step 2 model, shown in a viewer.
+- **Change:** a mod adds sequence objects and links at level load (a TOML layer, like step 13's actor layer), or
+  defines new sequence actions and events whose body is mod code (step 11 natives, step 12 classes).
+- **Missions:** a small layer on top: objectives, checkpoints, dialogue lines (step 17's sound), success and failure,
+  fed to the speedrun timer's splits.
+
+**Milestone:** a mod adds a new objective to a story chapter (reach a point, then a mod-defined sequence action opens a
+door), the game's own HUD shows it, checkpoint restarts keep it consistent, and the self-test plays it through.
+
+#### 30. AI and enemies
+
+- **Spawning:** enemies (the game's cop and soldier archetypes) spawned at points with their loadout and team, through
+  the API and in level layers; removed on unload and on restart like any mod actor.
+- **Behaviour:** hooks and services over the AI controllers (perception, targeting, cover, chase), and mod-defined
+  behaviours in Lua or C# that run at the AI's own update rate within a budget.
+- **Navigation:** path data for new geometry (step 13 maps and level additions): generated offline by the CLI, loaded
+  with the level.
+
+**Milestone:** a mod sets up an ambush in an existing level with three enemies using a mod-defined flanking behaviour;
+they navigate a mod-added area, and the TAS replays the encounter verified (AI included in the determinism of step 19).
+
+#### 31. Movement and animation
+
+Faith's movement is a set of move states; the trainer and TAS already read and write them.
+
+- **New moves:** a mod adds a move (a subclass of the game's move classes, step 12) with its entry conditions, physics
+  and transitions, and binds it to an input action (step 17).
+- **Tuning:** every movement constant (speeds, timings, wallrun lengths) readable and overridable per mod with an
+  undo (step 24's change log), shown in a tuning panel.
+- **Animation:** play existing animation sets on new moves; import new ones through the CLI (step 16's model pipeline)
+  and blend them with the game's.
+
+**Milestone:** a mod adds a double jump with its own animation and sound, usable in time trials, recorded and played
+back by the TAS, and switching the mod off mid-level leaves Faith's movement exactly as the game's.
+
+#### 32. Physics objects and gameplay pieces
+
+- **Pieces:** the level's gameplay actors (ziplines, swing poles, springboards, ledges, doors, valves) placeable from
+  mods and the step 13 editor with their parameters, and dynamic physics props with mass and constraints.
+- **Triggers:** a library of volumes (enter, leave, stay, count) with mod callbacks, drawn by the Collision View.
+- **Physics queries:** ray, sweep and overlap tests against the world for mods, budgeted per frame.
+
+**Milestone:** a mod builds a small course in an existing level from these pieces only (no new package): a zipline to a
+swing pole to a springboard, all usable and recorded by the TAS; 500 physics queries per frame cost under 1 ms.
+
+#### 33. Cameras, photo mode and cinematics
+
+- **Camera API:** a mod takes the camera (position, rotation, FOV, post process) with a priority, and gives it back.
+- **Photo mode:** pause, free camera, depth of field, filters (step 16's post process), screenshots at higher resolution
+  than the screen.
+- **Cinematics:** keyframed camera paths over a replay (the TAS's ghosts and recordings), exported as a video frame
+  sequence at a fixed frame rate regardless of the game's speed.
+
+**Milestone:** a 30-second keyframed shot over a TAS replay renders to an image sequence at 60 fps with no dropped or
+repeated frame, and photo mode works in every level of the story.
+
+#### 34. Save games and persistent mod data
+
+- **Mod data with saves:** a mod's state saved in a sidecar file next to each game save slot (`<slot>.mirage.toml`),
+  loaded with the slot; the game's own save files are never changed.
+- **Schema versions:** a mod declares its data version and a migration function; old data is migrated once and kept
+  as a backup.
+- **Global progress:** per-profile data (unlocks, best times) that isn't tied to a slot, with the same migrations.
+
+**Milestone:** a mod's collectible count survives save, quit, load and a mod update with a migration; deleting the
+mod leaves the game's saves loadable by the unmodded game.
+
+#### 35. Localization and text
+
+- **Strings:** mods ship translations (`lang/<code>.toml`) and get the player's language from the game; missing keys
+  fall back to English and are listed for translators.
+- **The game's text:** a mod overrides or adds entries of the game's localization (subtitles, menu text) per language,
+  as content (step 7).
+- **Fonts:** coverage checked for the languages a mod declares; the menu's fonts get the missing glyph ranges.
+
+**Milestone:** the first-party mods are translated into one more language with no code change, and a mod replaces a
+subtitle line in the game's own subtitles in two languages.
+
+### The outside world
+
+#### 36. External control: stream tools, LiveSplit, companions
+
+- **Local API:** a WebSocket server (off by default; step 20 permission) exposing events and commands that mods
+  choose to publish: level, time, deaths, the TAS state, mod-defined values.
+- **Integrations:** LiveSplit (splits and game time from the speedrun timer), browser-source stream overlays, and
+  chat-driven events for streamers (votes that a mod turns into gameplay, rate-limited).
+- **Security:** localhost only unless enabled, a token per client, every command declared by a mod and logged.
+
+**Milestone:** LiveSplit splits a run from the menu's timer with game time exact to the tick, and a browser overlay
+shows a mod's live values with under 50 ms of latency.
+
+#### 37. Challenges and leaderboards
+
+- **Challenge format:** a challenge is a mod (route, rules, allowed mods) with a stable id and version; the game's time
+  trials are the first challenges.
+- **Leaderboards:** submitted runs carry their replay and step 19's signed summary; the server replays them headless
+  where possible (step 38's simulated engine for the checks it can do) and ranks verified runs only.
+- **Rules:** cosmetic mods allowed by default, gameplay mods only where the challenge lists them; the speedrun profile
+  of step 27 is the default for submissions.
+
+**Milestone:** a community challenge is published, played by two accounts, both runs verified and ranked; a run made
+with an unlisted gameplay mod is rejected with the mod named.
+
+#### 38. Offline mod testing
+
+- **A simulated engine:** the testhost (already used for parts of the menu) grows into enough of the API's behaviour
+  (objects, properties, events, a fixed tick) to run a mod's logic without the game: mods ship tests, the CLI runs them.
+- **Recorded worlds:** a snapshot of a level's objects and properties taken in the game replays into the simulated
+  engine, so tests read realistic values.
+- **CI:** a GitHub Actions template for mods (build, test, package, publish to the index); the menu's own CI runs the
+  first-party mods' tests the same way.
+
+**Milestone:** every first-party mod has tests that run offline in under 30 s in CI, and a mod's PR on GitHub is built,
+tested and packaged by the template without the game installed.
+
+#### 39. Reports for mod authors
+
+- **Crash and error reports:** opt-in per player, sent per mod to the mod's declared endpoint (or the index's), with
+  the crash reporter's attribution and symbolicated stacks (PDBs, portable PDBs, Lua tracebacks), and no personal data
+  (paths and names scrubbed, the exact payload shown before the first send).
+- **Health:** the index shows a mod's crash rate per version and game build; a version over a threshold is flagged for
+  rollback (step 28).
+
+**Milestone:** a deliberate crash in a test mod reaches its author's endpoint symbolicated with file and line; the
+payload contains nothing that identifies the player.
+
+#### 40. ABI v2 and long-term support
+
+- **Deprecation policy:** an API entry is deprecated with a replacement and a warning for at least two minor versions,
+  and removed only in a new ABI.
+- **ABI v2:** what years of v1 taught (handles instead of raw pointers where lifetimes bit, async calls, batching for
+  property access), with v1 kept running through a shim: every v1 mod in the index loads unchanged.
+- **Releases:** an LTS line of the runtime with security and game-build fixes only; the API reference, guides and
+  examples published as a versioned docs site generated from the headers and the C# and Lua bindings.
+
+**Milestone:** every mod in the index built for ABI v1 passes its tests on the v2 runtime through the shim, and the
+docs site shows each entry's status (stable, deprecated, new in v2).
+
 ## Order and dependencies
 
 ```
@@ -600,6 +872,25 @@ Steps 11–20:
 before 15–18 so the engine hooks, rendering, audio and multiplayer are offered as services mods can depend on and
 version. 19 waits for 12 because new actors are what make mod state worth rewinding.
 
+Steps 21–40:
+
+```
+C# today ─► 21 ─► 22                     (22 needs 20's debugger for its watch view)
+5 ─► 23 ─► 24 ─► 25                      (25 reads 24's change log)
+3, 15 ─► 26
+10 ─► 27 ─► 28                           (28 resolves against 10's index)
+13 ─► 29 ─► 30 ─► 31 ─► 32               (12's classes underneath each)
+16 ─► 33        9 ─► 34 ─► 35
+14 ─► 36        19 ─► 37 ◄─ 27, 38
+10 ─► 38 ─► 39  all ─► 40
+```
+
+The platform steps (21–28) come first: content built on a loader that can't recover from a bad mod or slows down with
+many would be built twice. 23 before 24 because bisection needs fast restarts, and 24's change log is what 25 analyses
+and 31 undoes. The game systems (29–35) follow 12–13 because they place and subclass what those steps create. 37 waits
+for 19 (verified replays), 27 (category profiles) and 38 (headless checks). 40 is last by definition: it is what the
+years of v1 in 21–39 teach.
+
 ## Risks
 
 | Risk | Plan |
@@ -616,14 +907,28 @@ version. 19 waits for 12 because new actors are what make mod state worth rewind
 | The UnrealScript compiler is a project of its own | Scope it to round-tripping the decompiler's output (step 12 milestone), not the whole 2008 language |
 | Engine symbols differ between game builds (Steam, Origin, GOG) | `symbols.toml` keyed by build hash; a symbol that doesn't verify is absent, never guessed; mods that need it don't load |
 | Multiplayer and mod services widen what a bad mod can do | Step 20's permissions; network off unless declared; per-mod message budgets |
+| Three languages triple the API surface to keep in step | Lua, C# and the C ABI are generated or checked from `api.h` (step 21's coverage test); a feature isn't done until all three have it or it is listed as native-only |
+| The .NET runtime's ~89 MB of address space crowds TAS snapshots and textures | Loaded only when a C# mod exists (now); step 23 attributes it and unloads on-demand mods first; the runtime itself can't unload, so the mod manager says when a restart without C# mods would free it |
+| Bisection restarts the game repeatedly and annoys the player | Only on request, each restart confirmed, at most log2(n) + 1 restarts, and the crash records narrow the set first |
+| A local WebSocket API is an attack surface | Off by default, localhost only, a token per client, only commands mods declared (step 36) |
+| Crash reports leak personal data | Opt-in, scrubbed, the exact payload shown before the first send (step 39) |
+| Game systems (AI, Kismet, movement) differ between story levels in ways the self-test doesn't reach | Each step's milestone plays through real story content, not only Prologue; the level list grows with each |
 
 ## Decisions
 
 - Scripting: Lua 5.4, compiled as C++ (2026-11-09).
 - Mod manifest: `mod.toml` (TOML, read with toml11), not JSON (2026-11-10).
 - Mod settings are declared in `mod.toml` (`[settings.<key>]`), like Geode's `mod.json` (2026-11-11).
+- C# mods on .NET (now 10, x86) hosted through hostfxr, not Mono (2026-11-11): Mono's only 32-bit Windows build is
+  unmaintained. C# scripts (`main.cs`) are compiled in the game with Roslyn; built assemblies work too (2026-11-12).
+- The build's scripting language (`MEMENU_DOTNET`): C# when on, Lua when off; new script mods and the script editor
+  use it, and Lua mods run in every build (2026-11-11).
+- A packaged mod is a `.mirage` zip read in place; folders stay for development (proposed in step 28).
 
 ## Open questions
 
-- The file format for a packaged mod (a folder only, or also a zip such as `.mirage`).
 - Whether the mod index should be curated or open.
+- WebAssembly as a fourth, sandboxed compiled-mod format (any language, safe by construction): considered for after
+  step 28, only if a runtime earns its place by measurement (size, address space, call cost) against C# and native.
+- Whether the runtime should host mods out of process for untrusted code (a crash then can't take the game down, at the
+  cost of a cross-process call per API use): measure the call cost before deciding.
