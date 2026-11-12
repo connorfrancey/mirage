@@ -42,6 +42,8 @@ namespace diag {
     void LogStartup(HMODULE self);          // Process, OS, this DLL and the other modules loaded in the game
     void InstallCrashLogger(HMODULE self);  // Logs (and flushes) hardware exceptions raised inside this DLL
     void RemoveCrashLogger();
+    // While one lives on this thread, faults raised here are expected (a test that faults on purpose): not logged
+    struct ExpectedFault { ExpectedFault(); ~ExpectedFault(); ExpectedFault(const ExpectedFault&) = delete; ExpectedFault& operator=(const ExpectedFault&) = delete; };
     long LogFatal(const EXCEPTION_POINTERS* ep, const char* where);   // For __except filters: logs, keeps searching
     // Asked first about every crash: the name of the mod whose code faulted ("" if none), which it records. Mirage mods.
     void SetCrashAttributor(std::string (*attribute)(const void* address, unsigned long code));

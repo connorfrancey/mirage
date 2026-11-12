@@ -1,4 +1,5 @@
 #include "runtime/mods.h"
+#include "core/events.h"
 #include "core/notify.h"
 
 #include "core/module.h"
@@ -1209,11 +1210,13 @@ namespace mirage::mods
 		++mod.reloads;
 		if (!problem.empty()) {
 			spdlog::error("[mod {}] hot reload failed: {} (its modules are off until it loads again)", mod.id, problem);
+			events::Bus().Publish(events::ModReloaded{mod.id, false});
 			return problem;
 		}
 		for (ModModule* m : wasOn)
 			if (m->Bound()) m->SetEnabled(true);
 		spdlog::info("[mod {}] reloaded ({} time(s))", mod.id, mod.reloads);
+		events::Bus().Publish(events::ModReloaded{mod.id, true});
 		return {};
 	}
 

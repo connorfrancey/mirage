@@ -79,6 +79,10 @@ namespace sched
 	// Modules mesure their OnRender with this (modules::Render does it).
 	void RecordRender(const Module& module, double microseconds);
 	
+	// The stretch of one Low/Background entry under pressure: `scale` (the priority's uniform stretch now) weighted by the
+	// entry's cost against the average deferrable run (1/4 to 4 times), never past `maxScale`. Pure (unit tested).
+	double AdaptiveScale(double scale, double costUs, double meanUs, double maxScale);
+
 	const char* PriorityName(Priority p);
 	const char* StateName(State s);
 } 

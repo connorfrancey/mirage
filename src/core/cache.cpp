@@ -58,6 +58,8 @@ namespace cache
 			case Scope::Manual: return "manual";
 			case Scope::Lru: return "lru";
 			case Scope::Persistent: return "on disk";
+			case Scope::Weak: return "weak";
+			case Scope::Adaptive: return "adaptive";
 		}
 		return "?";
 	}

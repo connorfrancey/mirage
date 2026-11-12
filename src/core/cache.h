@@ -24,6 +24,9 @@
 // More caches, each in its own header:
 //   core/ttl_cache.h         cache::TtlMap       keyed values that expire a set time after they were stored
 //   core/lru_cache.h         cache::Lru          keyed values, at most N: the least recently used one goes first
+//   core/adaptive_cache.h    cache::Adaptive     keyed values, at most N, balancing recency and frequency (ARC)
+//   core/weak_cache.h        cache::Weak         shared values found while someone holds them (not kept alive)
+//   core/resource_cache.h    res::Cache          files read once and shared, budgeted, deduplicated by content
 //   core/memory_cache.h      mem::Cache          values read from game memory (crash-safe), per tick/level/TTL
 //   core/signature_cache.h   sig::Cache          byte pattern scan results, kept on disk for the same game exe
 //   core/address_cache.h     addr::Cache         named addresses and pointer chains
@@ -42,7 +45,7 @@ namespace cache
 {
 	// Tick/Level/Timed/Manual: when a value goes stale (see above). Lru and Persistent only label statistics: an LRU
 	// cache (bounded by size, not time) and one that is kept on disk between sessions.
-	enum class Scope : std::uint8_t { Tick, Level, Timed, Manual, Lru, Persistent };
+	enum class Scope : std::uint8_t { Tick, Level, Timed, Manual, Lru, Persistent, Weak, Adaptive };
 	
 	// ---- Epochs (bumped by the game layer) ---------------------------------------------------------------------------------------------------
 	std::uint32_t TickEpoch();

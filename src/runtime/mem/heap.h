@@ -84,4 +84,9 @@ namespace mirage::mem
 	void OnAllocated(void* p, std::size_t bytes, double ns) noexcept;	// ns < 0: not timed
 	void OnFreeing(void* p, std::size_t bytes, double ns) noexcept;
 	double NowNs();									// For timing (QueryPerformanceCounter)
+
+	// Real time in milliseconds since boot, read from the kernel's shared page (KUSER_SHARED_DATA interrupt time). Unlike
+	// QueryPerformanceCounter and GetTickCount(64), the TAS can't make it virtual: on the game thread during a TAS
+	// session those run on the replay's clock. For anything that compares times across threads.
+	std::uint64_t RealTimeMs();
 }

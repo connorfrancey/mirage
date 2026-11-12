@@ -86,6 +86,17 @@ namespace sched
 		}
 		
 		bool Deferrable(Priority p) { return p == Priority::Low || p == Priority::Background; }
+
+		// The most a priority is ever stretched (at full pressure): the caps the uniform stretching had
+		double MaxScale(Priority p)
+		{
+			switch (p)
+			{
+				case Priority::Low: return kMaxPressure;
+				case Priority::Background: return kMaxPressure * kMaxPressure;
+				default: return 1.0;
+			}
+		}
 		
 		// Topological order (Kahn) over `after`, picking the highest priority (then name) among the ready entries. Entries
 		// caught in a cycle are appended by priority, with an error in the log.
@@ -174,14 +185,32 @@ namespace sched
 // ---- Public API (the state above lives in sched's anonymous namespace) -------------------------------------------------
 namespace sched
 {
+	double AdaptiveScale(double scale, double costUs, double meanUs, double maxScale)
+	{
+		if (scale <= 1.0) return scale;
+		const double weight = std::clamp(costUs / std::max(1.0, meanUs), 0.25, 4.0);
+		return std::min(1.0 + (scale - 1.0) * weight, maxScale);
+	}
+
 	namespace
 	{
 		std::atomic<std::uint64_t> g_tickCount{0};
 
+		// The average cost of a deferrable entry's run (us): what "expensive" is measured against
+		std::atomic<float> g_deferrableAvgUs{0.f};
+
 		float EffectiveInterval(const Entry& e)
 		{
 			if (!opt::kEnabled) return 0.f;		// No optimizations: every entry is due on every tick
-			return static_cast<float>(e.schedule.interval * Scale(e.schedule.priority));
+			double scale = Scale(e.schedule.priority);
+			if (scale > 1.0 && Deferrable(e.schedule.priority)) {
+				// Adaptive per entry: under pressure the expensive entries give way first. An entry costing k times the
+				// average deferrable run is stretched k times as much (k between 1/4 and 4), never past the priority's
+				// own cap: cheap ones keep running close to their interval, the costly ones yield the time.
+				scale = AdaptiveScale(scale, e.avgUs.load(std::memory_order_relaxed), g_deferrableAvgUs.load(std::memory_order_relaxed),
+									  MaxScale(e.schedule.priority));
+			}
+			return static_cast<float>(e.schedule.interval * scale);
 		}
 
 		void RecordRun(Entry& e, float us)
@@ -190,6 +219,7 @@ namespace sched
 			e.lastUs.store(us, std::memory_order_relaxed);
 			Ema(e.avgUs, us);
 			Max(e.maxUs, us);
+			if (Deferrable(e.schedule.priority)) Ema(g_deferrableAvgUs, us, 0.02f);
 		}
 
 		// Tasks added with AddTask since the last tick join the run order. Game thread.

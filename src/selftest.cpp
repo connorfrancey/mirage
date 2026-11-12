@@ -1,4 +1,5 @@
 #include "selftest.h"
+#include "diag.h"
 
 #include "config.h"
 #include "core/devmode.h"
@@ -31,6 +32,10 @@
 #include "runtime/reflect.h"
 #include "runtime/layout.h"
 #include "runtime/lua_vm.h"
+#include "core/events.h"
+#include "core/tasks.h"
+#include "runtime/crash_reporter.h"
+#include "runtime/hang.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/manager.h"
 #include "runtime/mem/pool.h"
@@ -3641,6 +3646,151 @@ void TestMemoryManager()
     End(s);
 }
 
+// The crash reporter, the hang detector, the event bus and background tasks as wired in the game, and the reflection
+// path cache measured against parsing every path.
+namespace crash_test {
+// A real access violation, caught: its exception pointers are copied for the report (the copies outlive the handler)
+EXCEPTION_RECORD g_record;
+CONTEXT g_context;
+int Filter(EXCEPTION_POINTERS* ep)
+{
+    g_record = *ep->ExceptionRecord;
+    g_context = *ep->ContextRecord;
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+bool Fault()
+{
+    __try {
+        volatile int* p = reinterpret_cast<volatile int*>(0x10);
+        *p = 1;
+    } __except (Filter(GetExceptionInformation())) {
+        return true;
+    }
+    return false;
+}
+}
+
+void TestCrashAndHang()
+{
+    Step& s = Begin("Crash reporter and hang detector");
+    Probe p(s);
+    namespace fs = std::filesystem;
+
+    // 1. A report from a real (caught) exception: written, with what and where, without ending the game
+    {
+        diag::ExpectedFault expected;    // Not a crash for the crash logger (it would flag the run)
+        if (!crash_test::Fault()) p.Problem("the test fault didn't fault");
+    }
+    EXCEPTION_POINTERS ep{&crash_test::g_record, &crash_test::g_context};
+    const std::wstring report = mirage::crash::WriteReport(&ep, "self-test (not a real crash)");
+    if (report.empty()) p.Problem("no report was written");
+    else {
+        const std::string text = mirage::crash::ReadReport(fs::path(report));
+        for (const char* part : {"What: access violation", "Where: medge_menu.dll+", "Access: writing 0x00000010", "Call stack", "Modules ("})
+            if (text.find(part) == std::string::npos) p.Problem(std::string("the report has no \"") + part + "\"");
+        if (!fs::exists(fs::path(report).replace_extension(".dmp"))) p.Problem("no minidump next to the report");
+        s.notes.push_back("report: " + fs::path(report).filename().string() + ", " + std::to_string(text.size()) + " bytes");
+        std::error_code ec;
+        fs::remove(fs::path(report), ec);
+        fs::remove(fs::path(report).replace_extension(".dmp"), ec);
+    }
+
+    // 2. A hang: the game thread blocked on purpose past a short threshold, reported with where, then recovered
+    std::atomic<int> detected{0}, recovered{0};
+    std::string where;
+    std::mutex whereLock;
+    auto subDetected = events::Bus().Subscribe<events::HangDetected>([&](const events::HangDetected& e) {
+        if (std::string(e.thread) != "game thread") return;
+        std::lock_guard<std::mutex> l(whereLock);
+        where = e.where;
+        ++detected;
+    }, {.owner = "self-test"});
+    auto subRecovered = events::Bus().Subscribe<events::HangRecovered>([&](const events::HangRecovered& e) {
+        if (std::string(e.thread) == "game thread") ++recovered;
+    }, {.owner = "self-test"});
+    p.Expect("Hang: the game thread");          // The stall this step makes on purpose
+    const auto saved = mirage::hang::Configured();
+    auto quick = saved;
+    quick.enabled = true;
+    quick.gameSeconds = 1.0;
+    mirage::hang::Configure(quick);
+    game::RunOnGameThread([] { Sleep(2500); });       // Asynchronous: this thread watches meanwhile
+    if (!WaitFor(6.0, [&] { return detected.load() > 0; })) p.Problem("a 2.5 s stall of the game thread wasn't detected");
+    else {
+        std::lock_guard<std::mutex> l(whereLock);
+        if (where.find("Sleep") == std::string::npos && where.find("KERNELBASE") == std::string::npos &&
+            where.find("ntdll") == std::string::npos)
+            p.Problem("the stall's place doesn't show the Sleep it was in: " + where);
+        s.notes.push_back("hang seen at " + where.substr(0, 120));
+    }
+    if (!WaitFor(6.0, [&] { return recovered.load() > 0; })) p.Problem("the end of the stall wasn't noticed");
+    mirage::hang::Configure(saved);
+    // Its report file (hang reports are "report-*", never shown as "the game crashed last time")
+    for (const auto& e : fs::directory_iterator(mirage::crash::Folder(), std::filesystem::directory_options::skip_permission_denied)) {
+        const std::string name = e.path().filename().string();
+        std::error_code ec;
+        if (name.rfind("report-", 0) == 0 && fs::last_write_time(e.path(), ec) > fs::file_time_type::clock::now() - std::chrono::minutes(1))
+            fs::remove(e.path(), ec);
+    }
+
+    // 3. The event bus and the background tasks, through the game's dispatchers
+    std::atomic<bool> onGame{false};
+    const DWORD gameThread = [] {
+        DWORD id = 0;
+        OnGameThread([&] { id = GetCurrentThreadId(); });
+        return id;
+    }();
+    struct SelfTestPing { int n; };
+    auto sub = events::Bus().Subscribe<SelfTestPing>([&](const SelfTestPing&) { onGame = GetCurrentThreadId() == gameThread; },
+                                                     {.where = events::Where::GameThread, .owner = "self-test"});
+    events::Bus().Publish(SelfTestPing{1});
+    if (!WaitFor(3.0, [&] { return onGame.load(); })) p.Problem("a game-thread event handler didn't run on the game thread");
+    auto task = tasks::Run([] { return GetCurrentThreadId(); }, {.name = "self-test"});
+    std::atomic<bool> continued{false};
+    task.Then([&](const DWORD&) { continued = GetCurrentThreadId() == gameThread; }, tasks::On::GameThread);
+    if (!task.Wait(5.0) || !task.Ok()) p.Problem("a background task didn't finish: " + task.Error());
+    else if (*task.Result() == gameThread) p.Problem("the background task ran on the game thread");
+    if (!WaitFor(3.0, [&] { return continued.load(); })) p.Problem("the task's continuation didn't run on the game thread");
+    const auto ts = tasks::Snapshot();
+    s.notes.push_back(std::to_string(ts.workers) + " task workers, " + std::to_string(ts.completed) + " tasks done");
+
+    // 4. The reflection path cache: the same reads, parsed every time against cached (measured on the game thread)
+    double uncachedUs = 0.0, cachedUs = 0.0;
+    bool same = true;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        const char* paths[] = {"Location.Z", "Velocity.X", "Rotation.Yaw", "Health", "Controller.Location.X"};
+        constexpr int kRounds = 2000;
+        for (int pass = 0; pass < 2; ++pass) {
+            mirage::reflect::SetPathCache(pass == 1);
+            const auto t0 = clk::Now();
+            for (int r = 0; r < kRounds; ++r)
+                for (const char* path : paths) {
+                    const auto v = mirage::reflect::Resolve(pawn->Class, pawn, path);
+                    if (!v && r == 0) same = false;
+                }
+            (pass ? cachedUs : uncachedUs) = clk::Micros(clk::Now() - t0) / (kRounds * 5.0);
+        }
+        // The same answers both ways
+        for (const char* path : paths) {
+            mirage::reflect::SetPathCache(false);
+            const auto a = mirage::reflect::Resolve(pawn->Class, pawn, path);
+            mirage::reflect::SetPathCache(true);
+            const auto b = mirage::reflect::Resolve(pawn->Class, pawn, path);
+            if (a.address != b.address || a.member != b.member) same = false;
+        }
+        mirage::reflect::SetPathCache(true);
+    });
+    if (!same) p.Problem("the path cache resolved a path differently from parsing it");
+    char line[160];
+    std::snprintf(line, sizeof line, "path resolve: %.3f us parsed, %.3f us cached (%.1fx)", uncachedUs, cachedUs,
+                  cachedUs > 0 ? uncachedUs / cachedUs : 0.0);
+    s.notes.push_back(line);
+    if (cachedUs > uncachedUs) p.Problem("the path cache is slower than parsing");
+    End(s);
+}
+
 void TestCacheSystem()
 {
     Step& s = Begin("Cache system");
@@ -4389,6 +4539,7 @@ const Named* FeatureList()
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},
+        {"Crash reporter and hang detector", &TestCrashAndHang, false},
         {"Mirage content", &TestMirageContent, false},
         {"Mirage textures", &TestMirageTextures, false},
 #if MEMENU_FEATURE_TAS

@@ -2,6 +2,7 @@
 
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
+#include "core/events.h"
 #include "paths.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/pool.h"
@@ -29,10 +30,12 @@ namespace mirage::mem
 	{
 		using Clock = std::chrono::steady_clock;
 
+		// The real clock (heap.h): the game-thread job and the monitor thread compare times, and on the game thread during a
+		// TAS session steady_clock runs on the replay's clock
 		double Seconds()
 		{
-			static const auto start = Clock::now();
-			return std::chrono::duration<double>(Clock::now() - start).count();
+			static const std::uint64_t start = RealTimeMs();
+			return static_cast<double>(RealTimeMs() - start) / 1000.0;
 		}
 
 		std::string Mb(double bytes)
@@ -319,7 +322,9 @@ namespace mirage::mem
 			const bool repeat = level >= Level::High && now >= s.nextActionRepeat;
 			if (!changed && !repeat && !trimRequested) return;
 			const bool rising = level > s.acted;
+			const Level previous = s.acted;
 			s.acted = level;
+			if (changed) events::Bus().Publish(events::MemoryPressure{static_cast<int>(level), static_cast<int>(previous)});
 			if (level < Level::High && !trimRequested && !changed) return;
 
 			std::size_t freed = 0;

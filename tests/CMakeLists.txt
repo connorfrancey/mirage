@@ -32,6 +32,13 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/runtime/mem/heap.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/mem/sampler.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/mem/process.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/allocators.cpp
+        test_caches_more.cpp
+        test_infra.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/events.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/tasks.cpp
+        ${CMAKE_SOURCE_DIR}/src/core/resource_cache.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/config_cache.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/detours.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/resolve.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/semver.cpp
@@ -66,7 +73,7 @@ add_executable(memenu_tests
 target_include_directories(memenu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/api ${CMAKE_SOURCE_DIR}/mods)
 target_compile_definitions(memenu_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MEMENU_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(memenu_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 minhook magic_enum::magic_enum unordered_dense::unordered_dense)
+target_link_libraries(memenu_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 minhook magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash)
 if(MSVC)
   target_compile_options(memenu_tests PRIVATE /W4 /permissive- /utf-8)
 endif()

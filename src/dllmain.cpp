@@ -17,6 +17,8 @@
 #include "paths.h"
 #include "selftest.h"
 #include "core/devmode.h"
+#include "core/events.h"
+#include "core/tasks.h"
 #include "test_mode.h"
 #include "unload.h"
 #if MEMENU_GAME
@@ -33,6 +35,8 @@
 #include "runtime/script_patch.h"
 #include "runtime/firstparty.h"
 #include "runtime/mem/manager.h"
+#include "runtime/crash_reporter.h"
+#include "runtime/hang.h"
 #endif
 #if MEMENU_FEATURE_TAS
 #include "tas/tas.h"
@@ -95,6 +99,17 @@ static void Run(HMODULE module)
     spdlog::info("Hardware: {}", hw::Get().Summary());   // After the hooks: they add the GPU
     if (installed)
     {
+#if MEMENU_GAME
+        // Fatal crashes get a report instead of the game's dialog (runtime/crash_reporter.h): MinHook is up now
+        STARTUP_STEP(mirage::crash::Install());
+#endif
+        // Background tasks (core/tasks.h) and the event bus's queued deliveries: the render thread now, the game thread
+        // once the game layer is up
+        const auto toRender = [](std::function<void()> fn) { hooks::RunOnRenderThread(std::move(fn)); };
+        tasks::SetDispatcher(tasks::On::RenderThread, toRender);
+        events::SetDispatcher(events::Where::RenderThread, toRender);
+        events::SetDispatcher(events::Where::Worker, [](std::function<void()> fn) { tasks::Run(std::move(fn), {tasks::Priority::Normal, "event"}); });
+        STARTUP_STEP(tasks::Start());
         // From here modules added later (mods of the engine and world phases, hot reloads) join on the render thread,
         // with their saved state and a place in the scheduler
         modules::Start([](std::function<void()> fn) { hooks::RunOnRenderThread(std::move(fn)); }, [](Module& m) {
@@ -111,6 +126,8 @@ static void Run(HMODULE module)
             game::OnLevelLoad([](bool finished) {
                 mirage::mods::DispatchLevelLoad(finished, finished ? game::MapName() : std::string());
                 mirage::mem::OnLevelLoad(finished, finished ? game::MapName() : std::string());
+                mirage::hang::SetLoading(!finished);
+                events::Bus().Publish(events::LevelLoad{finished, finished ? game::MapName() : std::string()});
                 if (!finished) return;
                 levelLoaded = true;
                 mirage::reflect::ClearCache();   // Classes of the old level's packages are gone
@@ -118,6 +135,7 @@ static void Run(HMODULE module)
                 mirage::content::ReapplyAll();   // Content mods' overrides on the level's objects
             });
             game::OnTick([](float seconds) {
+                mirage::hang::BeatGame();
                 if (levelLoaded && !worldLoaded.exchange(true)) mirage::mods::LoadPhase(mirage::mods::Phase::World);
                 mirage::mods::DispatchTick(seconds);
                 modules::Tick();
@@ -137,6 +155,10 @@ static void Run(HMODULE module)
             });
             mirage::mem::SetModMemoryProvider([] { return mirage::mods::LuaMemoryByMod(); });
             STARTUP_STEP(mirage::mem::Start());
+            const auto toGame = [](std::function<void()> fn) { game::RunOnGameThread(std::move(fn)); };
+            tasks::SetDispatcher(tasks::On::GameThread, toGame);
+            events::SetDispatcher(events::Where::GameThread, toGame);
+            STARTUP_STEP(mirage::hang::Start());   // Watches the game thread's ticks and the render thread's frames
             STARTUP_STEP(mirage::mods::LoadPhase(mirage::mods::Phase::Engine));   // The game layer is up
             // Hot reload: mods whose files changed, checked twice a second (game thread, between the modules' ticks)
             sched::AddTask("Mirage mod reload", {0.5f, sched::Priority::Background, {}, {}}, [] { mirage::mods::ReloadChanged(); });
@@ -175,6 +197,9 @@ static void Run(HMODULE module)
         spdlog::info("Unload requested: unloading (EndScene ran {} times)", hooks::EndSceneCalls());
         selftest::Shutdown();   // A run started from the Test module: stopped, settings put back (needs the hooks)
 
+#if MEMENU_GAME
+        mirage::hang::Stop();   // Unloading stalls the threads on purpose: no hang reports for it
+#endif
         config::Save();         // Save before DisableAll so the enabled state is kept
         modules::DisableAll();  // Modules queue their cleanup on the game thread...
 #if MEMENU_GAME
@@ -183,12 +208,14 @@ static void Run(HMODULE module)
 #if MEMENU_FEATURE_TAS
         tas::Shutdown();        // The snapshot workers
 #endif
+        tasks::Stop();          // Background tasks: queued ones dropped, running ones asked to stop, workers joined
 #if MEMENU_GAME
         mirage::mem::Stop();         // Saves what it learnt about the levels; no pressure events to mods from here
         mirage::hooks::RemoveAll();  // Functions back to their own code before this DLL goes
         mirage::detours::RemoveAll();   // Mods' detours, before MinHook is shut down
         mirage::textures::Shutdown();   // Its worker, and the package file redirects (MinHook too)
         mirage::scripts::RestoreAll();  // Patched functions back to their own bytecode
+        mirage::crash::Uninstall();     // The game's own crash handling back, before MinHook is shut down
 #endif
         hooks::Uninstall();
 #if MEMENU_GAME

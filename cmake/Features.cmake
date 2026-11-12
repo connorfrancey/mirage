@@ -154,6 +154,7 @@ memenu_feature(tas               tas GAME STAGE 12 FILES tas/engine.cpp tas/repl
 memenu_feature(log_viewer        debug      STAGE 4  FILES features/debug/log_viewer.cpp)
 memenu_feature(performance       debug      STAGE 5  FILES features/debug/performance.cpp)
 memenu_feature(memory            debug GAME STAGE 5  FILES features/debug/memory.cpp)
+memenu_feature(crash_reporter    debug GAME STAGE 5  FILES features/debug/crash_reporter.cpp)
 memenu_feature(self_test         debug      STAGE 4  FILES features/debug/self_test.cpp)   # Shown in developer mode only
 
 # Levels

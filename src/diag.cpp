@@ -118,8 +118,11 @@ namespace {
     std::string (*g_attribute)(const void*, unsigned long) = nullptr;     // diag::SetCrashAttributor
     std::string (*g_released)(std::uintptr_t) = nullptr;
 
+    thread_local int t_expected = 0;     // diag::ExpectedFault scopes on this thread
+
     LONG CALLBACK CrashLogger(EXCEPTION_POINTERS* ep)
     {
+        if (t_expected) return EXCEPTION_CONTINUE_SEARCH;
         switch (ep->ExceptionRecord->ExceptionCode)
         {
             case EXCEPTION_ACCESS_VIOLATION: case EXCEPTION_ILLEGAL_INSTRUCTION: case EXCEPTION_PRIV_INSTRUCTION:
@@ -177,6 +180,9 @@ void diag::InstallCrashLogger(HMODULE self)
     g_veh = AddVectoredExceptionHandler(1, CrashLogger);
     if (!g_veh) spdlog::warn("Could not install the crash logger");
 }
+
+diag::ExpectedFault::ExpectedFault() { ++t_expected; }
+diag::ExpectedFault::~ExpectedFault() { --t_expected; }
 
 void diag::RemoveCrashLogger()
 {

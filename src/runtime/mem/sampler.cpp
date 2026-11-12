@@ -235,7 +235,7 @@ namespace mirage::mem::sampler
 				r.size = static_cast<std::uint32_t>(std::min<std::size_t>(bytes, UINT32_MAX));
 				r.weight = Weight(bytes, interval);
 				r.seq = g_seq.fetch_add(1, std::memory_order_relaxed) + 1;
-				r.timeMs = GetTickCount64();
+				r.timeMs = RealTimeMs();
 				r.tag = tag;
 				r.thread = GetCurrentThreadId();
 				AcquireSRWLockExclusive(&g_lock);
@@ -258,7 +258,7 @@ namespace mirage::mem::sampler
 		t_busy = true;
 		AcquireSRWLockExclusive(&g_lock);
 		Record r;
-		if (Erase(s, ptr, &r)) g_lifetime[LifetimeBucket(GetTickCount64() - r.timeMs)] += r.weight;
+		if (Erase(s, ptr, &r)) g_lifetime[LifetimeBucket(RealTimeMs() - r.timeMs)] += r.weight;
 		ReleaseSRWLockExclusive(&g_lock);
 		t_busy = false;
 	}
@@ -309,7 +309,7 @@ namespace mirage::mem::sampler
 		t_busy = busy;
 		rep.tableUsed = g_used.load(std::memory_order_relaxed);
 
-		const std::uint64_t now = GetTickCount64();
+		const std::uint64_t now = RealTimeMs();
 		std::map<std::uint32_t, Site> byStack;
 		for (const Record& r : live) {
 			rep.liveBytes += r.weight;

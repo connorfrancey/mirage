@@ -164,6 +164,21 @@ namespace mirage::mem
 		return static_cast<double>(now.QuadPart) * 1e9 / static_cast<double>(f);
 	}
 
+	std::uint64_t RealTimeMs()
+	{
+		// KSYSTEM_TIME at 0x7FFE0008 (all Windows versions): LowPart, High1Time, High2Time; read until the two highs agree
+		struct KSystemTime { volatile ULONG low; volatile LONG high1; volatile LONG high2; };
+		const auto* t = reinterpret_cast<const KSystemTime*>(0x7FFE0008);
+		LONG high;
+		ULONG low;
+		do {
+			high = t->high1;
+			low = t->low;
+		} while (high != t->high2);
+		const std::uint64_t ticks = (static_cast<std::uint64_t>(static_cast<ULONG>(high)) << 32) | low;	// 100 ns
+		return ticks / 10000;
+	}
+
 	bool TimeThisCall() { return (++t_timing & (kTimingEvery - 1)) == 0; }
 
 	void OnAllocated(void* p, std::size_t bytes, double ns) noexcept
@@ -187,7 +202,7 @@ namespace mirage::mem
 			LargeAllocation a;
 			a.bytes = bytes;
 			a.tag = tag;
-			a.timeMs = GetTickCount64();
+			a.timeMs = RealTimeMs();
 			a.depth = RtlCaptureStackBackTrace(2, 10, reinterpret_cast<void**>(a.frames), nullptr);
 			AcquireSRWLockExclusive(&g_ringLock);
 			g_ring[g_ringHead] = a;

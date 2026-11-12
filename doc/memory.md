@@ -15,6 +15,7 @@ are never touched, hooked, walked or locked.
 | `process.h` | Process counters and an address-space walk (`VirtualQuery`, `GetProcessMemoryInfo`, `GlobalMemoryStatusEx`) | monitor |
 | `pool.h` | Fixed-size block pools (`FixedPool`, `SyncPool`, `ObjectPool<T>`) with a registry, slab trimming and a heap fallback | owner / any |
 | `arena.h` | Temporary memory (`Scratch` scopes on a per-thread arena, `ScratchAllocator<T>`) and long-lived memory (`PersistentAllocate`, `PersistentString`) | owner / any |
+| `allocators.h` | `BuddyAllocator` (power-of-two blocks in one reservation, split and merged), `SmallAllocator` / `SmallObject<T>` (size classes up to 256 B over SyncPools), `SmallBuffer<N>` (inline, then heap), `StackAllocator` (LIFO, checked, markers) | locked / owner |
 | `manager.h` | Orchestration: monitor thread, game-thread job, pressure handlers, report, leak checks | both |
 
 ## How it runs

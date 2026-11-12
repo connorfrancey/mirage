@@ -74,6 +74,16 @@ namespace mirage::reflect
 	// Forgets the members found so far: classes of a level's packages go with the level. On a level load.
 	void ClearCache();
 
+	// The path cache (Resolve): each path parsed once, each segment with an inline cache of its last type's member.
+	// Off: every call parses the path (the self-test measures one against the other).
+	void SetPathCache(bool on);
+	struct PathCacheStats
+	{
+		std::size_t paths = 0;
+		std::uint64_t hits = 0, misses = 0, inlineHits = 0;	// Paths found / parsed; segments that skipped the lookup
+	};
+	PathCacheStats GetPathCacheStats();
+
 	std::string NameOf(const Classes::UObject* object);			// "TdPlayerPawn_0"
 	std::string ClassNameOf(const Classes::UObject* object);		// "TdPlayerPawn"
 }
