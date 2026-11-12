@@ -466,6 +466,15 @@ bytes. An empty injection adds 0.10 µs a call, an empty function hook 0.22 µs.
 it in Prologue, the player bounces; the same class written in `.uc` and compiled in the game behaves identically; the
 corpus round-trip (decompile + compile every TdGame function) is byte-identical for an agreed share, the rest listed.
 
+**Status (2026-11-12): the compiler is done; runtime classes, states and lifetime are next.** UnrealLib (branch
+`uc-compiler`, `UnrealLib::Compiler`) compiles function and state bodies to bytecode. Round trip over every function
+and state of the game's script packages: 13,231 of 13,244 compile (99.9%), 12,866 are byte-identical (97.1%; the game's
+own packages 97.6%, TdGame 97.1%, Engine 97.8%, Core 99.2%). UnrealLib's `docs/compiler.md` lists the unwritten rules
+of the UE3 compiler it reproduces (Context sizes and the 5-byte skip on `Outer`, IsModification on struct paths,
+EatReturnValue, label table alignment, ...) and what stays different (a jump to the function's end printed as
+`return;`, assert line numbers, third-party packages built with another compiler). Runtime classes need the engine's
+object construction (StaticConstructObject, UStruct::Link, the class default object) found in the executable.
+
 ### 13. Levels and world building
 
 - **Level additions:** a mod places actors into an existing level without a new package (a TOML/T3D layer: class,
