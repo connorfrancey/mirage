@@ -10,6 +10,10 @@
 //     game = "1.0"                       # Game build it was made for (informative for now)
 //     entry = "hello.dll"                # Native code: a DLL in the mod's folder
 //     lua = "main.lua"                   # Lua code (default: main.lua when it exists)
+//     dotnet = "MyMod.dll"               # C# code: a .NET assembly in the mod's folder with one class deriving from
+//                                        # Mirage.Mod (built against managed/Mirage; runs on the bundled .NET runtime),
+//                                        # or "main.cs": a script, every .cs in the folder compiled in the game
+//                                        # (default: main.cs when it exists and the mod has no other code)
 //     phase = "engine"                   # When it loads: early (menu start), engine (default: the game layer is
 //                                        # ready) or world (the first level has loaded)
 //     hot_reload = true                  # Reloaded when its files change (default: true for Lua only mods, false
@@ -82,8 +86,9 @@ namespace mirage::mods
 		semver::Range mirage = semver::Range::Any();
 		std::string entry;				// "" = no native code
 		std::string lua;				// "" = no Lua code (resolved against the folder by Load)
+		std::string dotnet;				// "" = no C# code
 		Phase phase = Phase::Engine;
-		bool hotReload = false;			// Default: true when there is no entry DLL
+		bool hotReload = false;			// Default: true when there is no entry DLL (C# assemblies unload: they reload too)
 		std::vector<std::string> content;
 		std::vector<Dependency> required, optional, incompatible;
 		std::vector<SettingDecl> settings;	// In the order of the file

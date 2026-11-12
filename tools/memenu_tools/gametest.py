@@ -119,6 +119,32 @@ def install(game_dir: Path, dll: Path, loader: Path) -> None:
     pdb = dll.with_suffix(".pdb")
     if pdb.exists():
         shutil.copy2(pdb, menu_dir / "medge_menu.pdb")
+    install_dotnet(dll.parent, menu_dir)
+
+
+def install_dotnet(build_dir: Path, menu_dir: Path) -> None:
+    """The .NET runtime and Mirage.dll for C# mods (cmake/DotNet.cmake): <build>/dotnet -> memenu/dotnet. The runtime
+    (~70 MB) is copied only when its version changed; Mirage.dll every time (it is small)."""
+    src = build_dir / "dotnet"
+    if not src.is_dir():
+        return
+    dst = menu_dir / "dotnet"
+    stamps = sorted(p.name for p in src.glob("runtime-*.stamp"))
+    have = sorted(p.name for p in dst.glob("runtime-*.stamp")) if dst.is_dir() else []
+    if stamps != have:
+        for sub in ("host", "shared"):
+            if (dst / sub).exists():
+                shutil.rmtree(dst / sub)
+        for old in have:
+            (dst / old).unlink()
+        for sub in ("host", "shared"):
+            if (src / sub).is_dir():
+                shutil.copytree(src / sub, dst / sub)
+        for f in src.iterdir():
+            if f.is_file():
+                shutil.copy2(f, dst / f.name)
+    if (src / "mirage").is_dir():
+        shutil.copytree(src / "mirage", dst / "mirage", dirs_exist_ok=True)
 
 
 def write_options(game_dir: Path, options: dict[str, str], late_ms: int) -> None:

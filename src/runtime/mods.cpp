@@ -12,6 +12,7 @@
 #include "runtime/mod_io.h"
 #include "runtime/mod_world.h"
 #include "runtime/mod_tas.h"
+#include "runtime/mod_dotnet.h"
 #include "runtime/mem/manager.h"
 #include "sdk/SDK.hpp"
 #include "theme.h"
@@ -927,6 +928,7 @@ namespace mirage::mods
 			detail::RemoveGameHooks(mod);	// Before its code goes
 			world::Unloading(&mod);			// Its 3D drawing too
 			if (mod.content && content::Applied(*mod.content)) content::Restore(*mod.content);
+			if (!mod.manifest.dotnet.empty()) dotnet::UnloadMod(&mod);	// OnUnload, then its assembly context goes
 			mod.lua.reset();
 			if (mod.unload) {
 				Fault f;
@@ -991,6 +993,11 @@ namespace mirage::mods
 			mod.fingerprint = Fingerprint(mod.manifest.dir);
 			std::string problem;
 			if (!mod.manifest.entry.empty()) problem = LoadNative(mod);
+			if (problem.empty() && !mod.manifest.dotnet.empty()) {		// C# (runtime/mod_dotnet.h)
+				const std::string error = dotnet::LoadMod(&mod, mod.manifest.dir / FromUtf8(mod.manifest.dotnet));
+				// A script's compile errors already start with the file ("main.cs(5,17): error CS0029: ...")
+				if (!error.empty()) problem = error.starts_with(mod.manifest.dotnet) ? error : mod.manifest.dotnet + ": " + error;
+			}
 			if (problem.empty() && !mod.manifest.lua.empty()) {
 				std::string error;
 				mod.lua = LoadLua(&kApi, &mod, mod.manifest.dir / FromUtf8(mod.manifest.lua), error);
@@ -1057,7 +1064,10 @@ namespace mirage::mods
 
 		std::string Kind(const Manifest& m)
 		{
-			return !m.entry.empty() && !m.lua.empty() ? "native + lua" : !m.entry.empty() ? "native" : !m.lua.empty() ? "lua" : "content";
+			std::string kind;
+			for (const auto& [has, name] : {std::pair{!m.entry.empty(), "native"}, {!m.dotnet.empty(), "C#"}, {!m.lua.empty(), "lua"}})
+				if (has) kind += (kind.empty() ? "" : " + ") + std::string(name);
+			return kind.empty() ? "content" : kind;
 		}
 	}
 

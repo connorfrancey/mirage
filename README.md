@@ -699,6 +699,9 @@ MirrorsEdge.exe
 - **Lua 5.4** (compiled as C++, so a Lua error unwinds C++ frames) is the main way to write a mod: one sandboxed state
   per mod, no `io` / `os.execute` / `package.loadlib`, files only inside the mod's folder. Native DLL mods use the same
   API through a stable, versioned C ABI.
+- **C#** mods run on the bundled .NET 10 runtime (x86), started only when a C# mod is installed: each mod in its own
+  collectible load context (hot reload unloads it), exceptions contained per module. See `doc/csharp-mods.md` and
+  `examples/mods/hello-cs`.
 - **[UnrealLib](https://github.com/connorfrancey/UnrealLib)** reads the game's own packages (Core, Engine, TdGame) in
   the process, so mods reach any property or function by name, without generated bindings.
 

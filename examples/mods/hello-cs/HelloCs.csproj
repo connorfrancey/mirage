@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A C# Mirage mod. Build: dotnet build -c Release, then put HelloCs.dll (and its .pdb, for line numbers in errors)
+       next to mod.toml in memenu\mods\hello-cs\. Mirage.dll is the menu's (memenu\dotnet\mirage): referenced, never
+       copied next to the mod. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AssemblyName>HelloCs</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- In this repository the API project; outside it, a reference to the installed memenu\dotnet\mirage\Mirage.dll -->
+    <ProjectReference Include="..\..\..\managed\Mirage\Mirage.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

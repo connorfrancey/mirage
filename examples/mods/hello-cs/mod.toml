@@ -1,0 +1,8 @@
+# A C# mod (Mirage on .NET 10): `dotnet build -c Release` makes HelloCs.dll; put it next to this file.
+id = "hello-cs"
+name = "Hello (C#)"
+version = "1.0.0"
+description = "The C# example: a module that follows the player, one that fails on purpose"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+dotnet = "HelloCs.dll"

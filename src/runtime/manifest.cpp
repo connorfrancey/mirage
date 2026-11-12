@@ -103,7 +103,7 @@ namespace mirage::mods
 		};
 
 		static const std::set<std::string> known = {"id", "name", "version", "description", "authors", "mirage", "game",
-			"entry", "lua", "phase", "content", "dependencies", "optional", "incompatible", "settings", "hot_reload"};
+			"entry", "lua", "dotnet", "phase", "content", "dependencies", "optional", "incompatible", "settings", "hot_reload"};
 		for (const auto& [key, value] : root.as_table())
 			if (!known.count(key)) warn("unknown key '" + key + "' (ignored)");
 
@@ -132,6 +132,12 @@ namespace mirage::mods
 		m.entry = str("entry");
 		if (!m.entry.empty() && (!InsideFolder(m.entry) || !EndsWith(m.entry, ".dll")))
 			error("entry '" + m.entry + "' must be a .dll inside the mod's folder");
+		m.dotnet = str("dotnet");
+		if (!m.dotnet.empty() && (!InsideFolder(m.dotnet) || !(EndsWith(m.dotnet, ".dll") || EndsWith(m.dotnet, ".cs"))))
+			error("dotnet '" + m.dotnet + "' must be a .dll (a built assembly) or a .cs file (a script: every .cs in the "
+				  "folder is compiled) inside the mod's folder");
+		if (!m.dotnet.empty() && !m.entry.empty() && m.dotnet == m.entry)
+			error("dotnet and entry name the same file: a C# assembly is not a native DLL");
 		m.lua = str("lua");
 		if (!m.lua.empty() && (!InsideFolder(m.lua) || !EndsWith(m.lua, ".lua")))
 			error("lua '" + m.lua + "' must be a .lua file inside the mod's folder");
@@ -335,13 +341,17 @@ namespace mirage::mods
 			out.manifest.reset();
 		};
 		if (m.lua.empty() && std::filesystem::is_regular_file(dir / "main.lua")) m.lua = "main.lua";
+		// A C# script mod: main.cs, the way main.lua is found (only when nothing else is its code)
+		if (m.lua.empty() && m.entry.empty() && m.dotnet.empty() && std::filesystem::is_regular_file(dir / "main.cs")) m.dotnet = "main.cs";
 		if (Utf8(dir.filename()) != m.id) fail("the folder is '" + Utf8(dir.filename()) + "' but the id is '" + m.id + "' (they must match)");
 		else if (!m.entry.empty() && !std::filesystem::is_regular_file(dir / FromUtf8(m.entry)))
 			fail("entry " + m.entry + " is not in the folder");
 		else if (!m.lua.empty() && !std::filesystem::is_regular_file(dir / FromUtf8(m.lua)))
 			fail("lua " + m.lua + " is not in the folder");
-		else if (m.entry.empty() && m.lua.empty() && m.content.empty())
-			out.warnings.push_back(Utf8(file) + ": no entry, no Lua and no content: the mod does nothing");
+		else if (!m.dotnet.empty() && !std::filesystem::is_regular_file(dir / FromUtf8(m.dotnet)))
+			fail("dotnet " + m.dotnet + " is not in the folder");
+		else if (m.entry.empty() && m.lua.empty() && m.dotnet.empty() && m.content.empty())
+			out.warnings.push_back(Utf8(file) + ": no entry, no Lua, no C# and no content: the mod does nothing");
 		return out;
 	}
 

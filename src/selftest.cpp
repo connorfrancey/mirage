@@ -36,6 +36,7 @@
 #include "core/tasks.h"
 #include "runtime/crash_reporter.h"
 #include "runtime/hang.h"
+#include "runtime/mod_dotnet.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/manager.h"
 #include "runtime/mem/pool.h"
@@ -3791,6 +3792,139 @@ void TestCrashAndHang()
     End(s);
 }
 
+// C# mods (runtime/mod_dotnet.h): the .NET runtime starts, examples/mods/hello-cs (built by game-test with the .NET
+// SDK) ticks and reads the player, an exception in a module switches it off, hot reload unloads the old assembly, and
+// C# scripts (examples/mods/hello-script, tests/mods/script-error) compile in the game or say why not.
+void TestCSharpMods()
+{
+    Step& s = Begin("Mirage C# mods");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    bool found = false;
+    for (const mm::Info& i : mm::List())
+        if (i.id == "hello-cs") {
+            found = true;
+            if (!i.loaded) p.Problem("hello-cs didn't load: " + i.problem);
+            if (i.kind.find("C#") == std::string::npos) p.Problem("hello-cs is listed as " + i.kind);
+        }
+    if (!found) {
+        p.Problem("hello-cs isn't installed (game-test builds it with the .NET SDK)");
+        End(s);
+        return;
+    }
+    const auto st = mirage::dotnet::GetStatus();
+    if (!st.started) {
+        p.Problem("the C# runtime didn't start: " + st.problem);
+        End(s);
+        return;
+    }
+    char line[200];
+    std::snprintf(line, sizeof line, ".NET %s started in %.0f ms, %.1f MB of address space", st.version.c_str(), st.startMs,
+                  (static_cast<double>(st.addressBefore) - static_cast<double>(st.addressAfter)) / 1048576.0);
+    s.notes.push_back(line);
+
+    Module* hello = nullptr;
+    Module* thrower = nullptr;
+    modules::ForEach([&](modules::Tab&, Module& m) {
+        if (m.Name() == "Hello (C#)") hello = &m;
+        if (m.Name() == "Throw (C#)") thrower = &m;
+    });
+    if (!hello || !thrower) {
+        p.Problem("the C# modules aren't in the menu");
+        End(s);
+        return;
+    }
+    const auto intOf = [](Module* m, const char* name) {
+        auto* v = dynamic_cast<ctl::SliderInt*>(m->FindSetting(name));
+        return v ? v->Get() : -1;
+    };
+    const auto floatOf = [](Module* m, const char* name) {
+        auto* v = dynamic_cast<ctl::Slider*>(m->FindSetting(name));
+        return v ? v->Get() : -1e9f;
+    };
+
+    // 1. It ticks, gets events, reads the player
+    if (!hello->Enabled()) OnRenderThread([&] { hello->SetEnabled(true); });
+    const int ticksBefore = intOf(hello, "Ticks");
+    WaitTicks(30);
+    if (intOf(hello, "Ticks") <= ticksBefore) p.Problem("Hello (C#) doesn't tick");
+    if (intOf(hello, "Tick events") <= 0) p.Problem("the C# tick event never arrived");
+    float pawnZ = 0.f;
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) pawnZ = pawn->Location.Z; });
+    if (std::fabs(floatOf(hello, "Pawn Z") - pawnZ) > 50.f)
+        p.Problem("C# read Location.Z " + std::to_string(floatOf(hello, "Pawn Z")) + ", the pawn is at " + std::to_string(pawnZ));
+    for (const auto& e : sched::Snapshot())
+        if (e.name == "Hello (C#)") {
+            std::snprintf(line, sizeof line, "C# module tick %.1f us average (reads the pawn by path)", e.avgUs);
+            s.notes.push_back(line);
+        }
+
+    // 2. An exception in a module: logged, the module off, the game untouched
+    p.Expect("thrown on purpose by the self-test");
+    const auto logContains = [](const std::string& part) {
+        std::vector<logging::Entry> entries;
+        logging::CopySince(0, entries);
+        return std::any_of(entries.begin(), entries.end(), [&](const logging::Entry& e) { return e.text.find(part) != std::string::npos; });
+    };
+    OnRenderThread([&] { thrower->SetEnabled(true); });
+    if (!WaitFor(5.0, [&] { return !thrower->Enabled(); })) p.Problem("a C# module that throws stayed on");
+    if (!WaitFor(2.0, [&] { return logContains("Throw (C#): OnTick threw InvalidOperationException"); }))
+        p.Problem("the C# exception wasn't logged with its module");
+
+    // 3. Hot reload: the old assembly context unloads (nothing kept it alive), the module comes back and ticks
+    std::string reload = "timed out";
+    OnGameThread([&] { reload = mm::Reload("hello-cs"); }, 15.0);
+    if (!reload.empty()) p.Problem("hot reload of hello-cs: " + reload);
+    Module* again = nullptr;
+    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "Hello (C#)") again = &m; });
+    if (!again) p.Problem("Hello (C#) is gone after the reload");
+    else {
+        if (!again->Enabled()) OnRenderThread([&] { again->SetEnabled(true); });
+        const int t0 = intOf(again, "Ticks");
+        WaitTicks(20);
+        if (intOf(again, "Ticks") <= t0) p.Problem("Hello (C#) doesn't tick after the reload");
+    }
+    // 4. Scripts: examples/mods/hello-script is compiled in the game and ticks; tests/mods/script-error doesn't compile,
+    //    and why names the file and line; the editor's check sees unsaved text
+    const mm::Info* script = nullptr;
+    const mm::Info* broken = nullptr;
+    const auto mods = mm::List();
+    for (const mm::Info& i : mods) {
+        if (i.id == "hello-script") script = &i;
+        if (i.id == "script-error") broken = &i;
+    }
+    if (!script || !script->loaded) p.Problem("the C# script mod hello-script didn't load: " + (script ? script->problem : "not installed"));
+    else {
+        Module* sm = nullptr;
+        modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "Script (C#)") sm = &m; });
+        if (!sm) p.Problem("the script's module isn't in the menu");
+        else {
+            if (!sm->Enabled()) OnRenderThread([&] { sm->SetEnabled(true); });
+            const int t0 = intOf(sm, "Ticks");
+            WaitTicks(20);
+            if (intOf(sm, "Ticks") <= t0) p.Problem("the C# script's module doesn't tick");
+        }
+        const auto clean = mirage::dotnet::CheckScripts(script->dir, {}, {});
+        if (clean.errors != 0) p.Problem("checking hello-script found " + std::to_string(clean.errors) + " error(s): " + clean.output);
+        const auto dirty = mirage::dotnet::CheckScripts(script->dir, script->dir / "main.cs", "public sealed class X : Mod { int y = ; }");
+        if (dirty.errors <= 0 || dirty.output.find("main.cs(1,") == std::string::npos)
+            p.Problem("checking unsaved text with an error: " + std::to_string(dirty.errors) + " error(s), " + dirty.output);
+        if (const auto ms = dirty.output.rfind('('); ms != std::string::npos) s.notes.push_back("script check " + dirty.output.substr(ms));
+    }
+    if (!broken) p.Problem("tests/mods/script-error isn't installed");
+    else if (broken->loaded) p.Problem("script-error loaded although it doesn't compile");
+    else if (broken->problem.find("main.cs(5,") == std::string::npos || broken->problem.find("CS0029") == std::string::npos)
+        p.Problem("script-error's problem doesn't name the file, line and error: " + broken->problem);
+    for (const auto& w : script ? script->warnings : std::vector<std::string>{}) s.notes.push_back("hello-script: " + w);
+
+    const auto after = mirage::dotnet::GetStatus(true);
+    if (after.stillLoaded != 0) p.Problem(std::to_string(after.stillLoaded) + " unloaded C# mod context(s) still alive (a reference kept it)");
+    std::snprintf(line, sizeof line, "managed heap %.2f MB after a reload, %d old contexts alive", after.managedBytes / 1048576.0,
+                  after.stillLoaded);
+    s.notes.push_back(line);
+    End(s);
+}
+
 void TestCacheSystem()
 {
     Step& s = Begin("Cache system");
@@ -4540,6 +4674,7 @@ const Named* FeatureList()
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},
         {"Crash reporter and hang detector", &TestCrashAndHang, false},
+        {"Mirage C# mods", &TestCSharpMods, false},
         {"Mirage content", &TestMirageContent, false},
         {"Mirage textures", &TestMirageTextures, false},
 #if MEMENU_FEATURE_TAS

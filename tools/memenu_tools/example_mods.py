@@ -46,6 +46,34 @@ def build_native(tc: Toolchain, name: str = "hello", compiler: str | None = None
     return build / "mod" / name, f"{name} built with {tag}"
 
 
+def build_csharp(name: str = "hello-cs", source: Path | None = None) -> tuple[Path | None, str]:
+    """Builds a C# mod (its .csproj) with the .NET SDK, the way a mod author would, and lays it out as a mod folder:
+    mod.toml, the mod's own DLL and PDB (never Mirage.dll: the menu's is shared). Returns (folder, what happened)."""
+    source = source or EXAMPLES / name
+    dotnet = shutil.which("dotnet")
+    if not dotnet:
+        return None, "the .NET SDK (dotnet) isn't installed: C# mods can't be built"
+    projects = list(source.glob("*.csproj"))
+    if len(projects) != 1:
+        return None, f"{source} needs exactly one .csproj"
+    build = OUT / f"{name}-dotnet"
+    r = subprocess.run([dotnet, "build", str(projects[0]), "-c", "Release", "-o", str(build), "--nologo", "-v", "quiet"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return None, (r.stdout + r.stderr)[-3000:]
+    folder = OUT / name
+    if folder.exists():
+        shutil.rmtree(folder)
+    folder.mkdir(parents=True)
+    shutil.copy2(source / "mod.toml", folder / "mod.toml")
+    assembly = projects[0].stem
+    for ext in (".dll", ".pdb"):
+        f = build / (assembly + ext)
+        if f.exists():
+            shutil.copy2(f, folder / f.name)
+    return folder, f"{name} built with dotnet"
+
+
 def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
     """Every mod the self-test loads: the examples and tests/mods, the native ones built. (folders, what was built)"""
     hello, how = build_native(tc, "hello")
@@ -59,9 +87,17 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
             return None, what
         native.append(folder)
         built.append(what)
+    csharp, what = build_csharp("hello-cs")
+    if csharp is None:
+        return None, what
+    native.append(csharp)
+    built.append(what)
     lua = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.lua").exists()]
-    mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", *lua]
-    return mods, f"{', '.join(built)}, {len(lua) + 1} Lua mods, high-steps and retexture (content)"
+    scripts = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.cs").exists()]  # Compiled in the game
+    mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", *lua,
+            EXAMPLES / "hello-script", *scripts]
+    return mods, (f"{', '.join(built)}, {len(lua) + 1} Lua mods, {len(scripts) + 1} C# scripts, high-steps and retexture "
+                  "(content)")
 
 
 def install_for_test(game_dir: Path, folders: list[Path]) -> Path:

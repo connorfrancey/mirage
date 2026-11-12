@@ -1,0 +1,9 @@
+# A C# script mod: no project, no build. Every .cs file in this folder is compiled when the game loads the mod
+# (main.cs is found the way main.lua is; `dotnet = "main.cs"` says it explicitly). Edit and save: it hot reloads.
+id = "hello-script"
+name = "Hello (C# script)"
+version = "1.0.0"
+description = "The C# script example: compiled in the game, no SDK needed"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+hot_reload = true

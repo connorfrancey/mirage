@@ -1,0 +1,5 @@
+# Self-test: a C# script that doesn't compile. It must not load, and the reason must name the file and line.
+id = "script-error"
+version = "1.0.0"
+mirage = "^0.1"
+dotnet = "main.cs"

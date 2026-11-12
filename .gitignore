@@ -13,3 +13,7 @@ __pycache__/
 
 # CPM dependency cache on CI (.github/workflows/release.yml)
 .cpm-cache/
+
+# .NET build output (managed/, C# example mods)
+**/obj/
+**/bin/

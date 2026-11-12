@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Mirage.dll: the API C# mods are written against, and the host the menu calls into (Mirage.Host.Bridge).
+       Mods reference this assembly; it is loaded once and shared by every mod (each mod in its own collectible
+       AssemblyLoadContext, so it can be unloaded and loaded again: hot reload). -->
+  <PropertyGroup>
+    <AssemblyName>Mirage</AssemblyName>
+    <RootNamespace>Mirage</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <!-- The host's runtimeconfig.json (written next to the DLL): conservative settings for a 32-bit game process -->
+    <GenerateRuntimeConfigurationFiles>true</GenerateRuntimeConfigurationFiles>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- C# scripts compiled in the game (Host/Scripts.cs): Roslyn as shipped with .NET 10. Its DLLs go next to Mirage.dll. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Keep the GC small and predictable inside the game: no background GC thread, memory given back, a cap -->
+    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.GC.HeapHardLimit" Value="134217728" />
+    <!-- No ICU: culture data isn't needed by mods, and loading it costs address space -->
+    <RuntimeHostConfigurationOption Include="System.Globalization.Invariant" Value="true" />
+  </ItemGroup>
+</Project>

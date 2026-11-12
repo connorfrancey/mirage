@@ -172,6 +172,7 @@ endif()
 
 include(cmake/Libraries.cmake)
 include(cmake/XxHash.cmake)
+include(cmake/DotNet.cmake)
 
 # The first-party mods (mods/): native ones built as their own DLLs (cmake/FirstPartyMods.cmake), then every mod's
 # files embedded in the DLL, written to the mods folder at startup (runtime/firstparty.h)
