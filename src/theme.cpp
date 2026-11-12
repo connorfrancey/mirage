@@ -192,6 +192,66 @@ Theme MakeLight(ImVec4 accent)
     return t;
 }
 
+// Catppuccin (https://catppuccin.com/palette, MIT): the four flavours' official colors, as 0xRRGGBB. The accent is
+// Mauve, Catppuccin's default. Text stays readable on everything it can sit on: accent-filled backgrounds (buttons,
+// headers, titles) are the accent mixed toward the base, never the pure pastel.
+struct Catppuccin {
+    std::uint32_t accent, text, subtext1, subtext0, overlay1, overlay0, surface2, surface1, surface0, base, mantle, crust;
+    bool light;
+};
+constexpr Catppuccin kLatte     {0x8839ef, 0x4c4f69, 0x5c5f77, 0x6c6f85, 0x8c8fa1, 0x9ca0b0, 0xacb0be, 0xbcc0cc, 0xccd0da, 0xeff1f5, 0xe6e9ef, 0xdce0e8, true};
+constexpr Catppuccin kFrappe    {0xca9ee6, 0xc6d0f5, 0xb5bfe2, 0xa5adce, 0x838ba7, 0x737994, 0x626880, 0x51576d, 0x414559, 0x303446, 0x292c3c, 0x232634, false};
+constexpr Catppuccin kMacchiato {0xc6a0f6, 0xcad3f5, 0xb8c0e0, 0xa5adcb, 0x8087a2, 0x6e738d, 0x5b6078, 0x494d64, 0x363a4f, 0x24273a, 0x1e2030, 0x181926, false};
+constexpr Catppuccin kMocha     {0xcba6f7, 0xcdd6f4, 0xbac2de, 0xa6adc8, 0x7f849c, 0x6c7086, 0x585b70, 0x45475a, 0x313244, 0x1e1e2e, 0x181825, 0x11111b, false};
+
+ImVec4 Rgb(std::uint32_t v, float a = 1.f)
+{
+    return { static_cast<float>((v >> 16) & 0xFF) / 255.f, static_cast<float>((v >> 8) & 0xFF) / 255.f,
+             static_cast<float>(v & 0xFF) / 255.f, a };
+}
+
+Theme MakeCatppuccin(const Catppuccin& p)
+{
+    Theme t;
+    if (p.light) ImGui::StyleColorsLight(&t.style);
+    else         ImGui::StyleColorsDark(&t.style);
+    CommonStyle(t.style);
+
+    const ImVec4 accent = Rgb(p.accent), base = Rgb(p.base);
+    const auto tint = [&](float amount) { return Mix(base, accent, amount); };   // amount of accent over the base
+    ImVec4* c = t.style.Colors;
+    c[ImGuiCol_Text]             = Rgb(p.text);
+    c[ImGuiCol_TextDisabled]     = Rgb(p.overlay0);
+    c[ImGuiCol_WindowBg]         = Rgb(p.base, 0.97f);
+    c[ImGuiCol_PopupBg]          = Rgb(p.mantle, 0.98f);
+    c[ImGuiCol_Border]           = Rgb(p.surface1, 0.80f);
+    c[ImGuiCol_TitleBg]          = Rgb(p.mantle);
+    c[ImGuiCol_TitleBgCollapsed] = Rgb(p.mantle);
+    c[ImGuiCol_TitleBgActive]    = tint(0.45f);
+    c[ImGuiCol_FrameBg]          = Rgb(p.surface0);
+    c[ImGuiCol_FrameBgHovered]   = Rgb(p.surface1);
+    c[ImGuiCol_FrameBgActive]    = Rgb(p.surface2);
+    c[ImGuiCol_CheckMark]        = accent;
+    c[ImGuiCol_SliderGrab]       = accent;
+    c[ImGuiCol_SliderGrabActive] = Mix(accent, Rgb(p.text), 0.30f);
+    c[ImGuiCol_Button]           = Rgb(p.surface0);
+    c[ImGuiCol_ButtonHovered]    = tint(0.35f);
+    c[ImGuiCol_ButtonActive]     = tint(0.55f);
+    c[ImGuiCol_Header]           = tint(0.30f);
+    c[ImGuiCol_HeaderHovered]    = tint(0.40f);
+    c[ImGuiCol_HeaderActive]     = tint(0.55f);
+    c[ImGuiCol_Separator]        = Rgb(p.surface1);
+
+    t.menu.accent     = accent;
+    t.menu.rowBg      = Rgb(p.mantle);
+    t.menu.rowHover   = Rgb(p.surface0);
+    t.menu.text       = Rgb(p.subtext1);
+    t.menu.textActive = Rgb(p.text);
+    t.menu.textDim    = Rgb(p.overlay1);
+    t.menu.settingsBg = Rgb(p.crust);
+    return t;
+}
+
 std::vector<std::pair<std::string, Theme>> Builtins()
 {
     return {
@@ -199,6 +259,10 @@ std::vector<std::pair<std::string, Theme>> Builtins()
         {"Midnight",    MakeDark({0.30f, 0.52f, 1.00f, 1.f})},
         {"Emerald",     MakeDark({0.15f, 0.78f, 0.48f, 1.f})},
         {"Light",       MakeLight({0.85f, 0.25f, 0.22f, 1.f})},
+        {"CatppuccinLatte",     MakeCatppuccin(kLatte)},
+        {"CatppuccinFrappe",    MakeCatppuccin(kFrappe)},
+        {"CatppuccinMacchiato", MakeCatppuccin(kMacchiato)},
+        {"CatppuccinMocha",     MakeCatppuccin(kMocha)},
     };
 }
 
