@@ -31,6 +31,9 @@
 #include "runtime/reflect.h"
 #include "runtime/layout.h"
 #include "runtime/lua_vm.h"
+#include "runtime/mem/arena.h"
+#include "runtime/mem/manager.h"
+#include "runtime/mem/pool.h"
 #include "runtime/memory.h"
 #include "runtime/mods.h"
 #include "runtime/resolve.h"
@@ -3542,6 +3545,102 @@ void TestMirageModHooks()
 // The cache system (core/cache_evict.h, core/cache_sched.h, game/object_query.h): the object index is built in slices by
 // the cache scheduler; its answers are the same as a scan of the whole object list, and faster (timed here against the
 // scans it replaced); the actor cache reads the levels' own actor lists; everything is under the eviction manager.
+// The memory manager (runtime/mem): it measures the process and its address space, finds a leak made on purpose, answers
+// simulated pressure (caches to their floor, handlers called, recovery after) and costs little per step.
+void TestMemoryManager()
+{
+    Step& s = Begin("Memory manager");
+    Probe p(s);
+    namespace mm = mirage::mem;
+    char line[240];
+
+    // 1. Measurements: an address space walk finished, the process read
+    if (!WaitFor(15.0, [] { return mm::GetStatus().address.complete; })) p.Problem("no address space walk finished in 15 s");
+    mm::Status st = mm::GetStatus();
+    if (st.process.privateBytes == 0) p.Problem("the process's memory was not read");
+    std::snprintf(line, sizeof line, "address space: %.0f MB free, largest block %.0f MB, fragmentation %.2f, %zu regions walked in %.2f ms",
+                  st.address.free.totalFree / 1048576.0, st.address.free.largestFree / 1048576.0, st.address.free.Index(), st.address.regions,
+                  st.address.walkMs);
+    s.notes.push_back(line);
+    std::snprintf(line, sizeof line, "pressure %s; menu heap %.1f MB; %zu Lua mods measured", mm::LevelName(st.level),
+                  st.heap.live / 1048576.0, st.modLua.size());
+    s.notes.push_back(line);
+
+    // 2. A leak made on purpose, found by its stack; what was freed is not reported
+    std::vector<char*> leaked;
+    mm::sampler::Report leak;
+    {
+        mm::LeakCheck check;
+        for (int i = 0; i < 3; ++i) leaked.push_back(new char[1000]);
+        for (int i = 0; i < 50; ++i) delete[] new char[500];
+        leak = check.Finish();
+    }
+    if (leak.liveBytes < 3000) p.Problem("the leak check found " + std::to_string(leak.liveBytes) + " bytes, not the 3,000 left on purpose");
+    if (leak.liveBytes > 3000 + 2048) p.Problem("the leak check found " + std::to_string(leak.liveBytes) + " bytes: freed blocks counted too");
+    if (leak.sites.empty() || leak.sites[0].frames.empty()) p.Problem("the leak has no call stack");
+    else s.notes.push_back("leak found at " + mm::sampler::Describe(leak.sites[0].frames[0]));
+    for (char* c : leaked) delete[] c;
+    if (mm::sampler::CurrentMode() != mm::Configured().tracking) p.Problem("the leak check didn't put the tracking mode back");
+
+    // 3. Simulated pressure: handlers run, caches go to their floor, then come back
+    // ("Ended": any level under High after it; this machine may sit at Elevated on its own, e.g. little commit left)
+    struct Seen { std::atomic<int> high{0}, normal{0}; } seen;
+    const int handler = mm::AddPressureHandler("self-test", 0, [&seen](mm::Level level, bool) {
+        if (level >= mm::Level::High) ++seen.high;
+        else if (seen.high.load() > 0) ++seen.normal;
+        return std::size_t{0};
+    });
+    const mm::Config cfg = mm::Configured();
+    const std::size_t budgetBefore = cache::Evictions().Budget();
+    if (!cfg.act) s.notes.push_back("the Memory module isn't acting (switched off): pressure checks skipped");
+    else {
+        mm::SimulatePressure(mm::Level::High, 3.0);
+        if (!WaitFor(5.0, [&] { return seen.high.load() > 0; })) p.Problem("simulated High pressure never reached the handlers");
+        // High halves the budget each second (gradual: no single long frame); 3 s of it takes 16 MB to 2 MB or the floor
+        if (!WaitFor(3.5, [&] { return cache::Evictions().Budget() <= std::max(cfg.cacheMin, budgetBefore / 4); }))
+            p.Problem("under High pressure the cache budget is still " + std::to_string(cache::Evictions().Budget() >> 20) + " MB");
+        if (!WaitFor(10.0, [&] { return seen.normal.load() > 0; }))
+            p.Problem(std::string("the handlers were not told the pressure ended (level now ") + mm::LevelName(mm::GetStatus().level) + ": " +
+                      mm::GetStatus().reason + ")");
+        if (!WaitFor(30.0, [&] { return cache::Evictions().Budget() >= std::min(budgetBefore, cfg.cacheMax); }))
+            p.Problem("the cache budget didn't come back after the pressure (" + std::to_string(cache::Evictions().Budget() >> 20) + " MB)");
+        st = mm::GetStatus();
+        if (st.actions == 0) p.Problem("no pressure action was counted");
+    }
+    mm::RemovePressureHandler(handler);
+
+    // 4. A trim on request, pools and arenas in the report, the mods' API
+    {
+        mm::SyncObjectPool<std::array<int, 16>> pool("self-test pool");
+        std::vector<std::array<int, 16>*> made;
+        for (int i = 0; i < 500; ++i) made.push_back(pool.Create());
+        for (auto* m : made) pool.Destroy(m);
+        mm::Scratch scratch;
+        (void)scratch.Array<int>(4096);
+        const std::string report = mm::Report(false);
+        for (const char* part : {"Pressure:", "Address space:", "Menu heap:", "Profiler:", "self-test pool", "Caches:"})
+            if (report.find(part) == std::string::npos) p.Problem(std::string("the report has no \"") + part + "\"");
+        mm::RequestTrim();
+        if (!WaitFor(5.0, [&] { return pool.Stats().slabs <= 1; })) p.Problem("a requested trim didn't free the pool's empty slabs");
+    }
+    MirageMemoryStats ms{};
+    ms.size = sizeof ms;
+    if (mirage::mods::Api()->memory_stats(nullptr, &ms) != 1 || ms.process_private == 0) p.Problem("memory_stats gave nothing");
+
+    // 5. Its own cost
+    st = mm::GetStatus();
+    // Steady state first: a few steps with nothing to do after the trim above
+    WaitFor(4.0, [] { return false; });
+    st = mm::GetStatus();
+    std::snprintf(line, sizeof line, "game thread step %.3f ms now, %.3f average, %.3f max (an action: caches enforced, mods told); monitor pass %.2f ms (max %.2f, own thread); malloc %.0f ns average (timed 1 in %u)",
+                  st.stepMs, st.avgStepMs, st.maxStepMs, st.monitorMs, st.maxMonitorMs, mm::ReadTiming(true).averageNs, mm::kTimingEvery);
+    s.notes.push_back(line);
+    s.notes.push_back(std::string("pressure ") + mm::LevelName(st.level) + (st.reason.empty() ? "" : ": " + st.reason));
+    if (st.stepMs > 1.0) p.Problem("a manager step with nothing to do took " + std::to_string(st.stepMs) + " ms on the game thread (budget 1 in debug)");
+    if (st.maxStepMs > 10.0) p.Problem("a manager action took " + std::to_string(st.maxStepMs) + " ms on the game thread (budget 10 in debug)");
+    End(s);
+}
+
 void TestCacheSystem()
 {
     Step& s = Begin("Cache system");
@@ -4289,6 +4388,7 @@ const Named* FeatureList()
         {"Mirage hooks from mods", &TestMirageModHooks, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
+        {"Memory manager", &TestMemoryManager, false},
         {"Mirage content", &TestMirageContent, false},
         {"Mirage textures", &TestMirageTextures, false},
 #if MEMENU_FEATURE_TAS

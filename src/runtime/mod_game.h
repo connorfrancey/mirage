@@ -72,4 +72,5 @@ namespace mirage::mods
 																	// skipped it (event_skip)
 	void DispatchKey(int vk);										// The window's thread
 	void DispatchStateRestored();									// Game thread: a TAS snapshot was put back
+	void DispatchMemoryPressure(int level);							// Game thread: the memory manager's level changed (or holds high)
 }

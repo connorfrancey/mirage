@@ -32,6 +32,7 @@
 #include "runtime/texture_overlays.h"
 #include "runtime/script_patch.h"
 #include "runtime/firstparty.h"
+#include "runtime/mem/manager.h"
 #endif
 #if MEMENU_FEATURE_TAS
 #include "tas/tas.h"
@@ -109,6 +110,7 @@ static void Run(HMODULE module)
             static std::atomic<bool> levelLoaded{false}, worldLoaded{false};
             game::OnLevelLoad([](bool finished) {
                 mirage::mods::DispatchLevelLoad(finished, finished ? game::MapName() : std::string());
+                mirage::mem::OnLevelLoad(finished, finished ? game::MapName() : std::string());
                 if (!finished) return;
                 levelLoaded = true;
                 mirage::reflect::ClearCache();   // Classes of the old level's packages are gone
@@ -127,6 +129,14 @@ static void Run(HMODULE module)
             // A TAS rewind: the game's memory went back (the mods' own didn't: tas/memory_map.h leaves memenu\ out)
             game::OnStateRestored([] { mirage::mods::DispatchStateRestored(); });
             STARTUP_STEP(levels::Init());
+            // The memory manager (runtime/mem/manager.h): a cache scheduler job, after the object queries made theirs.
+            // Under pressure it also tells the mods (MIRAGE_EVENT_MEMORY_PRESSURE), and its report lists their Lua memory.
+            mirage::mem::AddPressureHandler("Mods", 100, [](mirage::mem::Level level, bool) {
+                mirage::mods::DispatchMemoryPressure(static_cast<int>(level));
+                return std::size_t{0};
+            });
+            mirage::mem::SetModMemoryProvider([] { return mirage::mods::LuaMemoryByMod(); });
+            STARTUP_STEP(mirage::mem::Start());
             STARTUP_STEP(mirage::mods::LoadPhase(mirage::mods::Phase::Engine));   // The game layer is up
             // Hot reload: mods whose files changed, checked twice a second (game thread, between the modules' ticks)
             sched::AddTask("Mirage mod reload", {0.5f, sched::Priority::Background, {}, {}}, [] { mirage::mods::ReloadChanged(); });
@@ -174,6 +184,7 @@ static void Run(HMODULE module)
         tas::Shutdown();        // The snapshot workers
 #endif
 #if MEMENU_GAME
+        mirage::mem::Stop();         // Saves what it learnt about the levels; no pressure events to mods from here
         mirage::hooks::RemoveAll();  // Functions back to their own code before this DLL goes
         mirage::detours::RemoveAll();   // Mods' detours, before MinHook is shut down
         mirage::textures::Shutdown();   // Its worker, and the package file redirects (MinHook too)

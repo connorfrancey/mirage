@@ -24,6 +24,14 @@ add_executable(memenu_tests
         test_abi.cpp
         test_resolve.cpp
         test_detours.cpp
+        test_memory.cpp
+        # The memory manager's parts without the game (runtime/mem): the test exe keeps the CRT's own operator new
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/analysis.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/pool.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/arena.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/heap.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/sampler.cpp
+        ${CMAKE_SOURCE_DIR}/src/runtime/mem/process.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/detours.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/resolve.cpp
         ${CMAKE_SOURCE_DIR}/src/runtime/semver.cpp

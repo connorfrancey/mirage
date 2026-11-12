@@ -17,6 +17,9 @@
 // doesn't know go to the game (what they print comes back); `game <cmd>` sends one there even if the menu has a
 // command of that name. `help` lists the menu's commands, `help <name>` explains one, `find <text>` searches all.
 // History is kept in console_history.txt next to the DLL, aliases with the config, scripts (`run name`) in scripts/.
+#if MEMENU_GAME
+#include "runtime/mem/manager.h"
+#endif
 #include "core/module.h"
 #include "core/setting.h"
 #include "core/shell.h"
@@ -186,6 +189,7 @@ const Builtin kBuiltins[] = {
     {"run", "run <script>", "Run the commands in scripts/<script>.cfg next to the DLL, one per line"},
     {"game", "game <command>", "Send the command to the game, even if the menu has one by that name"},
     {"log", "log [on | off]", "Show the menu's warnings and errors here"},
+    {"memory", "memory [report | stacks | trim | mark | since]", "The memory manager: its report (stacks: with call stacks), give memory back now, or what is still live since a mark"},
     {"exit", "exit", "Close the console"},
 };
 
@@ -524,6 +528,7 @@ private:
         else if (name == "tp") Teleport(args);
         else if (name == "run") Run(args, depth);
         else if (name == "log") Log(args);
+        else if (name == "memory") MemoryCommand(args);
         else if (name == "exit") SetEnabled(false);
         else if (name == "game") GameCommand(rest);
         else GameCommand(Trim(raw));
@@ -552,6 +557,52 @@ private:
             else if (!known) Post(Kind::Info, "sent to the game (no output; '" + word + "' isn't a command the console knows)");
         });
     }
+
+    // memory [report | stacks | trim | mark | since]
+    void MemoryCommand(const std::vector<std::string>& args)
+    {
+#if MEMENU_GAME
+        const std::string what = args.empty() ? "report" : Lower(args[0]);
+        const auto printLines = [this](const std::string& text) {
+            std::size_t start = 0;
+            while (start <= text.size()) {
+                const std::size_t end = text.find('\n', start);
+                const std::string lineText = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+                if (!lineText.empty() || end != std::string::npos) Print(Kind::Output, lineText);
+                if (end == std::string::npos) break;
+                start = end + 1;
+            }
+        };
+        if (what == "report" || what == "stacks") printLines(mirage::mem::Report(what == "stacks"));
+        else if (what == "trim") {
+            mirage::mem::RequestTrim();
+            Print(Kind::Info, "The memory manager gives memory back at its next step (see the log)");
+        } else if (what == "mark") {
+            memoryMark_ = mirage::mem::sampler::Generation();
+            Print(Kind::Info, "Mark set: \"memory since\" shows what is still live of what is allocated from now");
+        } else if (what == "since") {
+            const auto rep = mirage::mem::sampler::Snapshot(memoryMark_, 10);
+            char buf[160];
+            std::snprintf(buf, sizeof buf, "Live since the mark (estimated): %.2f MB in %llu blocks", static_cast<double>(rep.liveBytes) / 1048576.0,
+                          static_cast<unsigned long long>(rep.liveBlocks));
+            Print(Kind::Output, buf);
+            for (const auto& site : rep.sites) {
+                std::string frames;
+                for (std::size_t i = 0; i < site.frames.size() && i < 5; ++i)
+                    frames += (i ? " < " : "") + mirage::mem::sampler::Describe(site.frames[i]);
+                std::snprintf(buf, sizeof buf, "  %.1f KB in %llu blocks [%s] ", static_cast<double>(site.liveBytes) / 1024.0,
+                              static_cast<unsigned long long>(site.liveBlocks), mirage::mem::TagName(site.tag));
+                Print(Kind::Output, buf + frames);
+            }
+        } else {
+            Print(Kind::Error, "memory: report, stacks, trim, mark or since");
+        }
+#else
+        (void)args;
+        Print(Kind::Error, "memory: this build has no game layer (no memory manager)");
+#endif
+    }
+    std::uint32_t memoryMark_ = 0;
 
     void Help(const std::vector<std::string>& args)
     {

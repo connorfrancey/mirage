@@ -72,6 +72,9 @@ namespace mirage::mods
 		bool offNextStart = false;				// Switched off in the mod manager (disabled.toml)
 		bool crashed = false;					// In crashes.toml: not loaded until allowed again
 	};
+	// Each loaded Lua mod's Lua memory, biggest first: {id, bytes}. Game thread (reloads replace the states there).
+	std::vector<std::pair<std::string, std::size_t>> LuaMemoryByMod();
+
 	// Every mod found, loaded or not, in load order then the rest
 	std::vector<Info> List();
 

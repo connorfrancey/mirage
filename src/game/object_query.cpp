@@ -8,6 +8,7 @@
 #include "game/game.h"
 #include "game/object_ref.h"
 #include "game/uobject.h"
+#include "runtime/mem/heap.h"
 
 #include <spdlog/spdlog.h>
 
@@ -100,6 +101,8 @@ namespace game
 		// One slice of the next pass (the maintenance job). True when a pass was completed.
 		bool Step(double budgetMs)
 		{
+			static const auto kTag = mirage::mem::RegisterTag("Object index");
+			mirage::mem::TagScope tag(kTag);
 			State& s = S();
 			if (s.next.scanned == 0) s.next.levelEpoch = cache::LevelEpoch();
 			if (s.next.levelEpoch != cache::LevelEpoch()) {	// A level load meanwhile: start over
@@ -150,10 +153,16 @@ namespace game
 		std::vector<Classes::UObject*> out;
 		if (!cls) return out;
 		const Index& index = Current(freshness);
+		std::vector<Classes::UObject*> found;
 		for (const auto& [c, slots] : index.byClass) {
-			if (!ClassIsA(c, cls)) continue;
+			// The class pointer is from when the index was built: a class of a level that unloaded since is freed memory,
+			// and walking its Super chain reads garbage. Only look at it through objects still alive in their slots (a
+			// class with a live instance is alive, and so are the classes it extends).
+			found.clear();
 			for (const std::uint32_t slot : slots)
-				if (Classes::UObject* o = At(slot, c)) out.push_back(o);
+				if (Classes::UObject* o = At(slot, c)) found.push_back(o);
+			if (found.empty() || !ClassIsA(c, cls)) continue;
+			out.insert(out.end(), found.begin(), found.end());
 		}
 		// Slots added since the index was built
 		const auto& objects = Objects();

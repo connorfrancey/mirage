@@ -11,6 +11,7 @@
 #include "runtime/mod_io.h"
 #include "runtime/mod_world.h"
 #include "runtime/mod_tas.h"
+#include "runtime/mem/manager.h"
 #include "sdk/SDK.hpp"
 #include "theme.h"
 #include "runtime/resolve.h"
@@ -789,6 +790,26 @@ namespace mirage::mods
 			return static_cast<uint32_t>(out.size());
 		}
 
+		// The memory manager's last sample, and this mod's Lua memory as of it (any thread: nothing here reads a mod)
+		int32_t MIRAGE_CALL MemoryStats(MirageMod* mod, MirageMemoryStats* out)
+		{
+			if (!out || out->size < sizeof(uint32_t)) return 0;
+			MirageMemoryStats s{};
+			s.size = sizeof s;
+			const mem::Status st = mem::GetStatus();
+			s.pressure = static_cast<int32_t>(st.level);
+			s.process_private = st.process.privateBytes;
+			s.process_working_set = st.process.workingSet;
+			s.address_free = st.address.complete ? st.address.free.totalFree : st.process.addressAvailable;
+			s.address_largest_free = st.address.complete ? st.address.free.largestFree : 0;
+			s.menu_heap = static_cast<uint64_t>(std::max<std::int64_t>(st.heap.live, 0));
+			if (mod)
+				for (const auto& [id, bytes] : st.modLua)
+					if (id == mod->id) s.mod_lua = bytes;
+			std::memcpy(out, &s, std::min<std::size_t>(out->size, sizeof s));
+			return 1;
+		}
+
 		uint32_t MIRAGE_CALL ThemeColor(int32_t which)
 		{
 			const theme::MenuColors& t = theme::Menu();
@@ -870,6 +891,7 @@ namespace mirage::mods
 			ImGuiContext, SettingDraw, SettingChoice, ReservedKeys,
 			tasapi::Available, tasapi::Status, tasapi::SetOptions, tasapi::Command, tasapi::Record, tasapi::ReplayRevision,
 			tasapi::ReplayGet, tasapi::ReplaySet, tasapi::File, tasapi::Folder, tasapi::Preflight, ModuleList,
+			MemoryStats,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -960,6 +982,8 @@ namespace mirage::mods
 		// Loads (or reloads) a mod's code. "" when it loaded, else why not (then nothing of it runs).
 		std::string LoadCode(MirageMod& mod)
 		{
+			static const auto kTag = mem::RegisterTag("Mods");
+			mem::TagScope tag(kTag);
 			mod.state = State::Loading;
 			mod.pending.clear();
 			for (ModModule* m : mod.modules) m->Unbind();
@@ -1248,6 +1272,15 @@ namespace mirage::mods
 		}
 		// The records stay: the menu's module list still holds the mods' modules (never called again) until the DLL
 		// goes, and they point at their mod
+	}
+
+	std::vector<std::pair<std::string, std::size_t>> LuaMemoryByMod()
+	{
+		std::vector<std::pair<std::string, std::size_t>> out;
+		for (const auto& owned : g_mods)
+			if (owned->lua && owned->state.load() == State::Active) out.emplace_back(owned->id, LuaMemory(*owned->lua));
+		std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		return out;
 	}
 
 	std::vector<Info> List()

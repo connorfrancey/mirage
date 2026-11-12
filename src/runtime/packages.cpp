@@ -1,6 +1,7 @@
 #include "runtime/packages.h"
 
 #include "core/clock.h"
+#include "runtime/mem/heap.h"
 #include "runtime/memory.h"
 
 #include <UnrealLib/Core/Log.hpp>
@@ -50,6 +51,8 @@ mirage::packages::Report mirage::packages::Probe(const fs::path& cooked)
 	using namespace UnrealLib;
 	RouteLibraryLog();
 
+	static const auto kTag = mirage::mem::RegisterTag("UnrealLib");
+	mirage::mem::TagScope tag(kTag);
 	Report r;
 	r.cooked = cooked.empty() ? CookedDir() : cooked;
 	const std::int64_t before = PrivateBytes();

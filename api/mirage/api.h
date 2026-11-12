@@ -146,6 +146,9 @@ typedef void(MIRAGE_CALL* MirageHookFn)(void* user, MirageCall* call);
 #define MIRAGE_EVENT_STATE_RESTORED 5 /* Game thread: the TAS put back a memory snapshot. The game's memory went back in
                                          time (a mod's own memory didn't): every game object kept from before may be
                                          another or gone, so look them up again */
+#define MIRAGE_EVENT_MEMORY_PRESSURE 6 /* Game thread: the memory manager's pressure level changed, or holds at High or
+                                         Critical (again every 5 s): value = MIRAGE_MEMORY_* now. Give back what can be
+                                         made again (caches; Lua: collectgarbage()). Never the game's memory */
 typedef struct MirageEvent {
     uint32_t size;              /* sizeof(MirageEvent) */
     int32_t type;               /* MIRAGE_EVENT_* */
@@ -431,6 +434,22 @@ typedef struct MirageCamera {
     float fov;                  /* Degrees */
 } MirageCamera;
 
+/* memory_stats: the process's memory and the mod's share (the runtime's memory manager) */
+#define MIRAGE_MEMORY_NORMAL 0
+#define MIRAGE_MEMORY_ELEVATED 1
+#define MIRAGE_MEMORY_HIGH 2
+#define MIRAGE_MEMORY_CRITICAL 3
+typedef struct MirageMemoryStats {
+    uint32_t size;                  /* sizeof(MirageMemoryStats): set it before the call */
+    int32_t pressure;               /* MIRAGE_MEMORY_* */
+    uint64_t process_private;       /* The process's commit charge (bytes) */
+    uint64_t process_working_set;
+    uint64_t address_free;          /* Free address space (a 32-bit game: what runs out first) */
+    uint64_t address_largest_free;  /* Its largest block; 0 = not measured yet */
+    uint64_t menu_heap;             /* The menu's own heap, live */
+    uint64_t mod_lua;               /* This mod's Lua state(s), 0 for a native mod (its own CRT is its own) */
+} MirageMemoryStats;
+
 /* tas_command: what to do (the runtime's TAS engine) */
 #define MIRAGE_TAS_PLAY 0
 #define MIRAGE_TAS_RESTART 1
@@ -710,6 +729,11 @@ typedef struct MirageApi {
     /* Every module in the menu (every mod's and the runtime's own), as JSON: [{"name", "tab", "enabled", "action"}, ...]
      * in the menu's order. Copies up to `capacity` bytes, returns the full length. Any thread. */
     uint32_t(MIRAGE_CALL* module_list)(char* json, uint32_t capacity);
+
+    /* ---- Memory (the runtime's memory manager) ---------------------------------------------------------------------
+     * The process's memory, the pressure level and the mod's own Lua memory. 1: filled. Any thread. To be told when
+     * memory gets short, subscribe to MIRAGE_EVENT_MEMORY_PRESSURE. */
+    int32_t(MIRAGE_CALL* memory_stats)(MirageMod* mod, MirageMemoryStats* out);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

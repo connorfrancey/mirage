@@ -247,6 +247,12 @@ namespace mirage::mods
 		return g_skipped;
 	}
 	void DispatchStateRestored() { Dispatch(Event(MIRAGE_EVENT_STATE_RESTORED)); }
+	void DispatchMemoryPressure(int level)
+	{
+		MirageEvent e = Event(MIRAGE_EVENT_MEMORY_PRESSURE);
+		e.value = level;
+		Dispatch(e);
+	}
 
 	void DispatchKey(int vk)
 	{
@@ -259,7 +265,7 @@ namespace mirage::mods
 	{
 		MirageSubscription* MIRAGE_CALL EventSubscribe(MirageMod* mod, int32_t type, MirageEventFn fn, void* user)
 		{
-			if (!mod || !fn || type < MIRAGE_EVENT_TICK || type > MIRAGE_EVENT_STATE_RESTORED) return nullptr;
+			if (!mod || !fn || type < MIRAGE_EVENT_TICK || type > MIRAGE_EVENT_MEMORY_PRESSURE) return nullptr;
 			auto s = std::make_shared<Subscription>();
 			s->mod = mod;
 			s->type = type;
