@@ -466,14 +466,22 @@ bytes. An empty injection adds 0.10 µs a call, an empty function hook 0.22 µs.
 it in Prologue, the player bounces; the same class written in `.uc` and compiled in the game behaves identically; the
 corpus round-trip (decompile + compile every TdGame function) is byte-identical for an agreed share, the rest listed.
 
-**Status (2026-11-12): the compiler is done; runtime classes, states and lifetime are next.** UnrealLib (branch
-`uc-compiler`, `UnrealLib::Compiler`) compiles function and state bodies to bytecode. Round trip over every function
-and state of the game's script packages: 13,231 of 13,244 compile (99.9%), 12,866 are byte-identical (97.1%; the game's
-own packages 97.6%, TdGame 97.1%, Engine 97.8%, Core 99.2%). UnrealLib's `docs/compiler.md` lists the unwritten rules
-of the UE3 compiler it reproduces (Context sizes and the 5-byte skip on `Outer`, IsModification on struct paths,
-EatReturnValue, label table alignment, ...) and what stays different (a jump to the function's end printed as
-`return;`, assert line numbers, third-party packages built with another compiler). Runtime classes need the engine's
-object construction (StaticConstructObject, UStruct::Link, the class default object) found in the executable.
+**Status (2026-11-12): classes from `.uc` source work in the game; states, Lua-defined classes and lifetime are next.**
+UnrealLib (branch `uc-compiler`, `UnrealLib::Compiler`) compiles function and state bodies to bytecode: round trip over
+every function and state of the game's script packages, 13,231 of 13,244 compile (99.9%), 12,866 byte-identical (97.1%;
+the game's own packages 97.6%). Its `docs/compiler.md` lists the UE3 compiler's unwritten rules it reproduces and what
+stays different. Its class package builder (`build_class_package`) turns a `.uc` class (variables, functions and events,
+defaultproperties) into a script package laid out like the game's: the reflection is written and loaded first, the
+bodies compiled against it, then the package written again with bytecode and defaults; subclasses carry the parent's
+component map (a Trigger's collision cylinder). In memenu, `runtime/class_source` builds a mod's `.uc` into
+`memenu\classes\<Class>_<hash>.u` and the engine loads it from there (`runtime/classes`: the package cache plus
+StaticLoadObject), so the engine itself makes the UClass, links it and builds its default object. API `class_load`,
+Lua `mirage.load_class`, C# `Mod.LoadClass`. Self-test "Mirage classes (.uc)": `MirageBouncePad` (a Trigger with a
+property and a Touch event) compiles in 2.6 s (mostly reading Core, Engine, GameFramework, IpDrv and TdGame, once),
+loads, spawns on the player, and its Touch launches them. A subclass of a level-only actor needs `bNoDelete=False`
+(the engine spawns no `bNoDelete` actor). Not yet: structs, enums, consts, states and replication in built classes;
+classes declared from Lua/C# without UnrealScript; unloading a mod's classes and actors (a package stays loaded for the
+session, so hot reload uses new package names).
 
 ### 13. Levels and world building
 
