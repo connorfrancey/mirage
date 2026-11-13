@@ -28,6 +28,7 @@
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
 #include "game/object_query.h"
+#include "runtime/classes.h"
 #include "runtime/inject.h"
 #include "runtime/natives.h"
 #include "runtime/script_patch.h"
@@ -4262,6 +4263,45 @@ void TestMirageTextures()
 // Mirage step 8: a script patch from a Lua mod (examples/mods/higher-jumps). On, TdMove_Jump.StartMove's bytecode
 // multiplies the jump's upward speed by 1.5: a standing jump goes about 2.25 times as high, with no native detour.
 // Off, the function's own bytecode is back and the jump is as before.
+// Classes from a package file anywhere (step 12): a copy of a script package the game ships, renamed and put outside
+// the game's folders, loads through StaticLoadObject with its path, and its class is the class the engine made from it
+void TestClassesProbe()
+{
+    Step& s = Begin("Mirage classes (probe)");
+    Probe p(s);
+    namespace fs = std::filesystem;
+    const fs::path source = paths::Dir().parent_path().parent_path() / "TdGame" / "CookedPC" / "MirrorsEdgeConsole.u";
+    std::error_code ec;
+    if (!fs::exists(source, ec))
+    {
+        s.notes.push_back("skipped: no MirrorsEdgeConsole.u to copy");
+        End(s);
+        return;
+    }
+    const fs::path copy = paths::Dir() / "selftest-mods" / "MirageProbe.u";
+    fs::create_directories(copy.parent_path(), ec);
+    fs::copy_file(source, copy, fs::copy_options::overwrite_existing, ec);
+    std::string why;
+    Classes::UClass* cls = nullptr;
+    OnGameThread([&] {
+        if (!mirage::classes::Ready(&why)) return;
+        cls = mirage::classes::LoadClassFrom(copy, "MirrorsEdgeConsole", &why);
+    }, 20.0);
+    if (!cls) p.Problem("the class didn't load from " + copy.string() + ": " + why);
+    else
+    {
+        std::string path, super;
+        OnGameThread([&] {
+            path = cls->GetPathName();
+            if (cls->SuperField) super = cls->SuperField->GetName();
+        });
+        s.notes.push_back("loaded " + path + " (extends " + super + ") from " + copy.filename().string());
+        if (path != "MirageProbe.MirrorsEdgeConsole") p.Problem("the class's path is " + path);
+        if (super != "TdConsole") p.Problem("its super is " + super + ", not TdConsole");
+    }
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -5175,6 +5215,7 @@ const Named* FeatureList()
         {"Mirage script injection", &TestScriptInjection, false},
         {"Mirage script injection (Lua)", &TestScriptInjectionMods, true},
         {"Mirage natives (Lua)", &TestNativesLua, false},
+        {"Mirage classes (probe)", &TestClassesProbe, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},
