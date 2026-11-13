@@ -351,8 +351,8 @@ namespace mirage::mods
 		else if (!m.dotnet.empty() && !std::filesystem::is_regular_file(dir / FromUtf8(m.dotnet)))
 			fail("dotnet " + m.dotnet + " is not in the folder");
 		else if (m.entry.empty() && m.lua.empty() && m.dotnet.empty() && m.content.empty() &&
-				 !std::filesystem::is_directory(dir / "levels") &&	// Level additions and maps (step 13) are what a mod does too
-				 !std::filesystem::is_directory(dir / "maps"))
+				 !std::filesystem::is_directory(dir / "levels") &&	// Level additions, maps and routes (step 13): what a mod does too
+				 !std::filesystem::is_directory(dir / "maps") && !std::filesystem::is_directory(dir / "routes"))
 			out.warnings.push_back(Utf8(file) + ": no entry, no Lua, no C# and no content: the mod does nothing");
 		return out;
 	}

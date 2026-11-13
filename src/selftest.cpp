@@ -32,6 +32,7 @@
 #include "runtime/classes.h"
 #include "runtime/layers.h"
 #include "runtime/maps.h"
+#include "runtime/routes.h"
 #include "runtime/inject.h"
 #include "runtime/natives.h"
 #include "runtime/script_patch.h"
@@ -4882,6 +4883,166 @@ void TestModMaps()
     End(s);
 }
 
+// Time-trial routes (step 13), the milestone: tests/mods/route-test has a route on the Prologue and the same one on
+// map-test's MirageTestMap (a copy of the Prologue). For each, a TAS macro starts at After_Intro and runs forward through
+// the start, the checkpoint and the finish: its first playback records the reference, the second plays back verified
+// (every recorded frame matched) and finishes the route in the very same game time; the speedrun timer follows (its
+// "TT - <route>" run splits and finishes) and the best run is kept as the ghost.
+void TestTimeTrials()
+{
+    Step& s = Begin("Mirage time trials");
+    Probe p(s);
+    namespace routes = mirage::routes;
+    Module* timer = modules::Find("Speedrun Timer");
+    Module* trials = modules::Find("Time Trials");
+    if (!tas::Available() || !timer || !trials) {
+        p.Problem(!tas::Available() ? "the TAS isn't available" : "the Speedrun Timer or Time Trials module is missing");
+        End(s);
+        return;
+    }
+    std::vector<routes::Route> list;
+    WaitFor(10.0, [&] {
+        list.clear();
+        for (const auto& r : routes::List())
+            if (r.mod == "route-test") list.push_back(r);
+        return list.size() >= 2;
+    });
+    if (list.size() < 2) {
+        p.Problem(fmt::format("{} route-test route(s) found, not 2 (edge_p and miragetestmap)", list.size()));
+        End(s);
+        return;
+    }
+    const bool timerWas = timer->Enabled(), trialsWas = trials->Enabled();
+    OnRenderThread([&] {
+        timer->SetEnabled(true);
+        trials->SetEnabled(true);
+        gui::visible = false;
+    });
+    std::string forward;
+    OnGameThread([&] { forward = KeyFor(game::Controller(), "GBA_MoveForward", "W"); });
+    tas::Replay saved;
+    tas::WithReplay([&](tas::Replay& r) { saved = r; });
+    const auto maps = levels::Maps();
+    const auto shared = [](const char* key) {
+        char v[256]{};
+        mirage::mods::game_api::ShareGet("memenu-speedrun", key, v, sizeof v);
+        return std::string(v);
+    };
+
+    for (const char* mapFile : {"edge_p", "miragetestmap"}) {
+        const auto route = std::find_if(list.begin(), list.end(), [&](const routes::Route& r) { return r.map == mapFile; });
+        const auto map = std::find_if(maps.begin(), maps.end(), [&](const levels::MapView& m) { return Lower(m.file) == mapFile; });
+        if (route == list.end() || map == maps.end()) {
+            p.Problem(std::string("no route or no level for ") + mapFile);
+            continue;
+        }
+        const auto cp = std::find(map->checkpointNames.begin(), map->checkpointNames.end(), "After_Intro");
+        if (cp == map->checkpointNames.end()) {
+            p.Problem(std::string(mapFile) + " has no After_Intro checkpoint in the level list");
+            continue;
+        }
+        tas::Macro m(60.f);
+        m.Describe(std::string("memenu self-test: route on ") + mapFile).Wait(5).Press(forward).Wait(100).Release(forward).Wait(20);
+        tas::Replay macro = m.Build();
+        macro.start = tas::StartKind::Checkpoint;
+        macro.map = map->label;
+        macro.checkpoint = map->checkpoints[static_cast<std::size_t>(cp - map->checkpointNames.begin())];
+        macro.syncValidUntil = 0;              // The first playback records the reference
+        macro.extensions["env.blockStreaming"] = "1";
+        tas::WithReplay([&](tas::Replay& r) { r = macro; });
+        routes::Forget(route->Id());           // No best and no ghost yet: the first run sets them
+        routes::Arm(route->Id());
+        WaitTicks(2);
+
+        // Plays it to the end; where the player was on some frames (to place routes)
+        const auto play = [&](std::vector<std::string>* where) {
+            tas::Play();
+            bool started = false;
+            tas::Status st{};
+            std::size_t sampled = 0;
+            const ULONGLONG deadline = GetTickCount64() + 90000;
+            while (GetTickCount64() < deadline && !g_aborted) {
+                st = tas::GetStatus();
+                if (st.mode == tas::Mode::Playing && !st.armed) started = true;
+                if (where && started && st.frame >= sampled) {
+                    const std::size_t frame = st.frame;
+                    OnGameThread([&] {
+                        if (auto* pawn = game::Pawn())
+                            where->push_back(fmt::format("f{}: [{:.0f}, {:.0f}, {:.0f}]", frame, pawn->Location.X, pawn->Location.Y, pawn->Location.Z));
+                    }, 0.5);
+                    sampled = frame + 20;
+                }
+                if (started && (st.mode != tas::Mode::Playing || st.paused || st.frame >= st.frames)) break;
+                Sleep(10);
+            }
+            // The end of the replay: its verdict comes with the pause there (PlaybackEnded)
+            WaitFor(5.0, [&] { st = tas::GetStatus(); return st.mode != tas::Mode::Playing || st.paused; });
+            tas::Stop();        // (Not a tick wait first: at its end the TAS holds the game paused)
+            WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
+            WaitTicks(3);
+            return std::make_pair(started, st);
+        };
+        std::vector<std::string> where;
+        const auto [ran, first] = play(&where);
+        const routes::State one = routes::Current();
+        std::string path;
+        for (const auto& w : where) path += w + " ";
+        s.notes.push_back(std::string(mapFile) + " path: " + path);
+        if (!ran) {
+            p.Problem(std::string(mapFile) + ": the macro didn't play: " + tas::GetStatus().message);
+            continue;
+        }
+        if (one.phase != routes::Phase::Finished) {
+            p.Problem(fmt::format("{}: the route didn't finish on the recording run (phase {}, {} split(s), {:.3f} s)", mapFile,
+                                  static_cast<int>(one.phase), one.splits.size(), one.time));
+            continue;
+        }
+        WaitTicks(5);
+        const std::string runFile = shared("run.file"), phase = shared("run.phase");
+        if (runFile.find("TT") == std::string::npos || phase != "finished")
+            p.Problem(fmt::format("{}: the speedrun timer didn't follow the route ({}, {})", mapFile, runFile, phase));
+
+        // The same again: verified against the recording, the same time to the tick
+        routes::Arm(route->Id());
+        WaitTicks(2);
+        const auto [ran2, second] = play(nullptr);
+        const routes::State two = routes::Current();
+        s.notes.push_back(fmt::format("{}: {} in {:.4f} s, then {:.4f} s; playback {} ({} frames checked){}", mapFile, route->name,
+                                      one.time, two.time, second.verified ? "verified" : "not verified", second.syncChecked,
+                                      two.ghost ? ", raced the ghost" : ""));
+        if (!ran2) p.Problem(std::string(mapFile) + ": the second playback didn't run");
+        else if (!second.verified || second.desyncFrame >= 0)
+            p.Problem(fmt::format("{}: the playback wasn't verified (desync on frame {}: {})", mapFile, second.desyncFrame,
+                                  second.desyncInfo));
+        if (two.phase != routes::Phase::Finished) p.Problem(std::string(mapFile) + ": the route didn't finish on the playback");
+        else if (two.time != one.time) p.Problem(fmt::format("{}: {:.6f} s on playback, {:.6f} s recorded", mapFile, two.time, one.time));
+        if (!two.ghost) p.Problem(std::string(mapFile) + ": no ghost of the first run to race");
+        if (two.best != one.time) p.Problem(fmt::format("{}: the best time is {:.6f}, not the first run's", mapFile, two.best));
+        else if (two.newBest) p.Problem(std::string(mapFile) + ": the same time again counted as a new best");
+        if (!one.newBest) p.Problem(std::string(mapFile) + ": the first run (no best before it) wasn't the best");
+    }
+
+    routes::Stop();
+    tas::WithReplay([&](tas::Replay& r) { r = saved; });
+    OnRenderThread([&] {
+        timer->SetEnabled(timerWas);
+        trials->SetEnabled(trialsWas);
+        gui::visible = true;
+    });
+    // Back to the test level
+    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
+        if (Lower(maps[static_cast<std::size_t>(i)].file) == Lower(g_options.map)) {
+            const int checkpoint = std::min(g_options.checkpoint, static_cast<int>(maps[static_cast<std::size_t>(i)].checkpoints.size()));
+            const int before = g_loadsFinished.load();
+            OnRenderThread([i, checkpoint] { levels::Load(i, checkpoint, levels::Method::Game, false); });
+            WaitFor(120.0, [&] { return g_loadsFinished.load() > before; });
+            WaitFor(60.0, [] { return game::GetStatus().hasPawn && !game::IsLoading(); });
+            WaitPlayerReady(30.0);
+            break;
+        }
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -5802,6 +5963,7 @@ const Named* FeatureList()
         {"Mirage classes (example mod)", &TestClassesExample, false},
         {"Mirage level additions", &TestLevelLayers, false},
         {"Mirage maps", &TestModMaps, false},
+        {"Mirage time trials", &TestTimeTrials, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

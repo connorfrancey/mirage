@@ -57,6 +57,10 @@ Comparison g_cmp;
 std::optional<Comparison> g_cmpBeforeFinish;    // To undo a final split that set a personal best
 std::string g_cmpKey;                           // File the comparison is from ("Any%", "IL - Flight")
 std::vector<std::string> g_names;               // Segments of that category
+// A time-trial route being run (the runtime's routes, step 13): its own category, "TT - <route>", one segment per
+// checkpoint and the finish. Empty: the chosen category.
+std::string g_routeKey;
+std::vector<std::string> g_routeNames;
 bool g_newPb = false;
 bool g_hooked = false;
 std::string g_map;                              // Lower case
@@ -85,6 +89,7 @@ void Save()
 // Which file a run of the current category in `map` compares against, and its segments.
 std::string KeyFor(Category c, const std::string& map)
 {
+    if (!g_routeKey.empty()) return g_routeKey;
     if (IsStory(c)) return CategoryName(c);
     const std::string title = ChapterTitle(map);
     return "IL - " + (title.empty() ? map : title);
@@ -92,6 +97,7 @@ std::string KeyFor(Category c, const std::string& map)
 
 std::vector<std::string> NamesFor(Category c, const std::string& map)
 {
+    if (!g_routeKey.empty()) return g_routeNames;
     if (IsStory(c)) return Chapters();
     const std::string title = ChapterTitle(map);
     return {title.empty() ? map : title};
@@ -442,6 +448,26 @@ void StartOrSplit()
     Post([](double now) {
         if (g_timer.Running()) SplitOrFinish(now);
         else BeginRun(now);
+    });
+}
+
+void RouteEvent(const std::string& what, const std::string& route, const std::vector<std::string>& segments)
+{
+    Post([what, route, segments](double now) {
+        if (what == "start") {
+            g_routeKey = "TT - " + route;
+            g_routeNames = segments;
+            BeginRun(now);
+        } else if (what == "split" || what == "finish") {
+            if (g_timer.Running()) SplitOrFinish(now);
+        } else if (what == "reset") {
+            EndAttempt();
+            Event("route reset");
+        } else if (what == "stop") {
+            if (g_timer.GetPhase() == Timer::Phase::Running) EndAttempt();
+            g_routeKey.clear();
+            g_routeNames.clear();
+        }
     });
 }
 

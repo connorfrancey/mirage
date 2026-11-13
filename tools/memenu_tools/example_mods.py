@@ -101,8 +101,8 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
     built.append(what)
     lua = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.lua").exists()]
     scripts = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.cs").exists()]  # Compiled in the game
-    content = [d for d in sorted(TEST_MODS.iterdir())   # Content only: level layers and maps (step 13)
-               if d.is_dir() and ((d / "levels").is_dir() or (d / "maps").is_dir())
+    content = [d for d in sorted(TEST_MODS.iterdir())   # Content only: level layers, maps, routes (step 13)
+               if d.is_dir() and any((d / sub).is_dir() for sub in ("levels", "maps", "routes"))
                and not (d / "main.lua").exists() and not (d / "main.cs").exists()]
     mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", EXAMPLES / "bounce-pad", *lua,
             EXAMPLES / "hello-script", *scripts, *content]

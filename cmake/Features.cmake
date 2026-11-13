@@ -167,6 +167,7 @@ memenu_feature(hotkeys           misc      STAGE 4 FILES features/misc/hotkeys.c
 memenu_feature(themes            misc      STAGE 4 FILES features/misc/themes.cpp)
 memenu_feature(mod_manager       misc GAME STAGE 9 FILES features/misc/mod_manager.cpp)
 memenu_feature(script_editor     misc GAME STAGE 9 FILES features/misc/script_editor.cpp)
+memenu_feature(time_trials       misc GAME STAGE 9 FILES features/misc/time_trials.cpp)
 
 # -------------------------------------------------------------------------------------------------
 # The game integration layer, only when something uses it

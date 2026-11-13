@@ -59,6 +59,9 @@ namespace speedrun
     void Undo();
     void SkipSplit();
     void ForgetPb();                // Of the category shown
+    // A time-trial route's run (the runtime's routes): "start" (switches to its category, "TT - <route>", with
+    // `segments`), "split", "finish", "reset" (the run is off), "stop" (back to the chosen category)
+    void RouteEvent(const std::string& what, const std::string& route, const std::vector<std::string>& segments);
 
     // Chapter names in story order ("Prologue", "Flight", ... "The Shard") and the title of a map ("" if not a chapter).
     const std::vector<std::string>& Chapters();

@@ -1,0 +1,10 @@
+# From After_Intro, running forward (towards -X) along the roof: the self-test's TAS macro runs it
+[[route]]
+name = "Self-test sprint"
+start = [19309.0, -3009.0, 8517.0]
+yaw = 32768
+checkpoints = [[19000.0, -3030.0, 8517.0]]
+finish = [18800.0, -3044.0, 8440.0]
+radius = 120.0
+height = 150.0
+ratings = [3.0, 2.0, 1.5]

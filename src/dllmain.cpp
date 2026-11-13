@@ -30,6 +30,7 @@
 #include "runtime/classes.h"
 #include "runtime/layers.h"
 #include "runtime/maps.h"
+#include "runtime/routes.h"
 #include "runtime/file_redirect.h"
 #include "runtime/mod_game.h"
 #include "runtime/mods.h"
@@ -137,6 +138,7 @@ static void Run(HMODULE module)
                 if (!finished) return;
                 levelLoaded = true;
                 mirage::layers::OnLevelLoaded();
+                mirage::routes::OnLevelLoaded();
                 mirage::reflect::ClearCache();   // Classes of the old level's packages are gone
                 mirage::hooks::Retry();          // Functions hooked before they were loaded, or gone with the level
                 mirage::content::ReapplyAll();   // Content mods' overrides on the level's objects
@@ -147,6 +149,7 @@ static void Run(HMODULE module)
                 mirage::mods::DispatchTick(seconds);
                 mirage::layers::Tick();          // Mods' level additions: spawned, respawned at restarts, removed
                 mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
+                mirage::routes::Tick(seconds);   // Time-trial routes: the run in progress
                 modules::Tick();
             });
             // The mods' other events: deaths, the player's move state, keys

@@ -62,6 +62,7 @@ public:
     {
         speedrun::SetOptions(Options(true));
         RunTestCommand();
+        RunRouteEvent();
         speedrun::Tick();
         Share();
     }
@@ -169,6 +170,23 @@ private:
         else if (what == "reset") speedrun::Reset();
         else if (what == "undo") speedrun::Undo();
         else if (what == "skip") speedrun::SkipSplit();
+    }
+
+    // The runtime's time-trial routes (step 13): "<counter> <what>\t<route>\t<segment>\t..." on the menu's share
+    void RunRouteEvent()
+    {
+        char buf[1024]{};
+        mirage::Api().share_get("memenu", "route.event", buf, sizeof buf);
+        const std::string text = buf;
+        if (text.empty() || text == lastRouteEvent_) return;
+        lastRouteEvent_ = text;
+        forceShare_ = true;
+        std::vector<std::string> parts;
+        std::size_t at = text.find(' ') + 1;
+        for (std::size_t tab; (tab = text.find('\t', at)) != std::string::npos; at = tab + 1) parts.push_back(text.substr(at, tab - at));
+        parts.push_back(text.substr(at));
+        if (parts.size() < 2) return;
+        speedrun::RouteEvent(parts[0], parts[1], std::vector<std::string>(parts.begin() + 2, parts.end()));
     }
 
     double Lrt(const speedrun::View& v) const { return v.timer.Lrt(speedrun::Now()); }
@@ -386,6 +404,7 @@ private:
     std::string lastCommand_;       // Game thread
     unsigned shareTick_ = 0;
     bool forceShare_ = false;
+    std::string lastRouteEvent_;
 };
 MIRAGE_MODULE(SpeedrunTimer)
 
