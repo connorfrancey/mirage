@@ -15,6 +15,7 @@
 #include "gui.h"
 #include "hooks.h"
 #include "paths.h"
+#include "util/float_util.h"
 
 #include <Windows.h>
 #include <timeapi.h>
@@ -467,7 +468,7 @@ void ApplyMatch()
 
     auto* pc = game::Controller();
     if (pc && pc->PlayerInput && HasExt(r, "sensitivity")) {
-        const float sens = std::strtof(Ext(r, "sensitivity").c_str(), nullptr);
+        const float sens = util::ParseFloatOr(Ext(r, "sensitivity"), 0.f);
         const bool invert = Ext(r, "invertMouse") == "1";
         if (sens != now.sensitivity || invert != now.invertMouse) {
             if (!s.savedInput.valid) s.savedInput = {true, now.sensitivity, now.invertMouse};
@@ -1752,7 +1753,7 @@ std::vector<Issue> Preflight()
         return out;
     }
     if (HasExt(r, "sensitivity")) {
-        const float sens = std::strtof(Ext(r, "sensitivity").c_str(), nullptr);
+        const float sens = util::ParseFloatOr(Ext(r, "sensitivity"), 0.f);
         const bool invert = Ext(r, "invertMouse") == "1";
         char text[160];
         if (std::abs(sens - now.sensitivity) > 1e-4f) {

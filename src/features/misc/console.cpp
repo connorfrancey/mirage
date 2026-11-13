@@ -31,6 +31,7 @@
 #include "log.h"
 #include "paths.h"
 #include "theme.h"
+#include "util/float_util.h"
 
 #include "sdk/SDK.hpp"
 #include <Windows.h>
@@ -787,9 +788,9 @@ private:
         if (args.size() < 3) { Print(Kind::Error, "usage: tp <x> <y> <z>   (pos prints where you are)"); return; }
         float v[3];
         for (int i = 0; i < 3; ++i) {
-            char* end = nullptr;
-            v[i] = std::strtof(args[static_cast<std::size_t>(i)].c_str(), &end);
-            if (!end || *end) { Print(Kind::Error, "not a number: " + args[static_cast<std::size_t>(i)]); return; }
+            const auto n = util::ParseFloat(args[static_cast<std::size_t>(i)]);
+            if (!n) { Print(Kind::Error, "not a number: " + args[static_cast<std::size_t>(i)]); return; }
+            v[i] = *n;
         }
         game::RunOnGameThread([x = v[0], y = v[1], z = v[2]] {
             auto* pawn = game::Pawn();

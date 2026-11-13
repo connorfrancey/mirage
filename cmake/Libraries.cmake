@@ -157,6 +157,17 @@ CPMAddPackage(
 )
 target_link_libraries(${PROJECT_NAME} PRIVATE magic_enum::magic_enum)
 
+# fast_float: Fast and exact implementation of the C++ from_chars functions for number types: 4x to 10x faster than strtod, part of GCC 12, MySQL, DuckDB, Chromium, Redis and WebKit/Safari
+CPMAddPackage(
+        NAME fast_float
+        GITHUB_REPOSITORY fastfloat/fast_float
+        GIT_TAG ${FASTFLOAT_VERSION}
+        OPTIONS
+            "FASTFLOAT_TEST OFF"
+)
+target_link_libraries(${PROJECT_NAME} PRIVATE FastFloat::fast_float)   # util/float_util.h: numbers from text
+
+
 # unordered_dense: open-addressing hash maps (values in one vector) where lookups are the hot part: the mesh builder's
 # edge map (render/mesh.cpp: 2x faster builds). Not the TAS page tables: measured, no gain. Header only. Unlike std::, an
 # insert or erase moves the other entries: no reference into the map may be kept across one.
