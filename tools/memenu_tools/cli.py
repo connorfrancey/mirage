@@ -1062,6 +1062,8 @@ def dev_test(ctx: click.Context, config: str, stage: str | None, no_build: bool,
               help="Load the menu this much later than usual (after the game went fullscreen, like the launcher).")
 @click.option("--timeout", default=900.0, show_default=True, help="Kill the game after this many seconds.")
 @click.option("--keep-open", is_flag=True, help="Don't close the game when the test is done.")
+@click.option("--minimized/--visible", default=True, show_default=True,
+              help="Start the game windowed and minimized, without taking focus (--visible: as the game is set up).")
 @click.option("--real-speed", is_flag=True,
               help="Test the game as players run it: the 62 fps cap stays on and TAS playbacks are paced (slower).")
 @click.option("--retries", default=1, show_default=True,
@@ -1069,7 +1071,7 @@ def dev_test(ctx: click.Context, config: str, stage: str | None, no_build: bool,
 @click.pass_context
 def game_test(ctx: click.Context, config: str, no_build: bool, build_dir: Path | None, game_dir: Path | None,
               map_name: str, checkpoint: int, ticks: int, only: str, skip: str, late_s: float, timeout: float,
-              keep_open: bool, real_speed: bool, retries: int) -> None:
+              keep_open: bool, minimized: bool, real_speed: bool, retries: int) -> None:
     """Run the in-game self-test in Mirror's Edge and report every step (see tools/memenu_tools/gametest.py).
 
     \b
@@ -1144,7 +1146,7 @@ def game_test(ctx: click.Context, config: str, no_build: bool, build_dir: Path |
                                     # The menu never closes the game itself: gt.run does, once the menu has unloaded
                                     "quit": "0"}, int(late_s * 1000))
         try:
-            res = gt.run(game_dir, timeout, progress, close=not keep_open)
+            res = gt.run(game_dir, timeout, progress, close=not keep_open, minimized=minimized)
         except gt.ElevationRequired:
             console.print("[red]Windows wants administrator rights to start the game[/] (compatibility settings on "
                           "MirrorsEdge.exe, see above): run this from an administrator terminal, or clear them.")

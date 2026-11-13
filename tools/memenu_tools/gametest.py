@@ -289,8 +289,43 @@ class _LinuxGame:
                 pass
 
 
-def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True) -> Result:
+def _minimize_windows(pid: int) -> int:
+    """Minimizes the game's visible top-level windows that aren't yet, without activating anything. How many it did."""
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    proc_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    user32.EnumWindows.argtypes = [proc_type, wintypes.LPARAM]
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.IsIconic.argtypes = [wintypes.HWND]
+    user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
+    user32.GetWindow.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    done = 0
+
+    def each(hwnd, _):
+        nonlocal done
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if (owner.value == pid and user32.IsWindowVisible(hwnd) and not user32.GetWindow(hwnd, 4)   # GW_OWNER
+                and not user32.IsIconic(hwnd)):
+            user32.ShowWindow(hwnd, 7)     # SW_SHOWMINNOACTIVE
+            done += 1
+        return True
+
+    user32.EnumWindows(proc_type(each), 0)
+    return done
+
+
+# How long after the start the game's window is kept minimized: the engine shows it again while it sets up its device;
+# after that it stays as the user leaves it (restoring it to watch is fine)
+MINIMIZE_SECONDS = 25.0
+
+
+def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True, minimized: bool = False) -> Result:
     """Starts the game, waits for the self-test to finish and the game to close (or `timeout` seconds).
+
+    `minimized`: the game starts windowed (-windowed) and minimized without taking focus. A fullscreen game can't be
+    minimized: its D3D9 device would be lost and it would stop drawing frames, which the self-test needs.
 
     `close`: quit the game once the menu has unloaded. This is done from here and not by the menu: a game told to quit
     while the menu is still unloading itself can deadlock on the way out (the process exit and the menu's own FreeLibrary
@@ -302,7 +337,15 @@ def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True) ->
     start = datetime.now()
     t0 = time.monotonic()
     try:
-        proc = _LinuxGame() if LINUX else subprocess.Popen([str(game_dir / devtest.GAME_EXE)], cwd=game_dir)
+        if LINUX:
+            proc = _LinuxGame()
+        elif minimized:
+            info = subprocess.STARTUPINFO()
+            info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            info.wShowWindow = 7     # SW_SHOWMINNOACTIVE: the first ShowWindow of the game takes this
+            proc = subprocess.Popen([str(game_dir / devtest.GAME_EXE), "-windowed"], cwd=game_dir, startupinfo=info)
+        else:
+            proc = subprocess.Popen([str(game_dir / devtest.GAME_EXE)], cwd=game_dir)
     except OSError as e:
         if getattr(e, "winerror", None) == 740:   # ERROR_ELEVATION_REQUIRED
             raise ElevationRequired() from e
@@ -312,6 +355,8 @@ def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True) ->
     watch = None if LINUX else hangmon.HangWatch(proc.pid, menu_dir / "logs" / "memenu.log", menu_dir / "logs")
     while True:
         time.sleep(0.25)
+        if minimized and not LINUX and time.monotonic() - t0 < MINIMIZE_SECONDS and proc.poll() is None:
+            _minimize_windows(proc.pid)
         data = _read(result_file)
         if data:
             res.finished, res.passed = data.get("finished", False), data.get("passed", False)
