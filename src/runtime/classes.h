@@ -29,6 +29,10 @@ namespace mirage::classes
 	Classes::UObject* LoadFrom(const std::filesystem::path& file, std::string_view object, Classes::UClass* cls,
 							   std::string* error = nullptr);
 	Classes::UClass* LoadClassFrom(const std::filesystem::path& file, std::string_view className, std::string* error = nullptr);
+	// The package file joins the engine's package cache (its name: the file's stem): the engine finds it by name from
+	// then on, like its own (level streaming, `open`, imports). False and `error` if it can't. Any thread the engine's
+	// loader isn't running on: the game thread.
+	bool CachePackage(const std::filesystem::path& file, std::string* error = nullptr);
 	// An object by its path ("Engine.Trigger", "Package.Group.Name"), its package loaded the way the game loads one if
 	// it isn't yet. `cls` nullptr: any class. nullptr if there is none. Game thread.
 	Classes::UObject* LoadByName(std::string_view path, Classes::UClass* cls);

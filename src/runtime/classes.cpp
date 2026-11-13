@@ -117,6 +117,25 @@ namespace mirage::classes
 		return result;
 	}
 
+	bool CachePackage(const std::filesystem::path& file, std::string* error)
+	{
+		if (!Find())
+		{
+			if (error) *error = "GPackageFileCache wasn't found";
+			return false;
+		}
+		std::error_code ec;
+		if (!std::filesystem::is_regular_file(file, ec))
+		{
+			if (error) *error = "no file " + file.string();
+			return false;
+		}
+		const std::wstring path = std::filesystem::absolute(file, ec).wstring();
+		if (CacheGuarded(path.c_str())) return true;
+		if (error) *error = "the engine's package cache refused " + file.string();
+		return false;
+	}
+
 	Classes::UObject* LoadByName(std::string_view path, Classes::UClass* cls)
 	{
 		StaticLoadObjectFn load = Find();

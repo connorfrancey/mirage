@@ -1,6 +1,11 @@
 #include "runtime/layers.h"
 
 #include "game/game.h"
+#include "paths.h"
+#ifdef GetObject		// windows.h (through paths.h) would rename call::Params::GetObject
+#undef GetObject
+#endif
+#include "runtime/call.h"
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/mods.h"
@@ -15,6 +20,7 @@
 #include <chrono>
 #include <filesystem>
 #include <future>
+#include <fstream>
 #include <map>
 
 namespace fs = std::filesystem;
@@ -47,6 +53,15 @@ namespace mirage::layers
 			int slot = -1;
 		};
 		std::map<std::string, Build> g_builds;
+
+		// A mod's sublevel in the current level: kept through restarts (the level's own sublevels are), unloaded with the
+		// mod or when its layer no longer lists it
+		struct Stream
+		{
+			SublevelInfo info;
+			int slot = -1;				// The streaming object's GObjects slot
+		};
+		std::map<std::string, std::vector<Stream>> g_streams;	// By mod id
 
 		std::map<std::string, ModLayer> g_layers;	// By mod id: the current level's
 		std::vector<mods::Info> g_mods;				// The mods as last checked (layers waiting on a build use it)
@@ -96,13 +111,11 @@ namespace mirage::layers
 			return false;
 		}
 
-		// A class: a mod's .uc file (compiled on a worker, step 12) or a class path, loaded if its package isn't yet.
-		// `pending`: the .uc is still compiling (nullptr now, ask again on a later tick).
-		Classes::UClass* ResolveClass(const mods::Info& mod, const std::string& name, std::string* why, bool* pending)
+		// A .uc file's class, compiled on a worker (step 12) and loaded. `pending`: still compiling (ask again later).
+		Classes::UClass* BuiltClassOf(const fs::path& file, const std::string& owner, std::string* why, bool* pending)
 		{
-			if (name.size() > 3 && Lower(name.substr(name.size() - 3)) == ".uc") {
-				const fs::path file = mod.dir / fs::path(std::u8string(name.begin(), name.end()));
-				const std::string key = mod.id + "|" + file.string();
+			{
+				const std::string key = owner + "|" + file.string();
 				std::error_code ec;
 				const fs::file_time_type stamp = fs::last_write_time(file, ec);
 				auto it = g_builds.find(key);
@@ -113,7 +126,7 @@ namespace mirage::layers
 				if (it == g_builds.end()) {
 					Build b;
 					b.stamp = stamp;
-					b.result = std::async(std::launch::async, [file, owner = mod.id] {
+					b.result = std::async(std::launch::async, [file, owner] {
 						std::pair<classes::BuiltClass, std::string> r;
 						if (!classes::BuildSource(file, r.first, &r.second, owner) && r.second.empty()) r.second = "it didn't build";
 						return r;
@@ -142,6 +155,14 @@ namespace mirage::layers
 				b.slot = b.cls ? SlotOf(b.cls) : -1;
 				return b.cls;
 			}
+		}
+
+		// A class: a mod's .uc file (compiled on a worker, step 12) or a class path, loaded if its package isn't yet.
+		// `pending`: the .uc is still compiling (nullptr now, ask again on a later tick).
+		Classes::UClass* ResolveClass(const mods::Info& mod, const std::string& name, std::string* why, bool* pending)
+		{
+			if (name.size() > 3 && Lower(name.substr(name.size() - 3)) == ".uc")
+				return BuiltClassOf(mod.dir / fs::path(std::u8string(name.begin(), name.end())), mod.id, why, pending);
 			// Cheap checks first: a lookup of something missing compares every object's full name, and asking the engine
 			// to load it searches the disk (seconds, on the game thread)
 			const std::string package = name.substr(0, name.find('.'));
@@ -212,18 +233,179 @@ namespace mirage::layers
 			return ok;
 		}
 
+		// ---- Sublevels ---------------------------------------------------------------------------------------------
+		// What the layers need from UnrealScript, built like a mod's class (step 12) the first time a layer streams a
+		// sublevel: a new LevelStreaming object appended to the world's list, and a name made from a string
+		constexpr const char* kHelperSource =
+			"// Written by the menu (runtime/layers.cpp): level streaming for mods' level layers\r\n"
+			"class MirageWorld extends Object;\r\n"
+			"\r\n"
+			"static function LevelStreaming AddStreamingLevel(WorldInfo W)\r\n"
+			"{\r\n"
+			"    local LevelStreamingKismet L;\r\n"
+			"\r\n"
+			"    L = new(W) class'LevelStreamingKismet';\r\n"
+			"    W.StreamingLevels.AddItem(L);\r\n"
+			"    return L;\r\n"
+			"}\r\n"
+			"\r\n"
+			"static function name MakeName(string S)\r\n"
+			"{\r\n"
+			"    return name(S);\r\n"
+			"}\r\n";
+
+		Classes::UClass* Helper(std::string* why, bool* pending)
+		{
+			static fs::path file;
+			if (file.empty()) {
+				file = paths::Dir() / "classes" / "generated" / "memenu" / "MirageWorld.uc";
+				std::error_code ec;
+				fs::create_directories(file.parent_path(), ec);
+				std::ifstream in(file, std::ios::binary);
+				const std::string old((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+				in.close();
+				if (old != kHelperSource) std::ofstream(file, std::ios::binary) << kHelperSource;
+			}
+			return BuiltClassOf(file, "memenu", why, pending);
+		}
+
+		Classes::UObject* DefaultObject(Classes::UClass* cls)
+		{
+			constexpr std::uint64_t kClassDefaultObject = 0x200;
+			auto& objects = Classes::UObject::GetGlobalObjects();
+			for (int i = static_cast<int>(objects.Num()) - 1; i >= 0; --i)
+				if (auto* o = objects.GetByIndex(i);
+					o && o->Class == cls && (*reinterpret_cast<std::uint64_t*>(reinterpret_cast<char*>(o) + 8) & kClassDefaultObject))
+					return o;
+			return nullptr;
+		}
+
+		bool Alive(const Stream& s)
+		{
+			if (!s.info.streaming || s.slot < 0) return false;
+			auto& objects = Classes::UObject::GetGlobalObjects();
+			return s.slot < static_cast<int>(objects.Num()) && objects.GetByIndex(s.slot) == s.info.streaming;
+		}
+
+		// The engine unloads it and takes it off the world's list
+		void Unload(Stream& s)
+		{
+			if (!Alive(s)) return;
+			Classes::ULevelStreaming* l = s.info.streaming;
+			l->bShouldBeLoaded = 0;
+			l->bShouldBeVisible = 0;
+			l->bIsRequestingUnloadAndRemoval = 1;
+			spdlog::info("[mod {}] sublevel {} unloaded", s.info.mod, s.info.package);
+		}
+		void UnloadStreams(const std::string& modId)
+		{
+			const auto it = g_streams.find(modId);
+			if (it == g_streams.end()) return;
+			for (Stream& s : it->second) Unload(s);
+			g_streams.erase(it);
+		}
+
+		// A new streaming object for `package` (its file in the engine's package cache already), loading blocking
+		Classes::ULevelStreaming* AddStreaming(Classes::UObject* helper, Classes::AWorldInfo* world, const std::string& package,
+											   std::string& problem)
+		{
+			// The package's name as an FName (the engine makes it: the name table may not have it yet)
+			call::Params named(helper, "MakeName");
+			const std::wstring wide(package.begin(), package.end());
+			const Classes::FString text(wide.c_str());
+			Classes::FName fname{};
+			named.SetRaw("S", &text, sizeof text);
+			if (!call::Call(helper, named, &problem) || !named.GetRaw("ReturnValue", &fname, sizeof fname)) {
+				if (problem.empty()) problem = "MakeName failed";
+				return nullptr;
+			}
+			call::Params add(helper, "AddStreamingLevel");
+			add.Set("W", static_cast<Classes::UObject*>(world));
+			if (!call::Call(helper, add, &problem)) return nullptr;
+			auto* l = static_cast<Classes::ULevelStreaming*>(add.GetObject("ReturnValue"));
+			if (!l) {
+				problem = "AddStreamingLevel returned nothing";
+				return nullptr;
+			}
+			l->PackageName = fname;
+			l->bShouldBeLoaded = 1;
+			l->bShouldBeVisible = 1;
+			l->bShouldBlockOnLoad = 1;		// Loaded in the next tick with the game waiting: the same on every run
+			return l;
+		}
+
+		// The layer's [[sublevel]] entries streamed in: those already there kept, those gone from the layer unloaded.
+		// False: the helper class is still compiling (the layer waits for it).
+		bool StreamSublevels(const mods::Info& mod, const toml::value& root)
+		{
+			std::vector<std::pair<std::string, fs::path>> wanted;		// Package name, file
+			if (root.contains("sublevel"))
+				for (const toml::value& entry : toml::find<toml::array>(root, "sublevel")) {
+					const std::string rel = toml::find_or<std::string>(entry, "package", "");
+					if (rel.empty()) continue;
+					const fs::path file = mod.dir / fs::path(std::u8string(rel.begin(), rel.end()));
+					wanted.emplace_back(file.stem().string(), file);
+				}
+			const auto listed = [&](const std::string& package) {
+				return std::any_of(wanted.begin(), wanted.end(), [&](const auto& w) { return Lower(w.first) == Lower(package); });
+			};
+			std::vector<Stream>& streams = g_streams[mod.id];
+			for (auto it = streams.begin(); it != streams.end();) {
+				if (listed(it->info.package) && (Alive(*it) || !it->info.problem.empty())) {
+					++it;
+				} else {
+					Unload(*it);
+					it = streams.erase(it);
+				}
+			}
+			if (wanted.empty()) return true;
+			std::string why;
+			bool pending = false;
+			Classes::UClass* helperClass = Helper(&why, &pending);
+			if (pending) return false;
+			Classes::AWorldInfo* world = game::World();
+			for (const auto& [package, file] : wanted) {
+				if (std::any_of(streams.begin(), streams.end(), [&](const Stream& s) { return Lower(s.info.package) == Lower(package); }))
+					continue;
+				Stream s;
+				s.info.mod = mod.id;
+				s.info.package = package;
+				std::string problem;
+				Classes::UObject* helper = helperClass ? DefaultObject(helperClass) : nullptr;
+				if (!helperClass) problem = "the level streaming helper didn't build: " + why;
+				else if (!helper) problem = "the level streaming helper has no default object";
+				else if (!world) problem = "no world";
+				else if (classes::CachePackage(file, &problem)) {
+					s.info.streaming = AddStreaming(helper, world, package, problem);
+					s.slot = s.info.streaming ? SlotOf(s.info.streaming) : -1;
+				}
+				s.info.problem = problem;
+				if (problem.empty()) spdlog::info("[mod {}] sublevel {} streamed into {}", mod.id, package, g_map);
+				else spdlog::warn("[mod {}] levels/{}.toml, sublevel {}: {}", mod.id, Lower(g_map), package, problem);
+				streams.push_back(std::move(s));
+			}
+			return true;
+		}
+
 		void SpawnLayer(const mods::Info& mod, ModLayer& layer)
 		{
 			layer.reloads = mod.reloads;
 			layer.waiting = false;
 			const fs::path file = mod.dir / "levels" / (Lower(g_map) + ".toml");
 			std::error_code ec;
-			if (!fs::is_regular_file(file, ec)) return;
+			if (!fs::is_regular_file(file, ec)) {
+				UnloadStreams(mod.id);		// It had one before a hot reload
+				return;
+			}
 			toml::value root;
 			try {
 				root = toml::parse(file);
 			} catch (const std::exception& e) {
 				spdlog::error("[mod {}] {}: {}", mod.id, file.filename().string(), e.what());
+				return;
+			}
+			if (!StreamSublevels(mod, root)) {	// The streaming helper is compiling: the whole layer waits for it
+				layer.waiting = true;
 				return;
 			}
 			if (!root.contains("actor")) return;
@@ -303,8 +485,11 @@ namespace mirage::layers
 		const bool restart = !newLevel && g_pawn && pawn != g_pawn;			// A new pawn in the same level
 		if (newLevel || restart) {
 			// A loaded level took the old actors with it; at a restart ours are destroyed for a fresh start
-			if (restart) DestroyAll();
-			else g_layers.clear();
+			if (restart) DestroyAll();		// Sublevels stay, like the level's own
+			else {
+				g_layers.clear();
+				g_streams.clear();			// Gone with the old world
+			}
 			if (newLevel) g_map = game::MapName();
 			g_levelChanged = false;
 			++g_generation;
@@ -332,6 +517,7 @@ namespace mirage::layers
 		for (auto it = g_layers.begin(); it != g_layers.end();) {
 			const auto m = std::find_if(list.begin(), list.end(), [&](const mods::Info& i) { return i.id == it->first; });
 			if (m == list.end() || !m->loaded) {
+				UnloadStreams(it->first);
 				Destroy(it->second);
 				it = g_layers.erase(it);
 			} else {
@@ -352,6 +538,7 @@ namespace mirage::layers
 
 	void Remove(const std::string& modId)
 	{
+		UnloadStreams(modId);
 		const auto it = g_layers.find(modId);
 		if (it == g_layers.end()) return;
 		Destroy(it->second);
@@ -371,4 +558,21 @@ namespace mirage::layers
 	}
 
 	int Generation() { return g_generation; }
+
+	std::vector<SublevelInfo> Sublevels()
+	{
+		std::vector<SublevelInfo> out;
+		for (auto& [id, streams] : g_streams)
+			for (const Stream& s : streams) {
+				SublevelInfo i = s.info;
+				if (!Alive(s)) {
+					i.streaming = nullptr;
+				} else {
+					i.loaded = i.streaming->LoadedLevel != nullptr;
+					i.visible = i.streaming->bIsVisible != 0;
+				}
+				out.push_back(std::move(i));
+			}
+		return out;
+	}
 }

@@ -4727,6 +4727,63 @@ void TestLevelLayers()
     OnGameThread([&] { byName = mirage::mods::game_api::LayerActor(nullptr, "layer-test", "PadB"); });
     if (byName != reinterpret_cast<MirageObject*>(first.b)) p.Problem("layer_actor(\"layer-test\", \"PadB\") didn't find PadB");
 
+    // The streamed sublevel (a copy of the game's Cranes_Bake as the package LayerTestArea): loaded and shown, with
+    // its 16 static mesh actors (their outer chain: PersistentLevel, TheWorld, the package)
+    struct Sub
+    {
+        Classes::ULevelStreaming* streaming = nullptr;
+        bool loaded = false, visible = false;
+        int meshes = 0;
+        std::string problem;
+    };
+    const auto sublevel = [] {
+        Sub out;
+        OnGameThread([&] {
+            for (const auto& i : mirage::layers::Sublevels())
+                if (i.mod == "layer-test" && i.package == "LayerTestArea")
+                {
+                    out.streaming = i.streaming;
+                    out.loaded = i.loaded;
+                    out.visible = i.visible;
+                    out.problem = i.problem;
+                }
+            auto& objects = Classes::UObject::GetGlobalObjects();
+            for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+            {
+                Classes::UObject* o = objects.GetByIndex(i);
+                if (!o || !o->Class || o->Class->GetName() != "StaticMeshActor" || static_cast<Classes::AActor*>(o)->bDeleteMe) continue;
+                const Classes::UObject* package = o->Outer && o->Outer->Outer ? o->Outer->Outer->Outer : nullptr;
+                if (package && !package->Outer && package->GetName() == "LayerTestArea") ++out.meshes;
+            }
+        });
+        return out;
+    };
+    Sub sub;
+    WaitFor(20.0, [&] { sub = sublevel(); return sub.loaded && sub.visible && sub.meshes > 0; });
+    s.notes.push_back(fmt::format("sublevel LayerTestArea: loaded {}, visible {}, {} static mesh actor(s){}", sub.loaded, sub.visible,
+                                  sub.meshes, sub.problem.empty() ? "" : " (" + sub.problem + ")"));
+    if (!sub.streaming) p.Problem("the sublevel wasn't added: " + sub.problem);
+    else if (!sub.loaded || !sub.visible) p.Problem("the sublevel didn't load and show");
+    else if (sub.meshes != 16) p.Problem(fmt::format("the sublevel has {} static mesh actors, not the package's 16", sub.meshes));
+
+    // Unloaded with the mod's layer (what a mod's unload does), then streamed in again: once, not twice
+    if (sub.loaded)
+    {
+        OnGameThread([] { mirage::layers::Remove("layer-test"); });
+        Sub gone;
+        WaitFor(10.0, [&] { gone = sublevel(); return gone.meshes == 0; });
+        if (gone.meshes != 0) p.Problem(fmt::format("{} of the sublevel's actors still there after its unload", gone.meshes));
+        Sub back;
+        WaitFor(20.0, [&] { back = sublevel(); return back.loaded && back.visible && back.meshes > 0 && back.streaming != sub.streaming; });
+        s.notes.push_back(fmt::format("after an unload and the layer again: {} static mesh actor(s)", back.meshes));
+        if (back.meshes != 16) p.Problem(fmt::format("the sublevel came back with {} static mesh actors, not 16", back.meshes));
+        sub = back;
+        // The pads were removed and spawned again with it; the new PadA gets the changed state the restart must undo
+        WaitFor(10.0, [&] { first = look(); return first.spawned >= 2; });
+        if (first.a)
+            OnGameThread([&] { mirage::reflect::SetInt(mirage::reflect::Resolve(first.a->Class, first.a, "Bounces"), 7); });
+    }
+
     // A checkpoint restart: the pads spawned again, fresh
     const int generation = mirage::layers::Generation();
     OnRenderThread([] { levels::RestartFromLastCheckpoint(); });
@@ -4739,6 +4796,12 @@ void TestLevelLayers()
     if (mirage::layers::Generation() <= generation) p.Problem("the restart wasn't seen");
     else if (again.spawned != 2) p.Problem(fmt::format("{} pad(s) after the restart", again.spawned));
     else if (bounces != 0) p.Problem(fmt::format("PadA kept its state through the restart (Bounces {})", bounces));
+    if (sub.loaded)
+    {
+        const Sub kept = sublevel();
+        if (kept.streaming != sub.streaming || !kept.loaded || kept.meshes != 16)
+            p.Problem(fmt::format("the sublevel didn't stay through the restart (loaded {}, {} actors)", kept.loaded, kept.meshes));
+    }
     // The old ones are gone
     int stale = 0;
     OnGameThread([&] {

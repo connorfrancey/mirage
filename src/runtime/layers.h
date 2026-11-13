@@ -14,6 +14,15 @@
 // reload the level, it gives the player a new pawn, and actors spawned into the level would otherwise keep their state.
 // They go when the mod unloads, come back changed after a hot reload, and are gone with the level. Content mods (no
 // code) can carry layers too. Game thread.
+//
+// A layer can also stream a level package of the mod into the level (a streamed sublevel, with its own geometry,
+// volumes and Kismet), loaded blocking (the same tick on every run: the TAS replays it):
+//
+//     [[sublevel]]
+//     package = "levels/MyArea.me1"                   # the file's stem is the package's name: unique in the game
+//
+// Sublevels stay through checkpoint restarts (like the level's own); they are unloaded with the mod, and loaded again
+// after a hot reload.
 
 #include <string>
 #include <vector>
@@ -21,6 +30,7 @@
 namespace Classes
 {
 	class AActor;
+	class ULevelStreaming;
 }
 
 namespace mirage::layers
@@ -40,6 +50,16 @@ namespace mirage::layers
 	};
 	// The current level's layer actors. Game thread.
 	std::vector<ActorInfo> List();
+
+	struct SublevelInfo
+	{
+		std::string mod, package;					// Its mod, the package's name
+		Classes::ULevelStreaming* streaming = nullptr;	// nullptr: not added (`problem` says why) or gone
+		bool loaded = false, visible = false;		// The engine's view: its level is in memory, and shown
+		std::string problem;
+	};
+	// The current level's mod sublevels. Game thread.
+	std::vector<SublevelInfo> Sublevels();
 	// How many times the layers were (re)spawned since the menu started: level loads and restarts
 	int Generation();
 }

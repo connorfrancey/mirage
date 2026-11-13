@@ -17,3 +17,7 @@ bHidden = false
 name = "Missing"
 class = "Engine.NoSuchClassAnywhere"
 location = [0.0, 0.0, 0.0]
+
+# A streamed sublevel: a copy of the game's Cranes_Bake (16 static meshes, its own mesh, no Kismet), as its own package
+[[sublevel]]
+package = "levels/LayerTestArea.me1"
