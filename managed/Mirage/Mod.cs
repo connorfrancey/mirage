@@ -76,6 +76,48 @@ namespace Mirage
             return new GameObject(cls);
         }
 
+        /// <summary>
+        /// A class described instead of written: the runtime writes the UnrealScript, compiles and loads it. A function in
+        /// <see cref="ClassSpec.Functions"/> is an override of the parent's (by name) or a new one (by declaration,
+        /// "function int Count()"); its code is the handler, run at the head of its empty body (read and write the
+        /// parameters with <c>call.Get</c>/<c>call.Set</c>, the object is <c>call.Object</c>; set "ReturnValue" and
+        /// <c>call.Skip()</c> to return a value). Throws with the compiler's errors. Game thread.
+        /// </summary>
+        public GameObject DefineClass(ClassSpec spec)
+        {
+            var functions = new List<string>();
+            foreach (var (key, _) in spec.Functions) functions.Add(key);
+            var json = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["name"] = spec.Name, ["extends"] = spec.Extends, ["placeable"] = spec.Placeable,
+                ["vars"] = spec.Vars, ["defaults"] = spec.Defaults, ["functions"] = functions, ["extra"] = spec.Extra,
+            });
+            var buf = stackalloc byte[2048];
+            var text = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(json);
+            void* cls;
+            try { cls = Bridge.Api->class_define(Handle, (byte*)text, buf, 2048); }
+            finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(text); }
+            if (cls == null) throw new InvalidOperationException($"{spec.Name}: {Utf8.Read(buf)}");
+            var path = new GameObject(cls).Path;
+            foreach (var (key, handler) in spec.Functions)
+            {
+                // An override is named; a new function's name is in its declaration, before '('
+                var name = key;
+                var paren = key.IndexOf('(');
+                if (paren >= 0)
+                {
+                    var head = key.Substring(0, paren).TrimEnd();
+                    name = head.Substring(head.LastIndexOf(' ') + 1);
+                }
+                Inject(path + "." + name, "head", handler);
+            }
+            return new GameObject(cls);
+        }
+
+        /// <summary>Keeps an object from the garbage collector until <see cref="Release"/> or the mod's unload.</summary>
+        public bool Keep(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 1) != 0;
+        public bool Release(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 0) != 0;
+
         /// <summary>A notification on screen.</summary>
         public void Notify(string text) => Utf8.With(text, t => { Bridge.Api->notify(Handle, (byte*)t); return 0; });
     }
@@ -92,5 +134,24 @@ namespace Mirage
 
         private void Write(int level, string text) =>
             Utf8.With(text, t => { Bridge.Api->log(_mod, level, (byte*)t); return 0; });
+    }
+}
+
+namespace Mirage
+{
+    /// <summary>A class for <see cref="Mod.DefineClass"/>.</summary>
+    public sealed class ClassSpec
+    {
+        public string Name { get; set; } = "";
+        public string Extends { get; set; } = "";
+        public bool Placeable { get; set; }
+        /// <summary>Declarations: "float Strength", "var() int Count".</summary>
+        public List<string> Vars { get; set; } = new();
+        /// <summary>"Strength=1500.0"</summary>
+        public List<string> Defaults { get; set; } = new();
+        /// <summary>An override by name ("Touch") or a new function by declaration, with its code.</summary>
+        public Dictionary<string, Action<Call>> Functions { get; set; } = new();
+        /// <summary>More UnrealScript, as written.</summary>
+        public string Extra { get; set; } = "";
     }
 }

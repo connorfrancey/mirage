@@ -4338,6 +4338,60 @@ defaultproperties
 }
 )";
 
+// A bounce pad spawned on the player: its Strength default, its Touch counted (Bounces) and the player launched
+struct Bounce
+{
+    int bounces = 0;
+    float velocityZ = 0.f;
+};
+Bounce BounceOn(Classes::UClass* cls, Probe& p, Step& s, bool destroy = true)
+{
+    Bounce out;
+    WaitGrounded();
+    Classes::AActor* pad = nullptr;
+    float strength = 0.f;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        pad = pawn->Spawn(cls, nullptr, Classes::FName{}, pawn->Location, pawn->Rotation, nullptr, true);
+        if (!pad) return;
+        strength = mirage::reflect::GetFloat(mirage::reflect::Resolve(cls, pad, "Strength"));
+        // A nudge: a move finds what the pawn now overlaps
+        Classes::FVector at = pawn->Location;
+        at.Z += 1.f;
+        pawn->SetLocation(at);
+    });
+    if (!pad)
+    {
+        p.Problem("it didn't spawn");
+        return out;
+    }
+    if (strength != 1500.f) p.Problem(fmt::format("its Strength is {} (the default is 1500)", strength));
+    for (int i = 0; i < 60 && out.bounces == 0; ++i)
+    {
+        WaitTicks(1);
+        OnGameThread([&] {
+            out.bounces = mirage::reflect::GetInt(mirage::reflect::Resolve(cls, pad, "Bounces"));
+            auto* pawn = game::Pawn();
+            if (!pawn) return;
+            out.velocityZ = (std::max)(out.velocityZ, pawn->Velocity.Z);
+            // Not touched yet (right after another pad's bounce a single move may not register): another small move
+            if (out.bounces == 0 && i % 4 == 3)
+            {
+                Classes::FVector at = pawn->Location;
+                at.Z += (i % 8 == 3) ? -1.f : 1.f;
+                pawn->SetLocation(at);
+            }
+        });
+    }
+    s.notes.push_back(fmt::format("touched {} time(s), the player's vertical speed reached {:.0f}", out.bounces, out.velocityZ));
+    if (out.bounces == 0) p.Problem("its Touch event never ran");
+    else if (out.velocityZ < 1000.f) p.Problem(fmt::format("the player wasn't launched (vertical speed {:.0f})", out.velocityZ));
+    if (destroy) OnGameThread([&] { pad->Destroy(); });
+    WaitGrounded();
+    return out;
+}
+
 void TestClassesSource()
 {
     Step& s = Begin("Mirage classes (.uc)");
@@ -4388,44 +4442,233 @@ void TestClassesSource()
     if (super != "Trigger") p.Problem("its super is " + super + ", not Trigger");
 
     // Spawned on the player: the engine's Touch runs the compiled bytecode
-    WaitGrounded();
-    Classes::AActor* pad = nullptr;
-    float strength = 0.f;
+    BounceOn(cls, p, s);
+    // UClass::ClassFlags where runtime/classes reads it: Trigger is native and placeable; the built class placeable
+    std::uint32_t trigger = 0, own = 0;
     OnGameThread([&] {
-        auto* pawn = game::Pawn();
-        if (!pawn) return;
-        pad = pawn->Spawn(cls, nullptr, Classes::FName{}, pawn->Location, pawn->Rotation, nullptr, true);
-        if (!pad) return;
-        strength = mirage::reflect::GetFloat(mirage::reflect::Resolve(cls, pad, "Strength"));
-        // A nudge: a move finds what the pawn now overlaps
-        Classes::FVector at = pawn->Location;
-        at.Z += 1.f;
-        pawn->SetLocation(at);
+        trigger = mirage::classes::ClassFlags(Classes::UClass::FindClass("Class Engine.Trigger"));
+        own = mirage::classes::ClassFlags(cls);
     });
-    if (!pad)
+    if ((trigger & 0x280u) != 0x280u || !(own & 0x200u))
+        p.Problem(fmt::format("class flags read wrong (Trigger 0x{:08X}, MirageBouncePad 0x{:08X})", trigger, own));
+    End(s);
+}
+
+// Step 12's milestone, the other half: tests/mods/class-lua and class-cs describe the bounce pad from Lua
+// (mirage.define_class) and C# (Mod.DefineClass), its Touch and a new function written in the mod's language; it
+// behaves as the .uc pad (the player is launched), TimesBounced returns the mod's value. A hot reload of the mod retires the class (its actors destroyed, abstract: no new spawns);
+// the reloaded mod defines it again from the same source: the same class, spawnable again.
+void TestDescribedClass(const char* step, const char* moduleName, const char* className, const char* modId)
+{
+    Step& s = Begin(step);
+    Probe p(s);
+    namespace mm = mirage::mods;
+    Module* m = modules::Find(moduleName);
+    if (!m)
     {
-        p.Problem("it didn't spawn");
+        p.Problem(std::string("the ") + moduleName + " module is missing (tests/mods/" + modId + ")");
         End(s);
         return;
     }
-    if (strength != 1500.f) p.Problem(fmt::format("its Strength is {} (the default is 1500)", strength));
+    const auto findClass = [className] {
+        Classes::UClass* found = nullptr;
+        OnGameThread([&] {
+            auto& objects = Classes::UObject::GetGlobalObjects();
+            for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+            {
+                Classes::UObject* o = objects.GetByIndex(i);
+                if (o && o->Class == Classes::UClass::StaticClass() && o->GetName() == className) found = static_cast<Classes::UClass*>(o);
+            }
+        });
+        return found;
+    };
+    OnRenderThread([m] { m->SetEnabled(true); });
+    Classes::UClass* cls = nullptr;
+    const clk::Ticks start = clk::Now();
+    for (int i = 0; i < 300 && !cls; ++i)
+    {
+        WaitTicks(5);
+        cls = findClass();
+    }
+    if (!cls)
+    {
+        p.Problem("the mod's class never appeared (the mod's log says why)");
+        End(s);
+        return;
+    }
+    std::string path;
+    OnGameThread([&] { path = cls->GetPathName(); });
+    s.notes.push_back(fmt::format("{} defined by {} in {:.2f} s", path, modId, clk::SecondsSince(start)));
+
+    const Bounce b = BounceOn(cls, p, s, false);
+    // TimesBounced: a function declared by the mod, its value returned by the mod's code
+    int times = -1, bouncesNow = -2;
+    OnGameThread([&] {
+        Classes::UObject* pad = nullptr;
+        auto& objects = Classes::UObject::GetGlobalObjects();
+        for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+            if (auto* o = objects.GetByIndex(i); o && o->Class == cls) pad = o;
+        if (!pad) return;
+        namespace ga = mirage::mods::game_api;
+        if (MirageCall* call = ga::CallBegin(reinterpret_cast<MirageObject*>(pad), "TimesBounced"))
+        {
+            MirageValue v{};
+            if (ga::CallInvoke(call) && ga::CallGet(call, "ReturnValue", &v)) times = v.i;
+            ga::CallEnd(call);
+        }
+        bouncesNow = mirage::reflect::GetInt(mirage::reflect::Resolve(cls, pad, "Bounces"));
+    });
+    (void)b;
+    if (times != bouncesNow) p.Problem(fmt::format("TimesBounced returned {}, Bounces is {}", times, bouncesNow));
+    // class-lua's Twice: declared `native("double")` in UnrealScript, the mod's Lua native behind it
+    if (std::string(modId) == "class-lua")
+    {
+        float twice = -1.f;
+        OnGameThread([&] {
+            Classes::UObject* pad = nullptr;
+            auto& objects = Classes::UObject::GetGlobalObjects();
+            for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+                if (auto* o = objects.GetByIndex(i); o && o->Class == cls) pad = o;
+            namespace ga = mirage::mods::game_api;
+            if (MirageCall* call = pad ? ga::CallBegin(reinterpret_cast<MirageObject*>(pad), "Twice") : nullptr)
+            {
+                MirageValue v{};
+                v.type = MIRAGE_VALUE_FLOAT;
+                v.f = 21.f;
+                ga::CallSet(call, "X", &v);
+                if (ga::CallInvoke(call) && ga::CallGet(call, "ReturnValue", &v)) twice = v.f;
+                ga::CallEnd(call);
+            }
+        });
+        s.notes.push_back(fmt::format("Twice(21) = {} (a native(\"double\") function, the mod's Lua native)", twice));
+        if (twice != 42.f) p.Problem(fmt::format("Twice(21) returned {}, not 42", twice));
+    }
+
+    // Its lifetime: a hot reload retires it (the pad still there is destroyed, the class can't spawn), the reloaded
+    // mod's definition brings it back
+    int alive = 0;
+    const auto countPads = [&] {
+        alive = 0;
+        OnGameThread([&] {
+            auto& objects = Classes::UObject::GetGlobalObjects();
+            for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+                if (auto* o = objects.GetByIndex(i); o && o->Class == cls && !(*reinterpret_cast<std::uint64_t*>(reinterpret_cast<char*>(o) + 8) & 0x200))
+                    if (!static_cast<Classes::AActor*>(o)->bDeleteMe) ++alive;
+        });
+        return alive;
+    };
+    if (countPads() != 1) p.Problem(fmt::format("{} pads before the reload, not 1", alive));
+    std::string reload;
+    std::uint32_t retiredFlags = 0;
+    OnGameThread([&] {
+        reload = mm::Reload(modId);
+        retiredFlags = mirage::classes::ClassFlags(cls);
+    }, 20.0);
+    if (!reload.empty()) p.Problem("hot reload: " + reload);
+    if (!(retiredFlags & 1u)) p.Problem("after the unload, the class isn't abstract (it could still be spawned)");
+    if (countPads() != 0) p.Problem(fmt::format("{} pads still there after the mod's unload", alive));
+    std::uint32_t flags = 1;
+    for (int i = 0; i < 100 && (flags & 1u); ++i)
+    {
+        WaitTicks(2);
+        OnGameThread([&] { flags = mirage::classes::ClassFlags(cls); });
+    }
+    if (flags & 1u) p.Problem("the reloaded mod's definition didn't bring the class back");
+    else if (findClass() != cls) p.Problem("the reloaded mod got another class for the same source");
+    else BounceOn(cls, p, s);
+
+    // mirage.keep's flag: RF_RootSet on and off
+    OnGameThread([&] {
+        Classes::UObject* o = game::Pawn();
+        if (!o) return;
+        auto& f = *reinterpret_cast<std::uint64_t*>(reinterpret_cast<char*>(o) + 8);
+        const std::uint64_t before = f & 0x4000;
+        mirage::classes::Keep(o, true);
+        const bool kept = (f & 0x4000) != 0;
+        mirage::classes::Keep(o, before != 0);
+        if (!kept) p.Problem("Keep didn't set RF_RootSet");
+    });
+    OnRenderThread([m] { m->SetEnabled(false); });
+    End(s);
+}
+
+// The example mod (examples/mods/bounce-pad): its UnrealScript class compiled from the mod's folder, a pad spawned from
+// Lua (mirage.call(pawn, "Spawn", { SpawnClass = ... })) when its module is switched on, and the player launched by it
+void TestClassesExample()
+{
+    Step& s = Begin("Mirage classes (example mod)");
+    Probe p(s);
+    Module* m = modules::Find("Bounce Pad");
+    if (!m)
+    {
+        p.Problem("the Bounce Pad module is missing (examples/mods/bounce-pad)");
+        End(s);
+        return;
+    }
+    WaitGrounded();
+    // The example's pads: the actors of a class named MirageBouncePad from a package the .uc test didn't build
+    const auto pads = [] {
+        std::vector<Classes::AActor*> out;
+        auto& objects = Classes::UObject::GetGlobalObjects();
+        for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+        {
+            Classes::UObject* o = objects.GetByIndex(i);
+            if (!o || !o->Class || o->Class->GetName() != "MirageBouncePad") continue;
+            if (*reinterpret_cast<std::uint64_t*>(reinterpret_cast<char*>(o) + 8) & 0x600) continue;   // Defaults, templates
+            if (o->Class->GetPathName() == "MirageBouncePad_59abd376.MirageBouncePad") continue;          // The .uc test's
+            if (!static_cast<Classes::AActor*>(o)->bDeleteMe) out.push_back(static_cast<Classes::AActor*>(o));
+        }
+        return out;
+    };
+    std::size_t before = 0;
+    OnGameThread([&] { before = pads().size(); });
+    OnRenderThread([m] { m->SetEnabled(true); });
+    Classes::AActor* pad = nullptr;
+    for (int i = 0; i < 120 && !pad; ++i)    // About 10 s: the first compile takes 3-4 s
+    {
+        WaitTicks(5);
+        OnGameThread([&] {
+            const auto now = pads();
+            if (now.size() > before) pad = now.back();
+        });
+    }
+    if (!pad)
+    {
+        p.Problem("no pad was dropped (the mod's log says why)");
+        End(s);
+        return;
+    }
+    std::string cls;
+    OnGameThread([&] { cls = pad->Class->GetPathName(); });
+    s.notes.push_back("dropped a " + cls);
     int bounces = 0;
     float velocityZ = 0.f;
-    for (int i = 0; i < 60 && bounces == 0; ++i)
+    for (int i = 0; i < 80 && bounces == 0; ++i)
     {
         WaitTicks(1);
         OnGameThread([&] {
-            bounces = mirage::reflect::GetInt(mirage::reflect::Resolve(cls, pad, "Bounces"));
-            if (auto* pawn = game::Pawn()) velocityZ = (std::max)(velocityZ, pawn->Velocity.Z);
+            bounces = mirage::reflect::GetInt(mirage::reflect::Resolve(pad->Class, pad, "Bounces"));
+            auto* pawn = game::Pawn();
+            if (!pawn) return;
+            velocityZ = (std::max)(velocityZ, pawn->Velocity.Z);
+            if (bounces == 0 && i % 4 == 3)
+            {
+                Classes::FVector at = pawn->Location;
+                at.Z += (i % 8 == 3) ? -1.f : 1.f;
+                pawn->SetLocation(at);
+            }
         });
     }
     s.notes.push_back(fmt::format("touched {} time(s), the player's vertical speed reached {:.0f}", bounces, velocityZ));
-    if (bounces == 0) p.Problem("its Touch event never ran");
+    if (bounces == 0) p.Problem("the pad's Touch never ran");
     else if (velocityZ < 1000.f) p.Problem(fmt::format("the player wasn't launched (vertical speed {:.0f})", velocityZ));
     OnGameThread([&] { pad->Destroy(); });
     WaitGrounded();
     End(s);
 }
+
+void TestClassesLua() { TestDescribedClass("Mirage classes (Lua)", "Class (Lua)", "MirageBouncePadLua", "class-lua"); }
+void TestClassesCSharp() { TestDescribedClass("Mirage classes (C#)", "Class (C#)", "MirageBouncePadCs", "class-cs"); }
 
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
@@ -5342,6 +5585,9 @@ const Named* FeatureList()
         {"Mirage natives (Lua)", &TestNativesLua, false},
         {"Mirage classes (probe)", &TestClassesProbe, false},
         {"Mirage classes (.uc)", &TestClassesSource, false},
+        {"Mirage classes (Lua)", &TestClassesLua, false},
+        {"Mirage classes (C#)", &TestClassesCSharp, false},
+        {"Mirage classes (example mod)", &TestClassesExample, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

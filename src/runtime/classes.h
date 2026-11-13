@@ -5,6 +5,7 @@
 // and keeps them like any cooked class. The file is added to the engine's package cache first
 // (FPackageFileCache::CachePackage, as the engine adds its own), then loaded by name. No copy into the game's folders.
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -25,4 +26,15 @@ namespace mirage::classes
 	Classes::UObject* LoadFrom(const std::filesystem::path& file, std::string_view object, Classes::UClass* cls,
 							   std::string* error = nullptr);
 	Classes::UClass* LoadClassFrom(const std::filesystem::path& file, std::string_view className, std::string* error = nullptr);
+
+	// ---- Lifetime: a mod's classes and the objects it holds ------------------------------------------------------
+	// UClass::ClassFlags (CLASS_Abstract 0x1, CLASS_Placeable 0x200, ...)
+	std::uint32_t ClassFlags(const Classes::UClass* cls);
+	// A mod's class goes with the mod: its live actors are destroyed and it is made abstract (the engine spawns no
+	// abstract class; its package stays loaded for the session). Returns the actors destroyed. Game thread.
+	int Retire(Classes::UClass* cls);
+	// A retired class loaded again (the same source after a hot reload): spawnable again. Game thread.
+	void Revive(Classes::UClass* cls);
+	// Keeps an object from the garbage collector (RF_RootSet) or lets it go. Game thread.
+	void Keep(Classes::UObject* object, bool keep);
 }

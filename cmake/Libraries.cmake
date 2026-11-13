@@ -361,7 +361,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE
         imgui imjson minhook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads)
 if(MEMENU_GAME)
-  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler lua::lua toml11::toml11 stb_headers)
+  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler lua::lua toml11::toml11 stb_headers)
   target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/api)   # mirage/api.h: the mod ABI
 endif()
 

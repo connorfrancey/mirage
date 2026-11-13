@@ -767,6 +767,20 @@ typedef struct MirageApi {
      * gets why (up to `capacity` bytes; may be NULL). The same source again gives the same class; an edited one (a hot
      * reload) gives a new class of the same name. Game thread. */
     MirageObject*(MIRAGE_CALL* class_load)(MirageMod* mod, const char* path, char* error, uint32_t capacity);
+    /* A class described instead of written, as JSON: {"name": "MyPad", "extends": "Trigger", "placeable": true,
+     * "vars": ["float Strength", "var() int Count"], "functions": ["Touch", "function int Count()"],
+     * "defaults": ["Strength=1500.0"], "extra": "<more UnrealScript>"}. A function given by name overrides the parent's
+     * (its declaration, an empty body); one given as a declaration is new (an empty body too). Their code is the mod's:
+     * inject_function(<the class's path>.<function>, "head", ...) reads the parameters and self, sets ReturnValue and
+     * returns early. The runtime writes the .uc to memenu\classes\generated\<mod>\ and loads it as class_load does.
+     * Game thread. */
+    MirageObject*(MIRAGE_CALL* class_define)(MirageMod* mod, const char* spec_json, char* error, uint32_t capacity);
+    /* "Package.Outer.Name" ("MirageBouncePad_1a2b3c4d.MirageBouncePad"): copies up to capacity, returns the full length */
+    uint32_t(MIRAGE_CALL* object_path)(MirageObject* object, char* buffer, uint32_t capacity);
+    /* Keeps an object from the garbage collector (keep 1) or lets it go (0); the mod's unload lets go of all it kept.
+     * A mod's classes go with it: unloading destroys their actors and they can't be spawned until loaded again.
+     * Game thread. */
+    int32_t(MIRAGE_CALL* object_keep)(MirageMod* mod, MirageObject* object, int32_t keep);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

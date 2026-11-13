@@ -42,6 +42,18 @@ namespace Mirage
             }
         }
 
+        /// <summary>"Package.Outer.Name" ("MirageBouncePad_1a2b3c4d.MirageBouncePad")</summary>
+        public string Path
+        {
+            get
+            {
+                if (Handle == null) return "";
+                var buf = stackalloc byte[512];
+                uint n = Bridge.Api->object_path(Handle, buf, 512);
+                return Utf8.Read(buf, (int)Math.Min(n, 511u));
+            }
+        }
+
         public bool IsA(string className) => Handle != null && Bridge.Api->object_is_a(Handle, Utf8.Intern(className)) != 0;
 
         public Value Get(string path)

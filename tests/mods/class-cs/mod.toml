@@ -1,0 +1,4 @@
+# Self-test (step 12): a class described from C# (Mod.DefineClass), its code in C#
+id = "class-cs"
+version = "1.0.0"
+mirage = "^0.1"

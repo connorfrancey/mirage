@@ -10,6 +10,7 @@
 #include "gui.h"
 #include "runtime/call.h"
 #include "runtime/class_source.h"
+#include "runtime/classes.h"
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
@@ -18,6 +19,7 @@
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
 
+#include <fmt/format.h>
 #include <spdlog/spdlog.h>
 #include <windows.h>
 
@@ -222,6 +224,19 @@ namespace mirage::mods
 		ReleaseScripts(mod);
 		for (auto& n : mod.natives) n->live = false;		// Its natives return zero from here (their index stays)
 		natives::Release(mod.id);
+		// Its classes and the objects it kept go with it (on the game thread: actors are destroyed)
+		if (!mod.classes.empty() || !mod.kept.empty()) {
+			auto retire = [modClasses = mod.classes, kept = mod.kept] {
+				for (void* o : kept)
+					if (Alive(static_cast<Classes::UObject*>(o))) classes::Keep(static_cast<Classes::UObject*>(o), false);
+				for (void* c : modClasses)
+					if (Alive(static_cast<Classes::UObject*>(c))) classes::Retire(static_cast<Classes::UClass*>(c));
+			};
+			if (game::IsGameThread()) retire();
+			else game::RunOnGameThread(retire);
+			mod.classes.clear();
+			mod.kept.clear();
+		}
 	}
 
 	void DispatchTick(float seconds)
@@ -388,30 +403,90 @@ namespace mirage::mods
 			return c ? Handle(c->self) : nullptr;
 		}
 
+		// An error for class_load / class_define: logged and copied for the mod
+		MirageObject* ClassError(MirageMod* mod, const char* what, const std::string& why, char* error, uint32_t capacity)
+		{
+			spdlog::error("[mod {}] {}: {}", mod ? mod->id : "?", what, why);
+			if (error && capacity) {
+				const std::size_t n = (std::min)(why.size(), static_cast<std::size_t>(capacity - 1));
+				std::memcpy(error, why.data(), n);
+				error[n] = '\0';
+			}
+			return nullptr;
+		}
+		// A class of the mod's: tracked (retired at its unload), spawnable again if an earlier load retired it
+		MirageObject* Adopt(MirageMod* mod, Classes::UClass* cls, const classes::BuiltClass& built, char* error, uint32_t capacity)
+		{
+			classes::Revive(cls);
+			if (std::find(mod->classes.begin(), mod->classes.end(), cls) == mod->classes.end()) mod->classes.push_back(cls);
+			spdlog::info("[mod {}] class {} loaded from {}{}", mod->id, built.className, built.package.filename().string(),
+						 built.cached ? " (built before)" : fmt::format(" (built in {:.2f} s)", built.seconds));
+			if (error && capacity) error[0] = '\0';
+			return Handle(cls);
+		}
+
 		MirageObject* MIRAGE_CALL ClassLoad(MirageMod* mod, const char* path, char* error, uint32_t capacity)
 		{
-			const auto fail = [&](const std::string& why) -> MirageObject* {
-				spdlog::error("[mod {}] class_load {}: {}", mod ? mod->id : "?", path ? path : "", why);
-				if (error && capacity) {
-					const std::size_t n = (std::min)(why.size(), static_cast<std::size_t>(capacity - 1));
-					std::memcpy(error, why.data(), n);
-					error[n] = '\0';
-				}
-				return nullptr;
-			};
-			if (!mod || !path) return fail("no mod or path");
-			if (!game::IsGameThread()) return fail("only on the game thread (a tick event, a hook)");
+			const std::string what = std::string("class_load ") + (path ? path : "");
+			if (!mod || !path) return ClassError(mod, what.c_str(), "no mod or path", error, capacity);
+			if (!game::IsGameThread()) return ClassError(mod, what.c_str(), "only on the game thread (a tick event, a hook)", error, capacity);
 			const auto utf8 = [](std::string_view t) { return std::filesystem::path(std::u8string(t.begin(), t.end())); };
 			std::filesystem::path file = utf8(path);
 			if (file.is_relative()) file = utf8(mod->dir) / file;
 			std::string why;
 			classes::BuiltClass built;
-			Classes::UClass* cls = classes::LoadSource(file, &why, &built);
-			if (!cls) return fail(why);
-			spdlog::info("[mod {}] class {} loaded from {}{}", mod->id, built.className, built.package.filename().string(),
-						 built.cached ? " (built before)" : "");
-			if (error && capacity) error[0] = '\0';
-			return Handle(cls);
+			Classes::UClass* cls = classes::LoadSource(file, &why, &built, mod->id);
+			if (!cls) return ClassError(mod, what.c_str(), why, error, capacity);
+			return Adopt(mod, cls, built, error, capacity);
+		}
+
+		MirageObject* MIRAGE_CALL ClassDefine(MirageMod* mod, const char* spec, char* error, uint32_t capacity)
+		{
+			if (!mod || !spec) return ClassError(mod, "class_define", "no mod or description", error, capacity);
+			if (!game::IsGameThread()) return ClassError(mod, "class_define", "only on the game thread (a tick event, a hook)", error, capacity);
+			classes::ClassSpec c;
+			try {
+				const nlohmann::json j = nlohmann::json::parse(spec);
+				c.name = j.value("name", "");
+				c.extends = j.value("extends", "");
+				c.placeable = j.value("placeable", false);
+				const auto list = [&](const char* key, std::vector<std::string>& out) {
+					if (!j.contains(key)) return;
+					for (const auto& v : j.at(key)) out.push_back(v.get<std::string>());
+				};
+				list("vars", c.vars);
+				list("functions", c.functions);
+				if (j.contains("defaults") && j.at("defaults").is_object()) {
+					for (const auto& [k, v] : j.at("defaults").items())
+						c.defaults.push_back(k + "=" + (v.is_string() ? v.get<std::string>() : v.is_boolean() ? (v.get<bool>() ? "True" : "False") : v.dump()));
+				} else {
+					list("defaults", c.defaults);
+				}
+				c.extra = j.value("extra", "");
+			} catch (const std::exception& e) {
+				return ClassError(mod, "class_define", std::string("the description isn't valid JSON: ") + e.what(), error, capacity);
+			}
+			const std::string what = "class_define " + c.name;
+			std::string why;
+			classes::BuiltClass built;
+			Classes::UClass* cls = classes::DefineClass(c, mod->id, &why, &built);
+			if (!cls) return ClassError(mod, what.c_str(), why, error, capacity);
+			return Adopt(mod, cls, built, error, capacity);
+		}
+
+		uint32_t MIRAGE_CALL ObjectPath(MirageObject* object, char* buffer, uint32_t capacity)
+		{
+			return CopyOut(object && Alive(Obj(object)) ? Obj(object)->GetPathName() : std::string(), buffer, capacity);
+		}
+
+		int32_t MIRAGE_CALL ObjectKeep(MirageMod* mod, MirageObject* object, int32_t keep)
+		{
+			if (!mod || !object || !Alive(Obj(object)) || !game::IsGameThread()) return 0;
+			auto it = std::find(mod->kept.begin(), mod->kept.end(), static_cast<void*>(Obj(object)));
+			if (keep && it == mod->kept.end()) mod->kept.push_back(Obj(object));
+			if (!keep && it != mod->kept.end()) mod->kept.erase(it);
+			classes::Keep(Obj(object), keep != 0);
+			return 1;
 		}
 
 		MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

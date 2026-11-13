@@ -140,6 +140,9 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, void*, void> native_return;
         public delegate* unmanaged[Cdecl]<void*, void*> native_self;
         public delegate* unmanaged[Cdecl]<void*, byte*, byte*, uint, void*> class_load;
+        public delegate* unmanaged[Cdecl]<void*, byte*, byte*, uint, void*> class_define;
+        public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint> object_path;
+        public delegate* unmanaged[Cdecl]<void*, void*, int, int> object_keep;
     }
 
     [StructLayout(LayoutKind.Sequential)]

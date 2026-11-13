@@ -61,9 +61,10 @@ script compiles: a game with only built (DLL) C# mods never pays for it.
 
 | C# | Native API |
 |----|-----------|
-| `Mod`: `Id`, `Version`, `Folder`, `Log`, `Config`/`SetConfig`, `On(GameEvent, ...)`, `Hook(function, when, ...)`, `Notify` | `mod_*`, `log`, `config_*`, `event_subscribe`, `hook_function`, `notify` |
+| `Mod`: `Id`, `Version`, `Folder`, `Log`, `Config`/`SetConfig`, `On(GameEvent, ...)`, `Hook(function, when, ...)`, `Inject`, `Native`, `Notify` | `mod_*`, `log`, `config_*`, `event_subscribe`, `hook_function`, `inject_function`, `native_register`, `notify` |
+| `Mod.LoadClass(path)` (a `.uc` file), `Mod.DefineClass(ClassSpec)`, `Mod.Keep/Release` ([new classes](mod-classes.md)) | `class_load`, `class_define`, `object_keep` |
 | `Module`: `OnEnable/OnDisable/OnTick/OnRender/OnTrigger/OnPanel`, `Enabled`, `Checkbox/Slider/SliderInt/Key` settings | `module_register`, `setting_*` |
-| `GameObject`: `Player`, `Controller`, `World`, `Find`, `Get/Set(path)`, `Name`, `ClassName`, `IsA` | `player_*`, `object_*` |
+| `GameObject`: `Player`, `Controller`, `World`, `Find`, `Get/Set(path)`, `Name`, `ClassName`, `Path`, `IsA` | `player_*`, `object_*` |
 | `Call` (in a hook): `Object`, `Function`, `Get/Set(parameter)`, `Skip` | `call_*` |
 | `Draw`: `Screen`, `Text`, `Line`, `Rect`, `RectFilled`, `WorldToScreen` | `draw_*`, `world_to_screen` |
 

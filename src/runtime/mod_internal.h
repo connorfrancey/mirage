@@ -63,6 +63,9 @@ struct MirageMod
 	// before a hook was removed may still hold one.
 	std::vector<std::unique_ptr<mirage::mods::HookRecord>> hooks;
 	std::vector<std::shared_ptr<mirage::mods::Subscription>> subscriptions;
+	// Its classes (class_load, class_define) and the objects it keeps from the GC (object_keep): retired and let go at
+	// its unload. UClass* / UObject*.
+	std::vector<void*> classes, kept;
 	std::vector<int> detours;							// mirage::detours ids, removed with its hooks
 	std::vector<std::unique_ptr<mirage::mods::NativeRecord>> natives;	// Its natives (step 11): records live as long as the menu
 	// Its content (step 7): what its content folders change, and the module that turns it on and off

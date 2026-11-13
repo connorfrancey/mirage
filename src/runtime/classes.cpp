@@ -7,6 +7,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <vector>
+
 namespace mirage::classes
 {
 	namespace
@@ -109,5 +112,57 @@ namespace mirage::classes
 	{
 		const std::string object = file.stem().string() + "." + std::string(className);
 		return static_cast<Classes::UClass*>(LoadFrom(file, object, Classes::UClass::StaticClass(), error));
+	}
+
+	namespace
+	{
+		constexpr std::size_t kClassFlagsOffset = 0xE4;		// UClass's first member, after UState (SDK: UClass at 0xE4)
+		constexpr std::uint32_t kClassAbstract = 0x1;
+		constexpr std::uint64_t kRootSet = 0x4000;			// RF_RootSet
+		constexpr std::uint64_t kNotAnInstance = 0x200 | 0x400;	// RF_ClassDefaultObject | RF_ArchetypeObject
+		std::uint32_t& Flags(Classes::UClass* cls) { return *reinterpret_cast<std::uint32_t*>(reinterpret_cast<char*>(cls) + kClassFlagsOffset); }
+		std::uint64_t& ObjectFlags(Classes::UObject* o) { return *reinterpret_cast<std::uint64_t*>(reinterpret_cast<char*>(o) + 0x8); }
+		std::vector<Classes::UClass*> g_retired;		// Made abstract by Retire (Revive undoes only these)
+	}
+
+	std::uint32_t ClassFlags(const Classes::UClass* cls)
+	{
+		return cls ? *reinterpret_cast<const std::uint32_t*>(reinterpret_cast<const char*>(cls) + kClassFlagsOffset) : 0;
+	}
+
+	int Retire(Classes::UClass* cls)
+	{
+		if (!cls) return 0;
+		int destroyed = 0;
+		auto& objects = Classes::UObject::GetGlobalObjects();
+		std::vector<Classes::AActor*> actors;
+		for (int i = 0; i < static_cast<int>(objects.Num()); ++i) {
+			Classes::UObject* o = objects.GetByIndex(i);
+			if (!o || o == cls || (ObjectFlags(o) & kNotAnInstance) || !o->IsA(cls)) continue;
+			if (o->IsA(Classes::AActor::StaticClass())) actors.push_back(static_cast<Classes::AActor*>(o));
+		}
+		for (Classes::AActor* a : actors)
+			if (a->Destroy()) ++destroyed;
+		if (!(Flags(cls) & kClassAbstract)) {
+			Flags(cls) |= kClassAbstract;
+			g_retired.push_back(cls);
+		}
+		spdlog::info("Classes: {} retired ({} actors destroyed)", cls->GetPathName(), destroyed);
+		return destroyed;
+	}
+
+	void Revive(Classes::UClass* cls)
+	{
+		const auto it = std::find(g_retired.begin(), g_retired.end(), cls);
+		if (it == g_retired.end()) return;
+		Flags(cls) &= ~kClassAbstract;
+		g_retired.erase(it);
+	}
+
+	void Keep(Classes::UObject* object, bool keep)
+	{
+		if (!object) return;
+		if (keep) ObjectFlags(object) |= kRootSet;
+		else ObjectFlags(object) &= ~kRootSet;
 	}
 }

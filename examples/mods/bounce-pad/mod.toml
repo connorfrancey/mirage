@@ -1,0 +1,10 @@
+# A new actor class written in UnrealScript: classes/MirageBouncePad.uc is compiled when the game loads the mod (no SDK,
+# no editor), and the Bounce Pad module spawns one under the player. Edit the .uc and save: the mod hot reloads with the
+# new class.
+id = "bounce-pad"
+name = "Bounce Pad (UnrealScript)"
+version = "1.0.0"
+description = "A new placeable actor class in UnrealScript: step on it and it launches you"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+hot_reload = true

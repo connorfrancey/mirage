@@ -94,10 +94,10 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
     built.append(what)
     lua = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.lua").exists()]
     scripts = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.cs").exists()]  # Compiled in the game
-    mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", *lua,
+    mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", EXAMPLES / "bounce-pad", *lua,
             EXAMPLES / "hello-script", *scripts]
     return mods, (f"{', '.join(built)}, {len(lua) + 1} Lua mods, {len(scripts) + 1} C# scripts, high-steps and retexture "
-                  "(content)")
+                  "(content), bounce-pad (an UnrealScript class)")
 
 
 def install_for_test(game_dir: Path, folders: list[Path]) -> Path:

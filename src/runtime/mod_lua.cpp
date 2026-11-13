@@ -12,6 +12,9 @@
 #include <lauxlib.h>
 #include <lua.h>
 
+#include <fmt/format.h>
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -174,6 +177,10 @@ namespace mirage::mods
 		static int World(lua_State* L);
 		static int Find(lua_State* L);
 		static int LoadClass(lua_State* L);
+		static int DefineClass(lua_State* L);
+		static int PathOf(lua_State* L);
+		static int KeepFn(lua_State* L);
+		static int ReleaseFn(lua_State* L);
 		static int Name(lua_State* L);
 		static int ClassName(lua_State* L);
 		static int IsA(lua_State* L);
@@ -792,6 +799,172 @@ namespace mirage::mods
 			return 2;
 		}
 		PushObject(L, cls);
+		return 1;
+	}
+
+	// mirage.define_class { name = "MyPad", extends = "Trigger", placeable = true,
+	//     vars = { "float Strength", "int Bounces" }, defaults = { Strength = 1500, bNoDelete = false },
+	//     functions = { Touch = function(self, params, call) ... end,
+	//                   Count = { "function int Count()", function(self) return 3 end } },
+	//     extra = "<more UnrealScript>" }
+	// -> the class. The runtime writes and compiles the class; each function's code is the Lua function, called at the
+	// head of its (empty) script body with the object, its parameters (read and written by name) and the call; a value it
+	// returns is the function's return value. Game thread (a tick, an event).
+	int LuaMod::DefineClass(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		luaL_checktype(L, 1, LUA_TTABLE);
+		nlohmann::json spec;
+		const auto field = [&](const char* key) -> std::string {
+			lua_getfield(L, 1, key);
+			std::string v = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+			lua_pop(L, 1);
+			return v;
+		};
+		spec["name"] = field("name");
+		spec["extends"] = field("extends");
+		lua_getfield(L, 1, "placeable");
+		spec["placeable"] = lua_toboolean(L, -1) != 0;
+		lua_pop(L, 1);
+		spec["extra"] = field("extra");
+		// vars: a list of declarations
+		spec["vars"] = nlohmann::json::array();
+		lua_getfield(L, 1, "vars");
+		if (lua_istable(L, -1))
+			for (lua_Integer i = 1; lua_rawgeti(L, -1, i) != LUA_TNIL; ++i) {
+				spec["vars"].push_back(lua_tostring(L, -1));
+				lua_pop(L, 1);
+			}
+		lua_pop(L, 2);
+		// defaults: { Name = value } or a list of "Name=Value" lines
+		spec["defaults"] = nlohmann::json::array();
+		bool keyed = false;		// { Name = value } (no order of its own) rather than a list of lines
+		lua_getfield(L, 1, "defaults");
+		if (lua_istable(L, -1) && lua_rawlen(L, -1) > 0) {		// A list of lines, in its order
+			for (lua_Integer i = 1; lua_rawgeti(L, -1, i) != LUA_TNIL; ++i) {
+				spec["defaults"].push_back(lua_isstring(L, -1) ? lua_tostring(L, -1) : "");
+				lua_pop(L, 1);
+			}
+			lua_pop(L, 1);
+		} else if (lua_istable(L, -1)) {
+			lua_pushnil(L);
+			while (lua_next(L, -2)) {
+				std::string value;
+				if (lua_isboolean(L, -1)) value = lua_toboolean(L, -1) ? "True" : "False";
+				else if (lua_isinteger(L, -1)) value = std::to_string(lua_tointeger(L, -1));
+				else if (lua_type(L, -1) == LUA_TNUMBER) value = fmt::format("{}", lua_tonumber(L, -1));
+				else if (lua_isstring(L, -1)) value = lua_tostring(L, -1);
+				if (lua_type(L, -2) == LUA_TSTRING) {
+					spec["defaults"].push_back(std::string(lua_tostring(L, -2)) + "=" + value);
+					keyed = true;
+				}
+				else spec["defaults"].push_back(value);
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+		// pairs() has no fixed order: sorted, the same description gives the same source (and the same package and
+		// class after a hot reload)
+		if (keyed) {
+			std::vector<std::string> d = spec["defaults"].get<std::vector<std::string>>();
+			std::sort(d.begin(), d.end());
+			spec["defaults"] = d;
+		}
+		// functions: { Name = fn } (an override) or { Name = { "declaration", fn } } (a new one)
+		struct Handler
+		{
+			std::string name;
+			int ref;
+		};
+		std::vector<Handler> handlers;
+		spec["functions"] = nlohmann::json::array();
+		lua_getfield(L, 1, "functions");
+		if (lua_istable(L, -1)) {
+			lua_pushnil(L);
+			while (lua_next(L, -2)) {
+				if (lua_type(L, -2) != LUA_TSTRING) {
+					lua_pop(L, 1);
+					continue;
+				}
+				const std::string name = lua_tostring(L, -2);
+				if (lua_isfunction(L, -1)) {
+					spec["functions"].push_back(name);
+					lua_pushvalue(L, -1);
+				} else if (lua_istable(L, -1)) {
+					lua_rawgeti(L, -1, 1);
+					spec["functions"].push_back(lua_isstring(L, -1) ? lua_tostring(L, -1) : name);
+					lua_pop(L, 1);
+					lua_rawgeti(L, -1, 2);
+				} else {
+					lua_pushnil(L);
+				}
+				if (lua_isfunction(L, -1)) handlers.push_back({name, luaL_ref(L, LUA_REGISTRYINDEX)});
+				else lua_pop(L, 1);
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+		{
+			std::vector<std::string> f = spec["functions"].get<std::vector<std::string>>();
+			std::sort(f.begin(), f.end());
+			spec["functions"] = f;
+		}
+
+		char error[2048]{};
+		MirageObject* cls = self.api_->class_define(self.mod_, spec.dump().c_str(), error, sizeof(error));
+		if (!cls) {
+			for (const Handler& h : handlers) luaL_unref(L, LUA_REGISTRYINDEX, h.ref);
+			return luaL_error(L, "mirage.define_class %s: %s", spec["name"].get<std::string>().c_str(), error);
+		}
+		char path[512]{};
+		self.api_->object_path(cls, path, sizeof(path));
+		// Each handler, behind a wrapper: (self, params, call), its result the return value
+		static const char* kWrap =
+			"local h = ...\n"
+			"return function(call)\n"
+			"  local r = h(call.object, call.params, call)\n"
+			"  if r ~= nil then call.params.ReturnValue = r; call:skip() end\n"
+			"end\n";
+		for (const Handler& h : handlers) {
+			if (luaL_loadstring(L, kWrap) != LUA_OK) return lua_error(L);
+			lua_rawgeti(L, LUA_REGISTRYINDEX, h.ref);
+			lua_call(L, 1, 1);
+			luaL_unref(L, LUA_REGISTRYINDEX, h.ref);
+			const std::string function = std::string(path) + "." + h.name;
+			auto c = std::make_unique<Callback>();
+			c->owner = &self;
+			c->what = "class " + spec["name"].get<std::string>() + "'s " + h.name;
+			c->fn = luaL_ref(L, LUA_REGISTRYINDEX);
+			c->hook = self.api_->inject_function(self.mod_, function.c_str(), "head", 0, &OnHook, c.get());
+			if (!c->hook) {
+				luaL_unref(L, LUA_REGISTRYINDEX, c->fn);
+				return luaL_error(L, "mirage.define_class: %s can't take its Lua code (see the log)", function.c_str());
+			}
+			self.callbacks_.push_back(std::move(c));
+		}
+		PushObject(L, cls);
+		return 1;
+	}
+
+	// mirage.path(object) -> "Package.Outer.Name"
+	int LuaMod::PathOf(lua_State* L)
+	{
+		char path[512]{};
+		Self(L).api_->object_path(CheckObject(L, 1), path, sizeof(path));
+		lua_pushstring(L, path);
+		return 1;
+	}
+	// mirage.keep(object): kept from the garbage collector until mirage.release(object) or the mod's unload
+	int LuaMod::KeepFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		lua_pushboolean(L, self.api_->object_keep(self.mod_, CheckObject(L, 1), 1));
+		return 1;
+	}
+	int LuaMod::ReleaseFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		lua_pushboolean(L, self.api_->object_keep(self.mod_, CheckObject(L, 1), 0));
 		return 1;
 	}
 
@@ -1472,7 +1645,8 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find}, {"load_class", LoadClass},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
+			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {nullptr, nullptr}};

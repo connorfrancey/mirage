@@ -466,22 +466,35 @@ bytes. An empty injection adds 0.10 µs a call, an empty function hook 0.22 µs.
 it in Prologue, the player bounces; the same class written in `.uc` and compiled in the game behaves identically; the
 corpus round-trip (decompile + compile every TdGame function) is byte-identical for an agreed share, the rest listed.
 
-**Status (2026-11-12): classes from `.uc` source work in the game; states, Lua-defined classes and lifetime are next.**
-UnrealLib (branch `uc-compiler`, `UnrealLib::Compiler`) compiles function and state bodies to bytecode: round trip over
-every function and state of the game's script packages, 13,231 of 13,244 compile (99.9%), 12,866 byte-identical (97.1%;
-the game's own packages 97.6%). Its `docs/compiler.md` lists the UE3 compiler's unwritten rules it reproduces and what
-stays different. Its class package builder (`build_class_package`) turns a `.uc` class (variables, functions and events,
-defaultproperties) into a script package laid out like the game's: the reflection is written and loaded first, the
-bodies compiled against it, then the package written again with bytecode and defaults; subclasses carry the parent's
-component map (a Trigger's collision cylinder). In memenu, `runtime/class_source` builds a mod's `.uc` into
-`memenu\classes\<Class>_<hash>.u` and the engine loads it from there (`runtime/classes`: the package cache plus
-StaticLoadObject), so the engine itself makes the UClass, links it and builds its default object. API `class_load`,
-Lua `mirage.load_class`, C# `Mod.LoadClass`. Self-test "Mirage classes (.uc)": `MirageBouncePad` (a Trigger with a
-property and a Touch event) compiles in 2.6 s (mostly reading Core, Engine, GameFramework, IpDrv and TdGame, once),
-loads, spawns on the player, and its Touch launches them. A subclass of a level-only actor needs `bNoDelete=False`
-(the engine spawns no `bNoDelete` actor). Not yet: structs, enums, consts, states and replication in built classes;
-classes declared from Lua/C# without UnrealScript; unloading a mod's classes and actors (a package stays loaded for the
-session, so hot reload uses new package names).
+**Status (2026-11-13): done.** Mods add classes two ways ([doc/mod-classes.md](mod-classes.md)):
+
+- **UnrealScript:** a `.uc` file in the mod's folder, compiled in the game by UnrealLib's compiler (`uc-compiler`
+  branch) into a script package in `memenu\classes\` that the engine loads itself (`runtime/classes`: the package cache
+  plus StaticLoadObject), so the engine makes the UClass, links it and builds its default object. The class builder
+  covers what script classes declare: consts, enums, structs, variables with every modifier, functions, delegates,
+  states (ignores, state functions, state code with labels and latent calls), interfaces, `defaultproperties` with
+  subobjects and dynamic array operations, class modifiers; the rules found in the game's packages (field order, probe
+  masks from the engine's probe names, flag inheritance, each class's own component templates) are in UnrealLib's
+  `docs/compiler.md`. `native("Name")` binds a declared native function to the mod's own native (step 11's leftover).
+- **Described from Lua or C#** (`mirage.define_class`, `Mod.DefineClass`, API `class_define`): the runtime writes the
+  UnrealScript (an override takes the parent's declaration from UnrealLib's decompiler) and the class's functions run
+  the mod's code through script injections (step 11).
+
+Lifetime: a mod's classes are tracked; its unload destroys their actors and makes them abstract (no new spawns); the
+same source loaded again revives the same class; `mirage.keep`/`Mod.Keep` (API `object_keep`) roots objects until the
+mod lets go or unloads; every other handle is weak (checked against GObjects on use). Package names hash the source
+and the builder version, so hot reload of an edited class is a new package.
+
+Milestone checks (self-test, in the game): "Mirage classes (.uc)", "(Lua)", "(C#)" and "(example mod)" each spawn a
+bounce pad on the player in Edge_p, the pad's Touch (UnrealScript, Lua, C#) launches the player the same way; the
+described classes' new function returns the mod's value; `native("double")` runs the mod's Lua native; a hot reload
+destroys the class's actors and brings the same class back. The compiler's corpus checks (UnrealLib, offline): every
+function and state of the game's script packages decompiled and compiled again, 12,866 of 13,244 byte-identical
+(97.1%; the rest listed in `docs/compiler.md`); every class (2,338) decompiled, built and decompiled again: 2,220 build
+(the rest need replication, native interfaces or `map{}`: C++ only), 2,187 come back identical (93.5%).
+
+Not done, by choice: adding a state to an existing cooked class (a subclass with the state works; the game's own
+states are patched and injected through steps 8 and 11), replication (single player), native interfaces.
 
 ### 13. Levels and world building
 

@@ -1,0 +1,4 @@
+# Self-test (step 12): a class described from Lua (mirage.define_class), its code in Lua
+id = "class-lua"
+version = "1.0.0"
+mirage = "^0.1"
