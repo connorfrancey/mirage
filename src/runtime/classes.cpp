@@ -8,6 +8,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <mutex>
+#include <thread>
 #include <vector>
 
 namespace mirage::classes
@@ -20,14 +22,12 @@ namespace mirage::classes
 															   unsigned long, void*, int);
 		StaticLoadObjectFn g_load = nullptr;
 		void** g_cacheVar = nullptr;	// &GPackageFileCache (an FPackageFileCache*)
-		bool g_tried = false;
+		std::once_flag g_found;			// The patterns are looked for once (any thread: Prepare does it on a worker)
 		// FPackageFileCache::CachePackage(const TCHAR* InPathName, UBOOL InOverrideDupe, UBOOL WarnIfExists): virtual 1
 		using CachePackageFn = int(__thiscall*)(void* self, const wchar_t* path, int overrideDupe, int warnIfExists);
 
-		StaticLoadObjectFn Find()
+		void Look()
 		{
-			if (g_tried) return g_load;
-			g_tried = true;
 			// Its prologue: SEH frame, a 0x68-byte stack frame, the security cookie, `mov eax, [ebp+10h]` (Name)
 			g_load = reinterpret_cast<StaticLoadObjectFn>(game::FindPattern(
 				"\x55\x8B\xEC\x6A\xFF\x68\x00\x00\x00\x00\x64\xA1\x00\x00\x00\x00\x50\x83\xEC\x68\x53\x56\x57\xA1\x00\x00\x00\x00"
@@ -43,6 +43,10 @@ namespace mirage::classes
 			else
 				spdlog::error("Classes: StaticLoadObject or GPackageFileCache wasn't found");
 			if (!g_cacheVar) g_load = nullptr;
+		}
+		StaticLoadObjectFn Find()
+		{
+			std::call_once(g_found, Look);
 			return g_load;
 		}
 
@@ -72,6 +76,11 @@ namespace mirage::classes
 				return nullptr;
 			}
 		}
+	}
+
+	void Prepare()
+	{
+		std::thread([] { Find(); }).detach();
 	}
 
 	bool Ready(std::string* why)
@@ -106,6 +115,14 @@ namespace mirage::classes
 		Classes::UObject* result = Guarded(load, cls, name.c_str());
 		if (!result && error) *error = std::string(object) + " didn't load from " + file.string() + " (the game's log says why)";
 		return result;
+	}
+
+	Classes::UObject* LoadByName(std::string_view path, Classes::UClass* cls)
+	{
+		StaticLoadObjectFn load = Find();
+		if (!load) return nullptr;
+		const std::wstring name(path.begin(), path.end());
+		return Guarded(load, cls ? cls : Classes::UObject::StaticClass(), name.c_str());
 	}
 
 	Classes::UClass* LoadClassFrom(const std::filesystem::path& file, std::string_view className, std::string* error)

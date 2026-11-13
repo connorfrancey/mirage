@@ -27,6 +27,8 @@
 #include "runtime/content.h"
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
+#include "runtime/classes.h"
+#include "runtime/layers.h"
 #include "runtime/file_redirect.h"
 #include "runtime/mod_game.h"
 #include "runtime/mods.h"
@@ -122,6 +124,7 @@ static void Run(HMODULE module)
         const bool gameReady = STARTUP_STEP(game::Init());
         if (gameReady)
         {
+            mirage::classes::Prepare();          // Mods' classes (step 12): the engine's loader found on a worker
             // The world phase's mods load on the first tick after a level has loaded
             static std::atomic<bool> levelLoaded{false}, worldLoaded{false};
             game::OnLevelLoad([](bool finished) {
@@ -131,6 +134,7 @@ static void Run(HMODULE module)
                 events::Bus().Publish(events::LevelLoad{finished, finished ? game::MapName() : std::string()});
                 if (!finished) return;
                 levelLoaded = true;
+                mirage::layers::OnLevelLoaded();
                 mirage::reflect::ClearCache();   // Classes of the old level's packages are gone
                 mirage::hooks::Retry();          // Functions hooked before they were loaded, or gone with the level
                 mirage::content::ReapplyAll();   // Content mods' overrides on the level's objects
@@ -139,6 +143,7 @@ static void Run(HMODULE module)
                 mirage::hang::BeatGame();
                 if (levelLoaded && !worldLoaded.exchange(true)) mirage::mods::LoadPhase(mirage::mods::Phase::World);
                 mirage::mods::DispatchTick(seconds);
+                mirage::layers::Tick();          // Mods' level additions: spawned, respawned at restarts, removed
                 modules::Tick();
             });
             // The mods' other events: deaths, the player's move state, keys

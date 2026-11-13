@@ -145,6 +145,7 @@ MIRAGE_AT(class_load, 528);
 MIRAGE_AT(class_define, 532);
 MIRAGE_AT(object_path, 536);
 MIRAGE_AT(object_keep, 540);
+MIRAGE_AT(layer_actor, 544);
 // managed/Mirage/Native/Structs.cs mirrors these by hand (Bridge.Initialize checks the same sizes in the game)
 static_assert(sizeof(MirageModuleDesc) == 56 && sizeof(MirageEvent) == 24 && sizeof(MirageValue) == 272);
 static_assert(sizeof(MirageMemoryStats) == 56 && offsetof(MirageMemoryStats, process_private) == 8);

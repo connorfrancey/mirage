@@ -896,6 +896,7 @@ namespace mirage::mods
 			tasapi::ReplayGet, tasapi::ReplaySet, tasapi::File, tasapi::Folder, tasapi::Preflight, ModuleList,
 			MemoryStats, game_api::InjectFunction, game_api::NativeRegister, game_api::NativeArg, game_api::NativeReturn,
 			game_api::NativeSelf, game_api::ClassLoad, game_api::ClassDefine, game_api::ObjectPath, game_api::ObjectKeep,
+			game_api::LayerActor,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

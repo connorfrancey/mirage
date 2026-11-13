@@ -781,6 +781,11 @@ typedef struct MirageApi {
      * A mod's classes go with it: unloading destroys their actors and they can't be spawned until loaded again.
      * Game thread. */
     int32_t(MIRAGE_CALL* object_keep)(MirageMod* mod, MirageObject* object, int32_t keep);
+
+    /* ---- Level additions (step 13): a mod's levels/<map>.toml places actors into a level (spawned on level load and
+     * again, fresh, at every checkpoint restart; removed with the mod). The actor named `name` there in the current
+     * level, of the mod `mod_id` (NULL or "": the calling mod's own). NULL: none (not spawned, another level). Game thread. */
+    MirageObject*(MIRAGE_CALL* layer_actor)(MirageMod* mod, const char* mod_id, const char* name);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

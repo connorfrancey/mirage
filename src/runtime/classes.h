@@ -20,12 +20,18 @@ namespace mirage::classes
 {
 	// StaticLoadObject found in the executable (by pattern). False and `why` if not.
 	bool Ready(std::string* why = nullptr);
+	// Looks for it on a worker thread now (a scan of the executable: about a second), so the first class a level
+	// layer or a mod loads doesn't wait for it on the game thread
+	void Prepare();
 
 	// `object` ("Package.Name") of class `cls` from the package file `file` (its name is the file's stem). Game thread.
 	// nullptr and `error` when it isn't there.
 	Classes::UObject* LoadFrom(const std::filesystem::path& file, std::string_view object, Classes::UClass* cls,
 							   std::string* error = nullptr);
 	Classes::UClass* LoadClassFrom(const std::filesystem::path& file, std::string_view className, std::string* error = nullptr);
+	// An object by its path ("Engine.Trigger", "Package.Group.Name"), its package loaded the way the game loads one if
+	// it isn't yet. `cls` nullptr: any class. nullptr if there is none. Game thread.
+	Classes::UObject* LoadByName(std::string_view path, Classes::UClass* cls);
 
 	// ---- Lifetime: a mod's classes and the objects it holds ------------------------------------------------------
 	// UClass::ClassFlags (CLASS_Abstract 0x1, CLASS_Placeable 0x200, ...)

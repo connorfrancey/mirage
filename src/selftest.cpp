@@ -30,6 +30,7 @@
 #include "game/object_query.h"
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
+#include "runtime/layers.h"
 #include "runtime/inject.h"
 #include "runtime/natives.h"
 #include "runtime/script_patch.h"
@@ -4670,6 +4671,97 @@ void TestClassesExample()
 void TestClassesLua() { TestDescribedClass("Mirage classes (Lua)", "Class (Lua)", "MirageBouncePadLua", "class-lua"); }
 void TestClassesCSharp() { TestDescribedClass("Mirage classes (C#)", "Class (C#)", "MirageBouncePadCs", "class-cs"); }
 
+// Level additions (step 13): tests/mods/layer-test, a content mod, adds two pads of its own UnrealScript class to
+// Edge_p (levels/edge_p.toml), one with a property set, and one entry whose class doesn't exist (reported, not fatal).
+// A checkpoint restart spawns them again, fresh (a pad's changed state is gone); a hot reload of the mod replaces them.
+void TestLevelLayers()
+{
+    Step& s = Begin("Mirage level additions");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    struct Seen
+    {
+        int spawned = 0, problems = 0;
+        Classes::AActor *a = nullptr, *b = nullptr;
+        std::string missing;
+    };
+    const auto look = [] {
+        Seen out;
+        OnGameThread([&] {
+            for (const auto& i : mirage::layers::List())
+            {
+                if (i.mod != "layer-test") continue;
+                if (i.actor) ++out.spawned;
+                if (!i.problem.empty()) ++out.problems;
+                if (i.name == "PadA") out.a = i.actor;
+                if (i.name == "PadB") out.b = i.actor;
+                if (i.name == "Missing") out.missing = i.problem;
+            }
+        });
+        return out;
+    };
+    Seen first;
+    WaitFor(20.0, [&] { first = look(); return first.spawned >= 2; });
+    s.notes.push_back(fmt::format("{} actor(s) spawned, {} with a problem ({})", first.spawned, first.problems, first.missing));
+    if (first.spawned != 2 || !first.a || !first.b)
+    {
+        p.Problem(fmt::format("{} of the layer's 2 pads spawned (the log says why)", first.spawned));
+        End(s);
+        return;
+    }
+    if (first.problems != 1 || first.missing.find("no class") == std::string::npos)
+        p.Problem("the entry with a missing class isn't reported as such: " + first.missing);
+    float strengthA = 0.f, strengthB = 0.f, z = 0.f;
+    OnGameThread([&] {
+        strengthA = mirage::reflect::GetFloat(mirage::reflect::Resolve(first.a->Class, first.a, "Strength"));
+        strengthB = mirage::reflect::GetFloat(mirage::reflect::Resolve(first.b->Class, first.b, "Strength"));
+        z = first.a->Location.Z;
+        // A pad's state changed: the restart must give a fresh one
+        mirage::reflect::SetInt(mirage::reflect::Resolve(first.a->Class, first.a, "Bounces"), 7);
+    });
+    if (strengthA != 1500.f || strengthB != 1800.f)
+        p.Problem(fmt::format("Strength {} and {}: not the default 1500 and the layer's 1800", strengthA, strengthB));
+    if (z != 9017.f) p.Problem(fmt::format("PadA is at Z {}, not the layer's 9017", z));
+    // As a mod finds it (API layer_actor)
+    MirageObject* byName = nullptr;
+    OnGameThread([&] { byName = mirage::mods::game_api::LayerActor(nullptr, "layer-test", "PadB"); });
+    if (byName != reinterpret_cast<MirageObject*>(first.b)) p.Problem("layer_actor(\"layer-test\", \"PadB\") didn't find PadB");
+
+    // A checkpoint restart: the pads spawned again, fresh
+    const int generation = mirage::layers::Generation();
+    OnRenderThread([] { levels::RestartFromLastCheckpoint(); });
+    WaitFor(30.0, [&] { return mirage::layers::Generation() > generation; });
+    Seen again;
+    WaitFor(10.0, [&] { again = look(); return again.spawned >= 2; });
+    int bounces = -1;
+    if (again.a) OnGameThread([&] { bounces = mirage::reflect::GetInt(mirage::reflect::Resolve(again.a->Class, again.a, "Bounces")); });
+    s.notes.push_back(fmt::format("after a checkpoint restart: {} pad(s), PadA's Bounces {}", again.spawned, bounces));
+    if (mirage::layers::Generation() <= generation) p.Problem("the restart wasn't seen");
+    else if (again.spawned != 2) p.Problem(fmt::format("{} pad(s) after the restart", again.spawned));
+    else if (bounces != 0) p.Problem(fmt::format("PadA kept its state through the restart (Bounces {})", bounces));
+    // The old ones are gone
+    int stale = 0;
+    OnGameThread([&] {
+        auto& objects = Classes::UObject::GetGlobalObjects();
+        for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+            if (auto* o = objects.GetByIndex(i); o && o->Class && o->Class->GetName() == "LayerPad" &&
+                                                 !(*reinterpret_cast<std::uint64_t*>(reinterpret_cast<char*>(o) + 8) & 0x600) &&
+                                                 !static_cast<Classes::AActor*>(o)->bDeleteMe)
+                ++stale;
+    });
+    if (stale != 2) p.Problem(fmt::format("{} live pads of the layer's class after the restart, not 2", stale));
+
+    // A hot reload of the mod: replaced
+    WaitGrounded();
+    std::string reload;
+    OnGameThread([&] { reload = mm::Reload("layer-test"); }, 20.0);
+    if (!reload.empty()) p.Problem("hot reload: " + reload);
+    Seen reloaded;
+    WaitFor(10.0, [&] { reloaded = look(); return reloaded.spawned >= 2 && reloaded.a != again.a; });
+    if (reloaded.spawned != 2 || reloaded.a == again.a) p.Problem("the hot reload didn't replace the layer's actors");
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -5588,6 +5680,7 @@ const Named* FeatureList()
         {"Mirage classes (Lua)", &TestClassesLua, false},
         {"Mirage classes (C#)", &TestClassesCSharp, false},
         {"Mirage classes (example mod)", &TestClassesExample, false},
+        {"Mirage level additions", &TestLevelLayers, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

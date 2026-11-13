@@ -18,6 +18,7 @@ namespace mirage::mods::game_api
 	MirageObject* MIRAGE_CALL ClassDefine(MirageMod* mod, const char* spec, char* error, uint32_t capacity);
 	uint32_t MIRAGE_CALL ObjectPath(MirageObject* object, char* buffer, uint32_t capacity);
 	int32_t MIRAGE_CALL ObjectKeep(MirageMod* mod, MirageObject* object, int32_t keep);
+	MirageObject* MIRAGE_CALL LayerActor(MirageMod* mod, const char* modId, const char* name);
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
 											   MirageHookFn fn, void* user);
 	MirageHook* MIRAGE_CALL HookFunction(MirageMod* mod, const char* function, int32_t when, int32_t priority,

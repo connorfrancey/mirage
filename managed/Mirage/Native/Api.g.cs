@@ -143,6 +143,7 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, byte*, byte*, uint, void*> class_define;
         public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint> object_path;
         public delegate* unmanaged[Cdecl]<void*, void*, int, int> object_keep;
+        public delegate* unmanaged[Cdecl]<void*, byte*, byte*, void*> layer_actor;
     }
 
     [StructLayout(LayoutKind.Sequential)]

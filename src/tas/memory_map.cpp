@@ -425,6 +425,20 @@ std::vector<Heap> Heaps()
     return out;
 }
 
+namespace
+{
+    // A pointer read that survives memory being gone (structured exceptions: no C++ objects in this function)
+    bool ReadPointer(std::uintptr_t address, std::uintptr_t& out)
+    {
+        __try {
+            out = *reinterpret_cast<const volatile std::uintptr_t*>(address);
+            return true;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+}
+
 std::vector<Thread> Threads()
 {
     std::vector<Thread> out;
@@ -448,15 +462,22 @@ std::vector<Thread> Threads()
         if (HANDLE h = OpenThread(THREAD_QUERY_INFORMATION, FALSE, t.id)) {
             ThreadBasicInformation tbi{};
             if (queryThread && queryThread(h, 0, &tbi, sizeof tbi, nullptr) >= 0 && tbi.tebBaseAddress) {
+                // A thread that is exiting may hand back a TEB that is gone already (seen: 0x2000, while a worker thread
+                // ended): its fields are read guarded, and a thread whose TEB can't be read has no stack range
                 t.teb = reinterpret_cast<std::uintptr_t>(tbi.tebBaseAddress);
-                const auto* tib = static_cast<const NT_TIB*>(tbi.tebBaseAddress);
-                t.stackHigh = reinterpret_cast<std::uintptr_t>(tib->StackBase);
 #ifdef _WIN64
-                t.stackLow = *reinterpret_cast<const std::uintptr_t*>(t.teb + 0x1478);   // DeallocationStack
+                constexpr std::uintptr_t kDeallocationStack = 0x1478;
 #else
-                t.stackLow = *reinterpret_cast<const std::uintptr_t*>(t.teb + 0xE0C);
+                constexpr std::uintptr_t kDeallocationStack = 0xE0C;
 #endif
-                if (!t.stackLow) t.stackLow = reinterpret_cast<std::uintptr_t>(tib->StackLimit);
+                std::uintptr_t base = 0, limit = 0, low = 0;
+                if (ReadPointer(t.teb + offsetof(NT_TIB, StackBase), base) && ReadPointer(t.teb + offsetof(NT_TIB, StackLimit), limit) &&
+                    ReadPointer(t.teb + kDeallocationStack, low)) {
+                    t.stackHigh = base;
+                    t.stackLow = low ? low : limit;
+                } else {
+                    t.teb = 0;
+                }
             }
             PVOID start = nullptr;
             if (queryThread && queryThread(h, 9, &start, sizeof start, nullptr) >= 0)    // Win32StartAddress

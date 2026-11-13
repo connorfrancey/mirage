@@ -1,0 +1,5 @@
+# Self-test (step 13): a content mod (no code) adding actors to the Prologue (levels/edge_p.toml)
+id = "layer-test"
+version = "1.0.0"
+mirage = "^0.1"
+hot_reload = true

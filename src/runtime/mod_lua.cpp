@@ -180,6 +180,7 @@ namespace mirage::mods
 		static int DefineClass(lua_State* L);
 		static int PathOf(lua_State* L);
 		static int KeepFn(lua_State* L);
+		static int LayerActor(lua_State* L);
 		static int ReleaseFn(lua_State* L);
 		static int Name(lua_State* L);
 		static int ClassName(lua_State* L);
@@ -954,6 +955,14 @@ namespace mirage::mods
 		lua_pushstring(L, path);
 		return 1;
 	}
+	// mirage.layer_actor("PadA" [, "other-mod"]) -> the actor of that name in a level layer (levels/<map>.toml), or nil
+	int LuaMod::LayerActor(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		PushObject(L, self.api_->layer_actor(self.mod_, luaL_optstring(L, 2, ""), luaL_checkstring(L, 1)));
+		return 1;
+	}
+
 	// mirage.keep(object): kept from the garbage collector until mirage.release(object) or the mod's unload
 	int LuaMod::KeepFn(lua_State* L)
 	{
@@ -1646,7 +1655,7 @@ namespace mirage::mods
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
 			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
-			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn},
+			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn}, {"layer_actor", LayerActor},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {nullptr, nullptr}};

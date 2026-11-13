@@ -11,6 +11,7 @@
 #include "runtime/call.h"
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
+#include "runtime/layers.h"
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
@@ -224,6 +225,7 @@ namespace mirage::mods
 		ReleaseScripts(mod);
 		for (auto& n : mod.natives) n->live = false;		// Its natives return zero from here (their index stays)
 		natives::Release(mod.id);
+		if (game::IsGameThread()) layers::Remove(mod.id);	// Its level additions (else the next tick sees it unloaded)
 		// Its classes and the objects it kept go with it (on the game thread: actors are destroyed)
 		if (!mod.classes.empty() || !mod.kept.empty()) {
 			auto retire = [modClasses = mod.classes, kept = mod.kept] {
@@ -477,6 +479,15 @@ namespace mirage::mods
 		uint32_t MIRAGE_CALL ObjectPath(MirageObject* object, char* buffer, uint32_t capacity)
 		{
 			return CopyOut(object && Alive(Obj(object)) ? Obj(object)->GetPathName() : std::string(), buffer, capacity);
+		}
+
+		MirageObject* MIRAGE_CALL LayerActor(MirageMod* mod, const char* modId, const char* name)
+		{
+			if (!name || !game::IsGameThread()) return nullptr;
+			const std::string owner = modId && *modId ? modId : (mod ? mod->id : "");
+			for (const layers::ActorInfo& a : layers::List())
+				if (a.mod == owner && a.name == name && a.actor) return Handle(a.actor);
+			return nullptr;
 		}
 
 		int32_t MIRAGE_CALL ObjectKeep(MirageMod* mod, MirageObject* object, int32_t keep)

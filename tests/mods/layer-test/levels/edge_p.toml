@@ -1,0 +1,19 @@
+# Self-test layer for the Prologue (Edge_p): two pads above the start, out of the way, and one entry that can't spawn
+[[actor]]
+name = "PadA"
+class = "classes/LayerPad.uc"
+location = [19309.0, -3009.0, 9017.0]
+
+[[actor]]
+name = "PadB"
+class = "classes/LayerPad.uc"
+location = [19509.0, -3009.0, 9017.0]
+rotation = [0, 16384, 0]
+[actor.properties]
+Strength = 1800.0
+bHidden = false
+
+[[actor]]
+name = "Missing"
+class = "Engine.NoSuchClassAnywhere"
+location = [0.0, 0.0, 0.0]

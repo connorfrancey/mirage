@@ -114,6 +114,22 @@ namespace Mirage
             return new GameObject(cls);
         }
 
+        /// <summary>
+        /// The actor named <paramref name="name"/> in a level layer (levels/&lt;map&gt;.toml) of this mod, or of
+        /// <paramref name="modId"/>'s; not valid if there is none in the current level. Game thread.
+        /// </summary>
+        public GameObject LayerActor(string name, string? modId = null)
+        {
+            var n = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(name);
+            var m = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(modId ?? "");
+            try { return new GameObject(Bridge.Api->layer_actor(Handle, (byte*)m, (byte*)n)); }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(n);
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(m);
+            }
+        }
+
         /// <summary>Keeps an object from the garbage collector until <see cref="Release"/> or the mod's unload.</summary>
         public bool Keep(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 1) != 0;
         public bool Release(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 0) != 0;
