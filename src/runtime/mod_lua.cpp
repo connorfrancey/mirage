@@ -173,6 +173,7 @@ namespace mirage::mods
 		static int Controller(lua_State* L);
 		static int World(lua_State* L);
 		static int Find(lua_State* L);
+		static int LoadClass(lua_State* L);
 		static int Name(lua_State* L);
 		static int ClassName(lua_State* L);
 		static int IsA(lua_State* L);
@@ -776,6 +777,23 @@ namespace mirage::mods
 	int LuaMod::Controller(lua_State* L) { PushObject(L, Self(L).api_->player_controller()); return 1; }
 	int LuaMod::World(lua_State* L) { PushObject(L, Self(L).api_->world_info()); return 1; }
 	int LuaMod::Find(lua_State* L) { PushObject(L, Self(L).api_->object_find(luaL_checkstring(L, 1))); return 1; }
+
+	// mirage.load_class("classes/MirageBouncePad.uc") -> the class, compiled from UnrealScript and loaded by the engine
+	// (nil and the reason when it doesn't compile or load). Game thread.
+	int LuaMod::LoadClass(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const char* path = luaL_checkstring(L, 1);
+		char error[1024]{};
+		MirageObject* cls = self.api_->class_load(self.mod_, path, error, sizeof(error));
+		if (!cls) {
+			lua_pushnil(L);
+			lua_pushstring(L, error);
+			return 2;
+		}
+		PushObject(L, cls);
+		return 1;
+	}
 
 	// mirage.all("GameEngine" [, defaults]) -> a list of the live objects of the class (and its subclasses)
 	int LuaMod::All(lua_State* L)
@@ -1454,7 +1472,7 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find}, {"load_class", LoadClass},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {nullptr, nullptr}};

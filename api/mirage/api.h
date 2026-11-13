@@ -759,6 +759,14 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* native_arg)(MirageNativeCall* call, int32_t index, MirageValue* out);    /* 0: no such argument */
     void(MIRAGE_CALL* native_return)(MirageNativeCall* call, const MirageValue* value);
     MirageObject*(MIRAGE_CALL* native_self)(MirageNativeCall* call);    /* The object the calling script runs on */
+
+    /* ---- Classes from UnrealScript (step 12): `path` (relative to the mod's folder, or absolute) is a `.uc` file
+     * holding one class, named like the file ("MirageBouncePad.uc": `class MirageBouncePad extends Trigger;`, its
+     * variables, functions and events, defaultproperties). It is compiled into a script package and the engine loads
+     * it: the class (a UClass) spawns and reflects like a cooked one. NULL when it doesn't compile or load: `error`
+     * gets why (up to `capacity` bytes; may be NULL). The same source again gives the same class; an edited one (a hot
+     * reload) gives a new class of the same name. Game thread. */
+    MirageObject*(MIRAGE_CALL* class_load)(MirageMod* mod, const char* path, char* error, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

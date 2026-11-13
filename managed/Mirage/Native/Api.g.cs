@@ -139,6 +139,7 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, int, void*, int> native_arg;
         public delegate* unmanaged[Cdecl]<void*, void*, void> native_return;
         public delegate* unmanaged[Cdecl]<void*, void*> native_self;
+        public delegate* unmanaged[Cdecl]<void*, byte*, byte*, uint, void*> class_load;
     }
 
     [StructLayout(LayoutKind.Sequential)]

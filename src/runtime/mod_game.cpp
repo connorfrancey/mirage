@@ -9,6 +9,7 @@
 #include "game/uobject.h"
 #include "gui.h"
 #include "runtime/call.h"
+#include "runtime/class_source.h"
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
@@ -385,6 +386,32 @@ namespace mirage::mods
 		{
 			auto* c = reinterpret_cast<natives::Call*>(call);
 			return c ? Handle(c->self) : nullptr;
+		}
+
+		MirageObject* MIRAGE_CALL ClassLoad(MirageMod* mod, const char* path, char* error, uint32_t capacity)
+		{
+			const auto fail = [&](const std::string& why) -> MirageObject* {
+				spdlog::error("[mod {}] class_load {}: {}", mod ? mod->id : "?", path ? path : "", why);
+				if (error && capacity) {
+					const std::size_t n = (std::min)(why.size(), static_cast<std::size_t>(capacity - 1));
+					std::memcpy(error, why.data(), n);
+					error[n] = '\0';
+				}
+				return nullptr;
+			};
+			if (!mod || !path) return fail("no mod or path");
+			if (!game::IsGameThread()) return fail("only on the game thread (a tick event, a hook)");
+			const auto utf8 = [](std::string_view t) { return std::filesystem::path(std::u8string(t.begin(), t.end())); };
+			std::filesystem::path file = utf8(path);
+			if (file.is_relative()) file = utf8(mod->dir) / file;
+			std::string why;
+			classes::BuiltClass built;
+			Classes::UClass* cls = classes::LoadSource(file, &why, &built);
+			if (!cls) return fail(why);
+			spdlog::info("[mod {}] class {} loaded from {}{}", mod->id, built.className, built.package.filename().string(),
+						 built.cached ? " (built before)" : "");
+			if (error && capacity) error[0] = '\0';
+			return Handle(cls);
 		}
 
 		MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

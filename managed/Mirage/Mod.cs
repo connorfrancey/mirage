@@ -63,6 +63,19 @@ namespace Mirage
         public int Native(string name, string signature, Func<object?[], object?> fn) =>
             Mirage.ModNative.Register(this, name, signature, fn);
 
+        /// <summary>
+        /// The class in the UnrealScript file <paramref name="path"/> (relative to the mod's folder, "classes/Pad.uc"),
+        /// compiled and loaded by the engine; it spawns like a cooked class. Throws with the compiler's errors when it
+        /// doesn't compile. Game thread.
+        /// </summary>
+        public GameObject LoadClass(string path)
+        {
+            var buf = stackalloc byte[1024];
+            void* cls = Bridge.Api->class_load(Handle, Utf8.Intern(path), buf, 1024);
+            if (cls == null) throw new InvalidOperationException($"{path}: {Utf8.Read(buf)}");
+            return new GameObject(cls);
+        }
+
         /// <summary>A notification on screen.</summary>
         public void Notify(string text) => Utf8.With(text, t => { Bridge.Api->notify(Handle, (byte*)t); return 0; });
     }

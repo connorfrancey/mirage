@@ -28,6 +28,7 @@
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
 #include "game/object_query.h"
+#include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/inject.h"
 #include "runtime/natives.h"
@@ -4302,6 +4303,130 @@ void TestClassesProbe()
     End(s);
 }
 
+// A class written in UnrealScript (step 12's milestone): MirageBouncePad.uc, a Trigger with a property and a Touch
+// event, compiled by the runtime and loaded by the engine. Spawned on the player, its Touch counts and launches them.
+// bNoDelete=False: a Trigger is a level's own actor (bNoDelete), and the engine spawns none of those.
+const char* kBouncePadSource = R"(class MirageBouncePad extends Trigger
+    placeable;
+
+var() float Strength;
+var int Bounces;
+
+event Touch(Actor Other, PrimitiveComponent OtherComp, Vector HitLocation, Vector HitNormal)
+{
+    local Pawn P;
+
+    P = Pawn(Other);
+    if (P == None)
+    {
+        return;
+    }
+    Bounces++;
+    P.Velocity.Z = Strength;
+    P.SetPhysics(PHYS_Falling);
+}
+
+function int TimesBounced()
+{
+    return Bounces;
+}
+
+defaultproperties
+{
+    Strength=1500.0
+    bNoDelete=False
+}
+)";
+
+void TestClassesSource()
+{
+    Step& s = Begin("Mirage classes (.uc)");
+    Probe p(s);
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = paths::Dir() / "selftest-classes";
+    fs::create_directories(dir, ec);
+    const fs::path uc = dir / "MirageBouncePad.uc";
+    {
+        std::ofstream f(uc, std::ios::binary | std::ios::trunc);
+        f << kBouncePadSource;
+    }
+    // Built from scratch every run (a package built by an older builder is not reused)
+    for (const auto& e : fs::directory_iterator(paths::Dir() / "classes", ec))
+        if (e.path().filename().string().rfind("MirageBouncePad_", 0) == 0) fs::remove(e.path(), ec);
+
+    mirage::classes::BuiltClass built;
+    std::string why;
+    const clk::Ticks start = clk::Now();
+    if (!mirage::classes::BuildSource(uc, built, &why))
+    {
+        p.Problem("it didn't compile: " + why);
+        End(s);
+        return;
+    }
+    s.notes.push_back(fmt::format("compiled {} in {:.2f} s (the game's script packages read with it)", built.package.filename().string(),
+                                  clk::SecondsSince(start)));
+    // The same source again: the package is reused
+    mirage::classes::BuiltClass again;
+    if (!mirage::classes::BuildSource(uc, again, &why) || !again.cached || again.package != built.package)
+        p.Problem("the same source was built again");
+
+    Classes::UClass* cls = nullptr;
+    OnGameThread([&] { cls = mirage::classes::LoadClassFrom(built.package, built.className, &why); }, 20.0);
+    if (!cls)
+    {
+        p.Problem("the engine didn't load it: " + why);
+        End(s);
+        return;
+    }
+    std::string path, super;
+    OnGameThread([&] {
+        path = cls->GetPathName();
+        if (cls->SuperField) super = cls->SuperField->GetName();
+    });
+    s.notes.push_back("loaded " + path + " (extends " + super + ")");
+    if (super != "Trigger") p.Problem("its super is " + super + ", not Trigger");
+
+    // Spawned on the player: the engine's Touch runs the compiled bytecode
+    WaitGrounded();
+    Classes::AActor* pad = nullptr;
+    float strength = 0.f;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        pad = pawn->Spawn(cls, nullptr, Classes::FName{}, pawn->Location, pawn->Rotation, nullptr, true);
+        if (!pad) return;
+        strength = mirage::reflect::GetFloat(mirage::reflect::Resolve(cls, pad, "Strength"));
+        // A nudge: a move finds what the pawn now overlaps
+        Classes::FVector at = pawn->Location;
+        at.Z += 1.f;
+        pawn->SetLocation(at);
+    });
+    if (!pad)
+    {
+        p.Problem("it didn't spawn");
+        End(s);
+        return;
+    }
+    if (strength != 1500.f) p.Problem(fmt::format("its Strength is {} (the default is 1500)", strength));
+    int bounces = 0;
+    float velocityZ = 0.f;
+    for (int i = 0; i < 60 && bounces == 0; ++i)
+    {
+        WaitTicks(1);
+        OnGameThread([&] {
+            bounces = mirage::reflect::GetInt(mirage::reflect::Resolve(cls, pad, "Bounces"));
+            if (auto* pawn = game::Pawn()) velocityZ = (std::max)(velocityZ, pawn->Velocity.Z);
+        });
+    }
+    s.notes.push_back(fmt::format("touched {} time(s), the player's vertical speed reached {:.0f}", bounces, velocityZ));
+    if (bounces == 0) p.Problem("its Touch event never ran");
+    else if (velocityZ < 1000.f) p.Problem(fmt::format("the player wasn't launched (vertical speed {:.0f})", velocityZ));
+    OnGameThread([&] { pad->Destroy(); });
+    WaitGrounded();
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -5216,6 +5341,7 @@ const Named* FeatureList()
         {"Mirage script injection (Lua)", &TestScriptInjectionMods, true},
         {"Mirage natives (Lua)", &TestNativesLua, false},
         {"Mirage classes (probe)", &TestClassesProbe, false},
+        {"Mirage classes (.uc)", &TestClassesSource, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

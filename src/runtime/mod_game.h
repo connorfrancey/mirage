@@ -14,6 +14,7 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL NativeArg(MirageNativeCall* call, int32_t index, MirageValue* out);
 	void MIRAGE_CALL NativeReturn(MirageNativeCall* call, const MirageValue* value);
 	MirageObject* MIRAGE_CALL NativeSelf(MirageNativeCall* call);
+	MirageObject* MIRAGE_CALL ClassLoad(MirageMod* mod, const char* path, char* error, uint32_t capacity);
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
 											   MirageHookFn fn, void* user);
 	MirageHook* MIRAGE_CALL HookFunction(MirageMod* mod, const char* function, int32_t when, int32_t priority,
