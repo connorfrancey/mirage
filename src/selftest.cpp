@@ -31,6 +31,7 @@
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/layers.h"
+#include "runtime/maps.h"
 #include "runtime/inject.h"
 #include "runtime/natives.h"
 #include "runtime/script_patch.h"
@@ -4786,6 +4787,101 @@ void TestLevelLayers()
     End(s);
 }
 
+// Maps from mods (step 13): tests/mods/map-test's maps/MirageTestMap.me1 (the game-test copies the Prologue's persistent
+// level there) is in the game's level select data (the TdGameData store's TdMaps list, as the level select asks it) and
+// in the menu's Levels list with its two checkpoints; it loads at one of them. Then the test level is loaded again.
+void TestModMaps()
+{
+    Step& s = Begin("Mirage maps");
+    Probe p(s);
+    const auto mine = [] {
+        for (const auto& m : mirage::maps::List())
+            if (m.package == "MirageTestMap") return m;
+        return mirage::maps::MapInfo{};
+    };
+    mirage::maps::MapInfo info;
+    WaitFor(15.0, [&] { info = mine(); return info.listed; });
+    if (info.package.empty()) {
+        p.Problem("the map-test mod's map wasn't found (is the mod loaded? the log says)");
+        End(s);
+        return;
+    }
+    if (!info.listed) p.Problem("MirageTestMap isn't in the level select data: " + info.problem);
+
+    // As the level select reads it: the store's list, by index
+    std::vector<std::string> files;
+    OnGameThread([&] {
+        Classes::UObject* store = nullptr;
+        auto& objects = Classes::UObject::GetGlobalObjects();
+        for (int i = 0; i < static_cast<int>(objects.Num()) && !store; ++i)
+            if (auto* o = objects.GetByIndex(i); o && game::IsA(o, Classes::UUIDataStore_TdGameData::StaticClass()) &&
+                                                 o->GetName().rfind("Default__", 0) != 0)
+                store = o;
+        if (!store) return;
+        mirage::call::Params count(store, "GetProviderCount");
+        count.SetName("FieldName", "TdMaps");
+        count.Set("bDoNotFilter", true);
+        if (!mirage::call::Call(store, count)) return;
+        const int n = count.GetInt("ReturnValue");
+        for (int i = 0; i < n; ++i) {
+            mirage::call::Params value(store, "GetStringValueFromProviderSet");
+            value.SetName("ProviderFieldName", "TdMaps");
+            value.SetName("SearchTag", "Filename");
+            value.Set("ListIndex", i);
+            if (!mirage::call::Call(store, value) || !value.GetBool("ReturnValue")) continue;
+            Classes::FString text;
+            value.GetRaw("OutString", &text, sizeof text);
+            files.push_back(text.IsValid() ? text.ToString() : std::string());
+        }
+    });
+    const bool inStore = std::find(files.begin(), files.end(), "MirageTestMap") != files.end();
+    s.notes.push_back(fmt::format("the level select's TdMaps list: {} map(s){}", files.size(), inStore ? ", MirageTestMap among them" : ""));
+    if (!inStore) p.Problem(fmt::format("MirageTestMap isn't in the data store's TdMaps list ({} entries)", files.size()));
+
+    // The menu's Levels list, with the checkpoints from maps/MirageTestMap.toml
+    std::vector<levels::MapView> maps;
+    int index = -1;
+    WaitFor(10.0, [&] {
+        maps = levels::Maps();
+        for (int i = 0; i < static_cast<int>(maps.size()); ++i)
+            if (maps[i].file == "MirageTestMap") index = i;
+        return index >= 0;
+    });
+    if (index < 0) {
+        p.Problem("MirageTestMap isn't in the menu's Levels list");
+        End(s);
+        return;
+    }
+    s.notes.push_back("Levels list: " + maps[index].label + fmt::format(", {} checkpoint(s)", maps[index].checkpoints.size()));
+    if (maps[index].checkpointNames != std::vector<std::string>{"Edge_Start", "After_Intro"})
+        p.Problem("its checkpoints aren't the two of MirageTestMap.toml");
+
+    // Loaded like any level, at its second checkpoint
+    const auto load = [&](int map, int checkpoint, const std::string& want) -> bool {
+        const int before = g_loadsFinished.load();
+        OnRenderThread([map, checkpoint] { levels::Load(map, checkpoint, levels::Method::Game, false); });
+        if (!WaitFor(120.0, [&] { return g_loadsFinished.load() > before; })) { p.Problem(want + " didn't load"); return false; }
+        if (!WaitFor(60.0, [] { return game::GetStatus().hasPawn && !game::IsLoading(); })) { p.Problem("no player in " + want); return false; }
+        if (const std::string why = WaitPlayerReady(30.0); !why.empty()) { p.Problem("in " + want + ": " + why); return false; }
+        return true;
+    };
+    if (load(index, 2, "MirageTestMap")) {
+        std::string map;
+        OnGameThread([&] { map = game::MapName(); });
+        s.notes.push_back("loaded: " + map + ", " + levels::LastMessage());
+        if (Lower(map) != "miragetestmap") p.Problem("the level loaded is " + map + ", not MirageTestMap");
+    }
+
+    // Back to the test level for the steps after this one
+    const std::string want = Lower(g_options.map);
+    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
+        if (Lower(maps[i].file) == want) {
+            load(i, std::min(g_options.checkpoint, static_cast<int>(maps[i].checkpoints.size())), g_options.map);
+            break;
+        }
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -5705,6 +5801,7 @@ const Named* FeatureList()
         {"Mirage classes (C#)", &TestClassesCSharp, false},
         {"Mirage classes (example mod)", &TestClassesExample, false},
         {"Mirage level additions", &TestLevelLayers, false},
+        {"Mirage maps", &TestModMaps, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Frame rate limit", &TestFrameRate, false},

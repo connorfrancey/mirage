@@ -1,0 +1,11 @@
+title = "Mirage Test Map"
+description = "A map from a mod (the self-test's copy of the Prologue)"
+game = "TdGame.TdSPStoryGame"
+
+[[checkpoint]]
+name = "Edge_Start"
+title = "The start"
+
+[[checkpoint]]
+name = "After_Intro"
+title = "After the intro"

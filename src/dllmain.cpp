@@ -29,6 +29,7 @@
 #include "runtime/fhooks.h"
 #include "runtime/classes.h"
 #include "runtime/layers.h"
+#include "runtime/maps.h"
 #include "runtime/file_redirect.h"
 #include "runtime/mod_game.h"
 #include "runtime/mods.h"
@@ -125,6 +126,7 @@ static void Run(HMODULE module)
         if (gameReady)
         {
             mirage::classes::Prepare();          // Mods' classes (step 12): the engine's loader found on a worker
+            mirage::maps::Install();             // Mods' maps in the level select (step 13): the config lookup hooked
             // The world phase's mods load on the first tick after a level has loaded
             static std::atomic<bool> levelLoaded{false}, worldLoaded{false};
             game::OnLevelLoad([](bool finished) {
@@ -144,6 +146,7 @@ static void Run(HMODULE module)
                 if (levelLoaded && !worldLoaded.exchange(true)) mirage::mods::LoadPhase(mirage::mods::Phase::World);
                 mirage::mods::DispatchTick(seconds);
                 mirage::layers::Tick();          // Mods' level additions: spawned, respawned at restarts, removed
+                mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
                 modules::Tick();
             });
             // The mods' other events: deaths, the player's move state, keys

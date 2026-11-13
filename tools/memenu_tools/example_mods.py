@@ -18,6 +18,13 @@ EXAMPLES = ROOT / "examples" / "mods"
 TEST_MODS = ROOT / "tests" / "mods"          # The self-test's own mods (load order, phases, hot reload, a crash)
 OUT = ROOT / "build" / "example-mods"
 
+# Level packages the test mods use, copied from the player's own game install when the mods are installed for the
+# self-test (the game's content isn't in the repository): (mod folder, path in it, the game's package file)
+GAME_PACKAGES = [
+    ("layer-test", "levels/LayerTestArea.me1", "Cranes_Bake.me1"),     # A streamed sublevel: 16 static meshes, no Kismet
+    ("map-test", "maps/MirageTestMap.me1", "Edge_p.me1"),              # A "new" map: the Prologue's persistent level
+]
+
 
 def clang_cl() -> str | None:
     return shutil.which("clang-cl")
@@ -94,8 +101,9 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
     built.append(what)
     lua = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.lua").exists()]
     scripts = [d for d in sorted(TEST_MODS.iterdir()) if d.is_dir() and (d / "main.cs").exists()]  # Compiled in the game
-    content = [d for d in sorted(TEST_MODS.iterdir())   # Content only: level layers (step 13)
-               if d.is_dir() and (d / "levels").is_dir() and not (d / "main.lua").exists() and not (d / "main.cs").exists()]
+    content = [d for d in sorted(TEST_MODS.iterdir())   # Content only: level layers and maps (step 13)
+               if d.is_dir() and ((d / "levels").is_dir() or (d / "maps").is_dir())
+               and not (d / "main.lua").exists() and not (d / "main.cs").exists()]
     mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", EXAMPLES / "bounce-pad", *lua,
             EXAMPLES / "hello-script", *scripts, *content]
     return mods, (f"{', '.join(built)}, {len(lua) + 1} Lua mods, {len(scripts) + 1} C# scripts, high-steps and retexture "
@@ -109,6 +117,17 @@ def install_for_test(game_dir: Path, folders: list[Path]) -> Path:
         shutil.rmtree(target)
     for f in folders:
         shutil.copytree(f, target / f.name, ignore=shutil.ignore_patterns("config.toml"))
+    # The game's root (game_dir may be its Binaries folder, where the menu goes)
+    maps = next((d / "TdGame" / "CookedPC" / "Maps" for d in (game_dir, game_dir.parent)
+                 if (d / "TdGame" / "CookedPC" / "Maps").is_dir()), game_dir / "TdGame" / "CookedPC" / "Maps")
+    for mod, rel, package in GAME_PACKAGES:
+        if not (target / mod).is_dir():
+            continue
+        found = next(iter(sorted(maps.rglob(package))), None) if maps.is_dir() else None
+        if found is None:
+            raise FileNotFoundError(f"{package} isn't in {maps}: the test mod {mod} needs it")
+        (target / mod / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(found, target / mod / rel)
     return target
 
 
