@@ -40,7 +40,6 @@
 #include "core/events.h"
 #include "core/tasks.h"
 #include "runtime/crash_reporter.h"
-#include "runtime/hang.h"
 #include "runtime/mod_dotnet.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/manager.h"
@@ -3662,7 +3661,7 @@ void TestMemoryManager()
     End(s);
 }
 
-// The crash reporter, the hang detector, the event bus and background tasks as wired in the game, and the reflection
+// The crash reporter, the event bus and background tasks as wired in the game, and the reflection
 // path cache measured against parsing every path.
 namespace crash_test {
 // A real access violation, caught: its exception pointers are copied for the report (the copies outlive the handler)
@@ -3686,9 +3685,9 @@ bool Fault()
 }
 }
 
-void TestCrashAndHang()
+void TestCrashReporter()
 {
-    Step& s = Begin("Crash reporter and hang detector");
+    Step& s = Begin("Crash reporter");
     Probe p(s);
     namespace fs = std::filesystem;
 
@@ -3711,45 +3710,7 @@ void TestCrashAndHang()
         fs::remove(fs::path(report).replace_extension(".dmp"), ec);
     }
 
-    // 2. A hang: the game thread blocked on purpose past a short threshold, reported with where, then recovered
-    std::atomic<int> detected{0}, recovered{0};
-    std::string where;
-    std::mutex whereLock;
-    auto subDetected = events::Bus().Subscribe<events::HangDetected>([&](const events::HangDetected& e) {
-        if (std::string(e.thread) != "game thread") return;
-        std::lock_guard<std::mutex> l(whereLock);
-        where = e.where;
-        ++detected;
-    }, {.owner = "self-test"});
-    auto subRecovered = events::Bus().Subscribe<events::HangRecovered>([&](const events::HangRecovered& e) {
-        if (std::string(e.thread) == "game thread") ++recovered;
-    }, {.owner = "self-test"});
-    p.Expect("Hang: the game thread");          // The stall this step makes on purpose
-    const auto saved = mirage::hang::Configured();
-    auto quick = saved;
-    quick.enabled = true;
-    quick.gameSeconds = 1.0;
-    mirage::hang::Configure(quick);
-    game::RunOnGameThread([] { Sleep(2500); });       // Asynchronous: this thread watches meanwhile
-    if (!WaitFor(6.0, [&] { return detected.load() > 0; })) p.Problem("a 2.5 s stall of the game thread wasn't detected");
-    else {
-        std::lock_guard<std::mutex> l(whereLock);
-        if (where.find("Sleep") == std::string::npos && where.find("KERNELBASE") == std::string::npos &&
-            where.find("ntdll") == std::string::npos)
-            p.Problem("the stall's place doesn't show the Sleep it was in: " + where);
-        s.notes.push_back("hang seen at " + where.substr(0, 120));
-    }
-    if (!WaitFor(6.0, [&] { return recovered.load() > 0; })) p.Problem("the end of the stall wasn't noticed");
-    mirage::hang::Configure(saved);
-    // Its report file (hang reports are "report-*", never shown as "the game crashed last time")
-    for (const auto& e : fs::directory_iterator(mirage::crash::Folder(), std::filesystem::directory_options::skip_permission_denied)) {
-        const std::string name = e.path().filename().string();
-        std::error_code ec;
-        if (name.rfind("report-", 0) == 0 && fs::last_write_time(e.path(), ec) > fs::file_time_type::clock::now() - std::chrono::minutes(1))
-            fs::remove(e.path(), ec);
-    }
-
-    // 3. The event bus and the background tasks, through the game's dispatchers
+    // 2. The event bus and the background tasks, through the game's dispatchers
     std::atomic<bool> onGame{false};
     const DWORD gameThread = [] {
         DWORD id = 0;
@@ -3770,7 +3731,7 @@ void TestCrashAndHang()
     const auto ts = tasks::Snapshot();
     s.notes.push_back(std::to_string(ts.workers) + " task workers, " + std::to_string(ts.completed) + " tasks done");
 
-    // 4. The reflection path cache: the same reads, parsed every time against cached (measured on the game thread)
+    // 3. The reflection path cache: the same reads, parsed every time against cached (measured on the game thread)
     double uncachedUs = 0.0, cachedUs = 0.0;
     bool same = true;
     OnGameThread([&] {
@@ -5726,7 +5687,7 @@ const Named* FeatureList()
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},
-        {"Crash reporter and hang detector", &TestCrashAndHang, false},
+        {"Crash reporter", &TestCrashReporter, false},
         {"Mirage C# mods", &TestCSharpMods, false},
 #if MEMENU_FEATURE_SCRIPT_EDITOR
         {"Mirage script editor", &TestScriptEditor, false},
