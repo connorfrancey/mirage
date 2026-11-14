@@ -147,7 +147,13 @@ namespace mirage::classes
 	Classes::UClass* LoadClassFrom(const std::filesystem::path& file, std::string_view className, std::string* error)
 	{
 		const std::string object = file.stem().string() + "." + std::string(className);
-		return static_cast<Classes::UClass*>(LoadFrom(file, object, Classes::UClass::StaticClass(), error));
+		auto* cls = static_cast<Classes::UClass*>(LoadFrom(file, object, Classes::UClass::StaticClass(), error));
+		// Kept for the session, its package and functions with it. Nothing in the game references a mod's class once its
+		// actors are gone, so a garbage collection (a level or sublevel unload) would take it while the runtime still
+		// holds it: a retired class waiting for its mod to come back (Revive), and functions whose bytecode the script
+		// injections replaced with memory the engine's allocator doesn't own (freeing it crashed the game).
+		if (cls) Keep(cls, true);
+		return cls;
 	}
 
 	namespace

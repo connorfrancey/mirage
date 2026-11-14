@@ -28,6 +28,7 @@ namespace mirage::classes
 	// nullptr and `error` when it isn't there.
 	Classes::UObject* LoadFrom(const std::filesystem::path& file, std::string_view object, Classes::UClass* cls,
 							   std::string* error = nullptr);
+	// A class from a package file, kept (RF_RootSet) for the session: see classes.cpp.
 	Classes::UClass* LoadClassFrom(const std::filesystem::path& file, std::string_view className, std::string* error = nullptr);
 	// The package file joins the engine's package cache (its name: the file's stem): the engine finds it by name from
 	// then on, like its own (level streaming, `open`, imports). False and `error` if it can't. Any thread the engine's
