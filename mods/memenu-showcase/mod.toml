@@ -49,3 +49,10 @@ name = "Drop a pad"
 module = "Mirage Showcase"
 description = "Drops a bounce pad where you stand (switches itself back off)"
 default = false
+
+[settings.watch_actors]
+type = "bool"
+name = "Watch actors"
+module = "Mirage Showcase"
+description = "Subscribes to actor_added / actor_removed while on (the runtime then compares the levels' actor lists each tick)"
+default = false

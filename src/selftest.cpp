@@ -5480,7 +5480,8 @@ void TestWorldAccess()
 // reads the player live; its hook on TdPlayerPawn.Landed counts a jump's landing; its injection into
 // TdMove_Jump.StartMove makes a standing jump lower and its low gravity makes one higher (each measured against a jump
 // without it in the same run, then put back); a bounce pad of the class it describes in Lua launches the player; and
-// switching it off puts the gravity back and removes its pads.
+// switching it off puts the gravity back and removes its pads. Its World section lists the actors around the player, and
+// watching actors, the dropped pad comes as actor_added.
 float ShowcaseShared(const char* key)
 {
     char v[64]{};
@@ -5496,8 +5497,9 @@ void TestShowcase()
     Probe p(s);
     Module* m = modules::Find("Mirage Showcase");
     const auto box = [&](const char* name) { return m ? dynamic_cast<ctl::Checkbox*>(m->FindSetting(name)) : nullptr; };
-    ctl::Checkbox *lowGravity = box("Low gravity"), *weighted = box("Weighted jumps"), *drop = box("Drop a pad");
-    if (!m || !lowGravity || !weighted || !drop) {
+    ctl::Checkbox *lowGravity = box("Low gravity"), *weighted = box("Weighted jumps"), *drop = box("Drop a pad"),
+                  *watch = box("Watch actors");
+    if (!m || !lowGravity || !weighted || !drop || !watch) {
         p.Problem("the Mirage Showcase module or its settings are missing (mods/memenu-showcase)");
         End(s);
         return;
@@ -5518,6 +5520,9 @@ void TestShowcase()
     WaitTicks(3);
     if (std::fabs(ShowcaseShared("pawn_z") - z) > 50.f)
         p.Problem(fmt::format("it read the player at Z {:.0f}, the player is at {:.0f}", ShowcaseShared("pawn_z"), z));
+    // The world: the actors around the player (refreshed 4 times a second)
+    WaitFor(3.0, [] { return ShowcaseShared("nearby") > 0.f; });
+    if (ShowcaseShared("nearby") <= 0.f) p.Problem("its World section found no actors around the player");
 
     // Hook: a jump's landing; a jump without anything, to compare with
     const float landingsBefore = ShowcaseShared("landings");
@@ -5556,16 +5561,25 @@ void TestShowcase()
     // A class made in Lua: a pad dropped under the player launches it (the class compiles the first time: seconds)
     WaitGrounded();
     const float bouncesBefore = ShowcaseShared("bounces");
+    OnRenderThread([&] { watch->Set(true); });      // Watching actors: the pad comes as actor_added
+    WaitTicks(3);
+    const float addedBefore = ShowcaseShared("actors_added");
     OnRenderThread([&] { drop->Set(true); });
     WaitFor(60.0, [] { return ShowcaseShared("pads") >= 1.f; });
     WaitFor(10.0, [&] { return ShowcaseShared("bounces") > bouncesBefore; });
     const float bounced = ShowcaseShared("bounces") - bouncesBefore;
     if (ShowcaseShared("pads") < 1.f) p.Problem("no pad was dropped (its class didn't compile? the log says)");
     else if (bounced < 1.f) p.Problem("the pad didn't launch the player");
+    WaitFor(3.0, [&] { return ShowcaseShared("actors_added") > addedBefore; });
+    const float addedSeen = ShowcaseShared("actors_added") - addedBefore;
+    if (addedSeen < 1.f) p.Problem("watching actors, it didn't see the pad come (actor_added)");
+    OnRenderThread([&] { watch->Set(false); });
 
     s.notes.push_back(fmt::format("standing jump {:.0f}, weighted {:.0f} (injection ran {:.0f} times), low gravity {:.0f} "
-                                  "(gravity {:.0f} -> {:.0f}); {:.0f} landing(s) hooked; pad bounces {:.0f}; {:.0f} event(s) logged",
-                                  plain, heavy, runs, floaty, gravityBefore, gravityOn, landings, bounced, ShowcaseShared("events")));
+                                  "(gravity {:.0f} -> {:.0f}); {:.0f} landing(s) hooked; pad bounces {:.0f}; {:.0f} event(s) logged; "
+                                  "{:.0f} actors within 30 m, {:.0f} added while watching",
+                                  plain, heavy, runs, floaty, gravityBefore, gravityOn, landings, bounced, ShowcaseShared("events"),
+                                  ShowcaseShared("nearby"), addedSeen));
 
     // Off: its pads go (the player stops bouncing) and nothing of it stays
     OnRenderThread([&] { m->SetEnabled(wasOn); });

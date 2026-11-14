@@ -763,7 +763,8 @@ MirrorsEdge.exe
 **Try it:** the **Mirage Showcase** (Mods tab, `mods/memenu-showcase`) is a tour of the loader in one window, written
 as an ordinary Lua mod: the player read live, the level's gravity changed and put back, a hook on the game's
 `TdPlayerPawn.Landed`, weighted jumps injected into `TdMove_Jump.StartMove`'s bytecode, a bounce pad class described
-in Lua and dropped where you stand, and a log of game events. Each section names the API it uses (self-test "Mirage
+in Lua and dropped where you stand, the actors around you (nearest first) and the ones coming and going,
+and a log of game events. Each section names the API it uses (self-test "Mirage
 showcase").
 
 **Next:** gameplay first (the plan was re-sequenced on 2026-11-13): live world access and a change log that makes

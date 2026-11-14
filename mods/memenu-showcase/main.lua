@@ -7,6 +7,8 @@
 --   Hooks           a script function of the game watched (mirage.hook on TdPlayerPawn.Landed)
 --   Injection       the game's jump code changed from inside its bytecode (mirage.inject)
 --   Classes         a new actor class described in Lua, spawned in the level (mirage.define_class)
+--   The world       the actors around the player, nearest first (mirage.actors); actors coming and going
+--                   (actor_added / actor_removed), restarts, streamed levels; objects that stay safe to keep (mirage.valid)
 --   Settings, UI    mod.toml settings and the UI layer (mirage.setting, mirage.ui)
 --
 -- UObjects are only touched on the game thread: the window asks (flags) and the tick does it. For the self-test the
@@ -18,7 +20,7 @@ local window   -- The window (below): drawn by the module's on_render
 local module = mirage.module {
     name = "Mirage Showcase",
     tab = "Mods",
-    description = "A tour of the mod loader: live objects, events, hooks, script injection, a class made in Lua",
+    description = "A tour of the mod loader: live objects, the world around you, events, hooks, script injection, a class made in Lua",
     order = 0,
     on_render = function() if mirage.menu_open() then window() end end,
 }
@@ -27,6 +29,7 @@ local GravityScale = mirage.setting("gravity_scale")
 local WeightedJumps = mirage.setting("weighted_jumps")
 local PadStrength = mirage.setting("pad_strength")
 local SpawnPad = mirage.setting("spawn_pad")
+local WatchActors = mirage.setting("watch_actors")
 
 -- ---- State, written on the game thread and read by the window -------------------------------------------------------
 local live = { ok = false }          -- The player, read every tick
@@ -38,6 +41,11 @@ local dropped = {}                   -- The pads in the level (weak handles: a l
 local gravity = { original = nil, applied = nil, world = nil }
 local frames = 0
 local clock = 0                      -- Game seconds since the mod loaded (the tick event's time step, summed)
+local nearby = {}                    -- The actors around the player: { name, class, distance }, nearest first
+local nearby_total = 0
+local actor_log = {}                 -- Actors that came and went, newest first (while Watch actors is on)
+local actors_added, actors_removed = 0, 0
+local pads_alive = 0                 -- Dropped pads still in the level (counted on the game thread)
 
 local function note(text)
     table.insert(events, 1, string.format("%7.2f  %s", clock, text))
@@ -57,6 +65,47 @@ end)
 mirage.on("player_state", function(new, old)
     note(string.format("move %d -> %d", old, new))
 end)
+mirage.on("restart", function() note("checkpoint restart: a new player") end)
+mirage.on("level_streamed", function(visible, level) note((visible and "streamed in: " or "streamed out: ") .. level) end)
+
+-- ---- The world: actors coming and going. Only subscribed while Watch actors is on: while anyone listens, the runtime
+-- compares the levels' actor lists every tick. ----------------------------------------------------------------------------
+local actor_subs = {}
+local function log_actor(text)
+    table.insert(actor_log, 1, string.format("%7.2f  %s", clock, text))
+    if #actor_log > 8 then actor_log[#actor_log] = nil end
+end
+local function update_watch()
+    local want = module:enabled() and WatchActors:get()
+    if want and #actor_subs == 0 then
+        actor_subs[1] = mirage.on("actor_added", function(actor, class)
+            actors_added = actors_added + 1
+            log_actor("+ " .. class .. " " .. mirage.name(actor))
+        end)
+        actor_subs[2] = mirage.on("actor_removed", function(actor)
+            actors_removed = actors_removed + 1
+            -- The actor is gone: it can't be read any more, but it is == to one kept (a pad of ours, here)
+            local ours = false
+            for _, pad in ipairs(dropped) do if pad == actor then ours = true end end
+            log_actor(ours and "- one of our pads" or "- an actor")
+        end)
+    elseif not want and #actor_subs > 0 then
+        for _, sub in ipairs(actor_subs) do sub:remove() end
+        actor_subs = {}
+    end
+end
+
+local function update_nearby(pawn)
+    local found = mirage.actors { near = pawn, radius = 3000 }     -- Nearest first; the player itself is the first
+    nearby_total = #found - 1
+    nearby = {}
+    for i = 2, math.min(#found, 9) do
+        local a = found[i]
+        local d = a.Location
+        local dx, dy, dz = d.X - pawn.Location.X, d.Y - pawn.Location.Y, d.Z - pawn.Location.Z
+        nearby[#nearby + 1] = { name = mirage.name(a), class = mirage.class(a), distance = math.sqrt(dx * dx + dy * dy + dz * dz) }
+    end
+end
 
 -- ---- Writing: the level's gravity -----------------------------------------------------------------------------------
 local function update_gravity(world)
@@ -159,12 +208,16 @@ mirage.on("tick", function(seconds)
     clock = clock + seconds
     update_hook()
     update_injection()
+    update_watch()
     local pawn, world = mirage.pawn(), mirage.world()
     if world then update_gravity(world) end
     if not module:enabled() then
         live.ok = false
-        -- Switched off: the pads go too (a pad left under the player would keep launching them)
-        for _, pad in ipairs(dropped) do pcall(mirage.call, pad, "Destroy") end   -- (one a level load took is gone)
+        -- Switched off: the pads go too (a pad left under the player would keep launching them). One a level load took
+        -- is no longer valid: kept objects are handles, never another object at the same address.
+        for _, pad in ipairs(dropped) do
+            if mirage.valid(pad) then mirage.call(pad, "Destroy") end
+        end
         dropped = {}
         return
     end
@@ -178,6 +231,9 @@ mirage.on("tick", function(seconds)
             SpawnPad:set(false)
             drop_pad(pawn)
         end
+        if math.floor(clock * 4) ~= math.floor((clock - seconds) * 4) then update_nearby(pawn) end   -- 4 times a second
+        pads_alive = 0
+        for _, pad in ipairs(dropped) do if mirage.valid(pad) then pads_alive = pads_alive + 1 end end
     else
         live.ok = false
     end
@@ -189,6 +245,8 @@ mirage.on("tick", function(seconds)
     mirage.share("bounces", bounces)
     mirage.share("gravity", gravity.applied or 0)
     mirage.share("events", #events)
+    mirage.share("nearby", nearby_total)
+    mirage.share("actors_added", actors_added)
 end)
 
 -- ---- The window: render thread, with the menu open --------------------------------------------------------------------
@@ -242,9 +300,36 @@ function window()
             if ui.button("Drop a pad where I stand") then SpawnPad:set(true) end
             ui.same_line()
             ui.text(string.format("%d dropped, %d bounces", pads, bounces))
+            ui.text_disabled(string.format("%d still in the level (mirage.valid: a level load takes them)", pads_alive))
         end
 
-        if section("Events", "mirage.on(\"level_load\" / \"death\" / \"player_state\", ...)") then
+        if section("The world", "mirage.actors{ near = pawn, radius = 3000 }; mirage.on(\"actor_added\" / \"actor_removed\")") then
+            ui.text(string.format("%d actors within 30 m; the nearest:", nearby_total))
+            if ui.table_begin("nearby", 3, ui.TABLE_BORDERS + ui.TABLE_ROW_BG) then
+                ui.table_column("Class", ui.COLUMN_STRETCH)
+                ui.table_column("Name", ui.COLUMN_STRETCH)
+                ui.table_column("m", ui.COLUMN_FIXED, 50)
+                ui.table_headers()
+                for _, a in ipairs(nearby) do
+                    ui.table_next_row()
+                    ui.table_next_column()
+                    ui.text(a.class)
+                    ui.table_next_column()
+                    ui.text(a.name)
+                    ui.table_next_column()
+                    ui.text(string.format("%.1f", a.distance / 100))
+                end
+                ui.table_end()
+            end
+            local changed, on = ui.checkbox("Watch actors come and go", WatchActors:get())
+            if changed then WatchActors:set(on) end
+            if WatchActors:get() then
+                ui.text(string.format("%d added, %d removed", actors_added, actors_removed))
+                for _, line in ipairs(actor_log) do ui.text(line) end
+            end
+        end
+
+        if section("Events", "mirage.on(\"level_load\" / \"death\" / \"player_state\" / \"restart\" / \"level_streamed\", ...)") then
             if #events == 0 then ui.text_disabled("nothing yet: jump, or load a level") end
             for _, e in ipairs(events) do ui.text(e) end
         end
