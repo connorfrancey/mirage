@@ -4,7 +4,7 @@
 
 #include <Windows.h>
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include "game/uobject.h"
 
 #include "sdk/SDK.hpp"
@@ -201,8 +201,8 @@ bool InImage(const void* p)
 
 bool Hook(void* target, void* detour, void** original, const char* what)
 {
-    if (!target || MH_CreateHook(target, detour, original) != MH_OK || MH_EnableHook(target) != MH_OK) {
-        spdlog::error("TAS: could not hook {}", what);
+    if (const hooking::Status st = hooking::Install(target, detour, original, what); !st) {
+        spdlog::error("TAS: could not hook {}: {}", what, st.error);
         return false;
     }
     return true;

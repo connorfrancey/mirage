@@ -11,7 +11,7 @@
 
 #include <Windows.h>
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <spdlog/spdlog.h>
 #include "sdk/SDK.hpp"
 
@@ -229,9 +229,8 @@ namespace {
         if (!target) target = fromVtable;
         if (!target) { spdlog::error("ProcessEvent not found: script events (speedrun auto splits) won't work"); return false; }
         addr::Game().Set("ProcessEvent", reinterpret_cast<std::uintptr_t>(target));
-        if (MH_CreateHook(target, reinterpret_cast<void*>(&ProcessEventHook), reinterpret_cast<void**>(&oProcessEvent)) != MH_OK ||
-            MH_EnableHook(target) != MH_OK) {
-            spdlog::error("Could not hook ProcessEvent: script events (speedrun auto splits) won't work");
+        if (const hooking::Status st = hooking::Install(target, &ProcessEventHook, &oProcessEvent, "UObject::ProcessEvent"); !st) {
+            spdlog::error("Could not hook ProcessEvent ({}): script events (speedrun auto splits) won't work", st.error);
             return false;
         }
         g_processEventHooked = true;
@@ -466,8 +465,8 @@ namespace {
 
     bool HookAt(void* target, void* detour, void** original, const char* what)
     {
-        if (MH_CreateHook(target, detour, original) != MH_OK || MH_EnableHook(target) != MH_OK) {
-            spdlog::error("Could not hook {}", what);
+        if (const hooking::Status st = hooking::Install(target, detour, original, what); !st) {
+            spdlog::error("Could not hook {}: {}", what, st.error);
             return false;
         }
         return true;

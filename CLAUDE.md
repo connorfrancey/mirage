@@ -50,8 +50,8 @@ uv run mirage sdk                   # regenerate the SDK (sdk/) from the game's 
   (`loader/src/core/setting.h`) are module members, saved by name to `Mirage.json`. `OnDisable` must undo everything
   (it also runs on unload).
 - **Game layer** (`loader/src/game/`): `game::Pawn()/Controller()/World()` (null during loads; check every time),
-  level loading (`levels::`), object lookups, `game::FindPattern` + MinHook for engine hooks (patterns, never fixed
-  addresses).
+  level loading (`levels::`), object lookups, `game::FindPattern` + MirageHook (`core/hooking.h`) for engine hooks
+  (patterns, never fixed addresses).
 - **SDK** (`sdk/`, generated, namespace `Classes`): never edit it; change `tools/sdkgen` and run `mirage sdk`.
   `AActor::SetLocation()` doesn't move the player (write `Location`); functions with a native index must go through
   `mirage::call` (`loader/src/runtime/call.h`), which also lays out 4-byte UBOOL params correctly.

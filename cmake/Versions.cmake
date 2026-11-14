@@ -67,10 +67,7 @@ set(IMGUIZMO_VERSION 1.10)
 set(IMGUIFILEDIALOG_VERSION v0.6.8)
 set(IMCURVE_GIT_COMMIT 8cc8dc3a971593c6ce5aa8f418776545b2dbc3bb)     # https://github.com/jsoulier/imcurve/commit/8cc8dc3a971593c6ce5aa8f418776545b2dbc3bb
 
-# MinHook - https://github.com/tsudakageyu/minhook
-set(MINHOOK_VERSION v1.3.4)
-
-# MirageHook - https://github.com/connorfrancey/miragehook (Mirage's own x86 hooking library; no tags yet)
+# MirageHook - https://github.com/connorfrancey/miragehook (Mirage's own x86 hooking library, every hook goes through it; no tags yet)
 set(MIRAGEHOOK_GIT_COMMIT 64d8d303375fede272210cd1db24b5dd9a9ac499)
 
 # unordered_dense - https://github.com/martinus/unordered_dense

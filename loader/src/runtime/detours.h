@@ -1,6 +1,6 @@
 #pragma once
 // Managed native detours (Mirage, step 6): mods detour the game's native code through the runtime, which owns the one
-// MinHook hook per target and chains the mods' detours on it in priority order.
+// hook per target (core/hooking.h) and chains the mods' detours on it in priority order.
 //
 //     static int (__thiscall* original)(void* self, int x) = nullptr;
 //     int __fastcall Mine(void* self, void*, int x) { return original(self, x) + 1; }

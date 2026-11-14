@@ -57,7 +57,15 @@ DIST_FILES = Path(__file__).parent / "dist"     # README.txt and license texts f
 # (name, what it's for, where it's from, CMake package name, license files in its sources, the first that exists wins)
 THIRD_PARTY = [
     ("Dear ImGui", "the menu's user interface", "https://github.com/ocornut/imgui", "imgui", ["LICENSE.txt"]),
-    ("MinHook", "hooking the game's functions", "https://github.com/TsudaKageyu/minhook", "minhook", ["LICENSE.txt"]),
+    # MirageHook (ours) hooks the game's functions; these are what it compiles in
+    ("Zydis", "decoding the hooked functions' instructions", "https://github.com/zyantific/zydis", "zydis", ["LICENSE"]),
+    ("Zycore (bundled with Zydis)", "Zydis's support library", "https://github.com/zyantific/zycore-c", "zycore", ["LICENSE"]),
+    ("AsmJit", "generating mid-function hook stubs", "https://github.com/asmjit/asmjit", "asmjit", ["LICENSE.md"]),
+    ("Highway", "fast signature scanning (SIMD)", "https://github.com/google/highway", "highway", ["LICENSE"]),
+    ("concurrentqueue", "the hooking library's diagnostic events", "https://github.com/cameron314/concurrentqueue",
+     "concurrentqueue", ["LICENSE.md"]),
+    ("readerwriterqueue", "the hooking library's diagnostic events", "https://github.com/cameron314/readerwriterqueue",
+     "readerwriterqueue", ["LICENSE.md"]),
     ("spdlog", "the log", "https://github.com/gabime/spdlog", "spdlog", ["LICENSE"]),
     ("{fmt} (bundled with spdlog)", "text formatting", "https://github.com/fmtlib/fmt", "spdlog",
      ["include/spdlog/fmt/bundled/fmt.license.rst", "include/spdlog/fmt/bundled/LICENSE.rst"]),
@@ -483,7 +491,7 @@ def minimal(ctx: click.Context, config: str, clean_first: bool, stage: str | Non
     time, least likely to break the game first.
 
     \b
-    Stage 0 is the D3D9 hook and ImGui's demo window (INSERT toggles it, END unloads), linking only MinHook, ImGui
+    Stage 0 is the D3D9 hook and ImGui's demo window (INSERT toggles it, END unloads), linking only MirageHook, ImGui
     and d3d9. Each stage adds a layer or a group of features; the last one is the whole trainer, every feature on.
     The stages and each feature's stage are in cmake/Features.cmake.
       mirage minimal --list        what each stage adds

@@ -24,7 +24,7 @@ namespace game {
 
 	using TickCallback = void (*)(float deltaSeconds);
 
-	// Call after hooks::Install() (MinHook must be initialised). Finds GNames/GObjects by pattern, which also
+	// Call after hooks::Install() (the hooks are up). Finds GNames/GObjects by pattern, which also
 	// pins this to the game version the patterns were made for, and hooks the engine tick and level loading.
 	// Returns false if a pattern was not found: the menu still works, game modules just can't do anything.
 	bool Init();

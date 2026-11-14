@@ -7,7 +7,7 @@
 #include "runtime/mods.h"
 #include "sdk/SDK.hpp"
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <spdlog/spdlog.h>
 #include <toml.hpp>
 
@@ -287,9 +287,8 @@ namespace mirage::maps
 			return false;
 		}
 		void* target = (*reinterpret_cast<void***>(*configVar))[0x2C / 4];
-		if (MH_CreateHook(target, reinterpret_cast<void*>(&SectionsHook), reinterpret_cast<void**>(&g_sections)) != MH_OK ||
-			MH_EnableHook(target) != MH_OK) {
-			spdlog::error("Maps: could not hook GetPerObjectConfigSections");
+		if (const hooking::Status st = hooking::Install(target, &SectionsHook, &g_sections, "GetPerObjectConfigSections"); !st) {
+			spdlog::error("Maps: could not hook GetPerObjectConfigSections: {}", st.error);
 			return false;
 		}
 		g_initProviders = reinterpret_cast<InitProvidersFn>(init);

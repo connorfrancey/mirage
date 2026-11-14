@@ -24,7 +24,7 @@ namespace mirage::crash
 {
 	enum class Mode { Mirage = 0, Game = 1 };	// Who handles a fatal crash
 
-	void Install();				// After hooks::Install (MinHook is up); before the game can crash
+	void Install();				// After hooks::Install (the hooks are up); before the game can crash
 	void Uninstall();
 	void SetMode(Mode mode);
 	Mode GetMode();

@@ -5,7 +5,7 @@
 #include "runtime/mem/manager.h"
 #include "runtime/mods.h"
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <spdlog/spdlog.h>
 
 #include <DbgHelp.h>
@@ -379,14 +379,11 @@ namespace mirage::crash
 		// dbghelp is in the game's imports: loaded already
 		if (HMODULE dbghelp = GetModuleHandleW(L"dbghelp.dll")) {
 			g_miniDumpTarget = reinterpret_cast<void*>(GetProcAddress(dbghelp, "MiniDumpWriteDump"));
-			if (g_miniDumpTarget && MH_CreateHook(g_miniDumpTarget, reinterpret_cast<void*>(&HookedMiniDump), reinterpret_cast<void**>(&oMiniDump)) == MH_OK)
-				MH_EnableHook(g_miniDumpTarget);
-			else
+			if (!g_miniDumpTarget || !hooking::Install(g_miniDumpTarget, &HookedMiniDump, &oMiniDump, "MiniDumpWriteDump"))
 				g_miniDumpTarget = nullptr;
 		}
 		g_setFilterTarget = reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "SetUnhandledExceptionFilter"));
-		if (g_setFilterTarget && MH_CreateHook(g_setFilterTarget, reinterpret_cast<void*>(&HookedSetFilter), reinterpret_cast<void**>(&oSetFilter)) == MH_OK) {
-			MH_EnableHook(g_setFilterTarget);
+		if (g_setFilterTarget && hooking::Install(g_setFilterTarget, &HookedSetFilter, &oSetFilter, "SetUnhandledExceptionFilter")) {
 			g_gameFilter = oSetFilter(&OurFilter);
 		} else {
 			g_setFilterTarget = nullptr;
@@ -402,14 +399,12 @@ namespace mirage::crash
 		if (!g_installed.exchange(false)) return;
 		if (g_setFilterTarget) {
 			oSetFilter(g_gameFilter);
-			MH_DisableHook(g_setFilterTarget);
-			MH_RemoveHook(g_setFilterTarget);
+			hooking::Remove(g_setFilterTarget);
 		} else {
 			SetUnhandledExceptionFilter(g_gameFilter);
 		}
 		if (g_miniDumpTarget) {
-			MH_DisableHook(g_miniDumpTarget);
-			MH_RemoveHook(g_miniDumpTarget);
+			hooking::Remove(g_miniDumpTarget);
 		}
 		if (g_reporter) {
 			SetEvent(g_jobReady);		// Wakes it: it sees g_installed false and ends

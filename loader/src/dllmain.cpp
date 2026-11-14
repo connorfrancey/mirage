@@ -107,7 +107,7 @@ static void Run(HMODULE module)
     if (installed)
     {
 #if MIRAGE_GAME
-        // Fatal crashes get a report instead of the game's dialog (runtime/crash_reporter.h): MinHook is up now
+        // Fatal crashes get a report instead of the game's dialog (runtime/crash_reporter.h): the hooks are up now
         STARTUP_STEP(mirage::crash::Install());
 #endif
         // Background tasks (core/tasks.h) and the event bus's queued deliveries: the render thread now, the game thread
@@ -228,12 +228,12 @@ static void Run(HMODULE module)
 #if MIRAGE_GAME
         mirage::mem::Stop();         // Saves what it learnt about the levels; no pressure events to mods from here
         mirage::hooks::RemoveAll();  // Functions back to their own code before this DLL goes
-        mirage::detours::RemoveAll();   // Mods' detours, before MinHook is shut down
-        mirage::textures::Shutdown();   // Its worker, and the package file redirects (MinHook too)
+        mirage::detours::RemoveAll();   // Mods' detours, before the hooks are shut down
+        mirage::textures::Shutdown();   // Its worker, and the package file redirects (hooks too)
         mirage::inject::RemoveAll();    // Injections out (their functions rebuilt), the stub's native slot freed
         mirage::scripts::RestoreAll();  // Patched functions back to their own bytecode
         mirage::inject::ReleaseNativeSlots();   // Mod natives out of the engine's table: no bytecode calls them now
-        mirage::crash::Uninstall();     // The game's own crash handling back, before MinHook is shut down
+        mirage::crash::Uninstall();     // The game's own crash handling back, before the hooks are shut down
 #endif
         hooks::Uninstall();
 #if MIRAGE_GAME

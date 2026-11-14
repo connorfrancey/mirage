@@ -1,8 +1,8 @@
 // Managed native detours (loader/src/runtime/detours.h): several detours on one function, in priority order, relinked as
-// they come and go. On real code in this test executable, through MinHook like in the game.
+// they come and go. On real code in this test executable, through MirageHook (core/hooking.h) like in the game.
 #include "runtime/detours.h"
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <gtest/gtest.h>
 
 namespace
@@ -18,16 +18,16 @@ namespace
 	int __cdecl Low(int x) { return g_origLow(x) + 100; }		// Priority 10
 	int __cdecl Mid(int x) { return g_origMid(x) - 7; }			// Priority 15, added last
 
-	struct MinHookUp
+	// Each test leaves no hook behind, and no manager
+	struct HooksDown
 	{
-		MinHookUp() { MH_Initialize(); }
-		~MinHookUp() { MH_Uninitialize(); }
+		~HooksDown() { hooking::Shutdown(); }
 	};
 }
 
 TEST(Detours, ChainRunsByPriorityAndRelinks)
 {
-	MinHookUp mh;
+	HooksDown down;
 	void* target = reinterpret_cast<void*>(&MirageDetourTarget);
 	ASSERT_EQ(g_call(1), 2);
 
@@ -59,7 +59,7 @@ TEST(Detours, ChainRunsByPriorityAndRelinks)
 
 TEST(Detours, RemoveAllPutsTheFunctionBack)
 {
-	MinHookUp mh;
+	HooksDown down;
 	void* target = reinterpret_cast<void*>(&MirageDetourTarget);
 	ASSERT_GT(mirage::detours::Add(target, reinterpret_cast<void*>(&Low), 10, reinterpret_cast<void**>(&g_origLow), "low"), 0);
 	ASSERT_GT(mirage::detours::Add(target, reinterpret_cast<void*>(&High), 20, reinterpret_cast<void**>(&g_origHigh), "high"), 0);
@@ -70,9 +70,61 @@ TEST(Detours, RemoveAllPutsTheFunctionBack)
 
 TEST(Detours, RejectsBadArguments)
 {
-	MinHookUp mh;
+	HooksDown down;
 	std::string error;
 	EXPECT_EQ(mirage::detours::Add(nullptr, reinterpret_cast<void*>(&Low), 0, reinterpret_cast<void**>(&g_origLow), "x", &error), 0);
 	EXPECT_FALSE(error.empty());
 	EXPECT_EQ(mirage::detours::Add(reinterpret_cast<void*>(&MirageDetourTarget), reinterpret_cast<void*>(&Low), 0, nullptr, "x"), 0);
+}
+
+// The loader's own hooks: one per target, made disabled with the original set, enabled together, removed.
+namespace
+{
+	extern "C" __declspec(noinline) int __cdecl MirageHookTargetA(int x) { return x * 3; }
+	extern "C" __declspec(noinline) int __cdecl MirageHookTargetB(int x) { return x - 1; }
+	int (*volatile g_callA)(int) = &MirageHookTargetA;
+	int (*volatile g_callB)(int) = &MirageHookTargetB;
+	int(__cdecl* g_origA)(int) = nullptr;
+	int(__cdecl* g_origB)(int) = nullptr;
+	int __cdecl DetourA(int x) { return g_origA(x) + 1000; }
+	int __cdecl DetourB(int x) { return g_origB(x) + 2000; }
+}
+
+TEST(Hooking, CreateEnableTogetherAndRemove)
+{
+	HooksDown down;
+	void* a = reinterpret_cast<void*>(&MirageHookTargetA);
+	void* b = reinterpret_cast<void*>(&MirageHookTargetB);
+	ASSERT_TRUE(hooking::Create(a, &DetourA, &g_origA, "A"));
+	ASSERT_TRUE(hooking::Create(b, &DetourB, &g_origB, "B"));
+	ASSERT_NE(g_origA, nullptr);
+	EXPECT_EQ(g_callA(2), 6);			// Made, not enabled
+	EXPECT_EQ(g_origA(2), 6);			// The original runs the real function before the hook is live
+
+	const hooking::Status again = hooking::Create(a, &DetourA, &g_origA, "A again");
+	EXPECT_FALSE(again);
+	EXPECT_TRUE(again.alreadyHooked);
+
+	void* const both[] = {a, b};
+	ASSERT_TRUE(hooking::Enable(both));
+	EXPECT_EQ(g_callA(2), 1006);
+	EXPECT_EQ(g_callB(2), 2001);
+
+	ASSERT_TRUE(hooking::Disable(a));
+	EXPECT_EQ(g_callA(2), 6);
+	ASSERT_TRUE(hooking::Remove(b));
+	EXPECT_EQ(g_callB(2), 1);
+	EXPECT_FALSE(hooking::Hooked(b));
+	EXPECT_FALSE(hooking::Remove(b));		// Gone already
+}
+
+TEST(Hooking, InstallAndShutdownPutTheFunctionBack)
+{
+	void* a = reinterpret_cast<void*>(&MirageHookTargetA);
+	ASSERT_TRUE(hooking::Install(a, &DetourA, &g_origA, "A"));
+	EXPECT_EQ(g_callA(1), 1003);
+	hooking::Shutdown();
+	EXPECT_EQ(g_callA(1), 3);
+	EXPECT_FALSE(hooking::Hooked(a));
+	EXPECT_FALSE(hooking::Install(nullptr, &DetourA, &g_origA, "nothing"));
 }

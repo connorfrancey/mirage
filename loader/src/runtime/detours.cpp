@@ -1,6 +1,6 @@
 #include "runtime/detours.h"
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -23,7 +23,7 @@ namespace mirage::detours
 		struct Target
 		{
 			std::vector<Entry> chain;		// Highest priority first, then oldest
-			void* trampoline = nullptr;		// MinHook's: the real function
+			void* trampoline = nullptr;		// The hook's way to the real function
 		};
 
 		std::mutex g_lock;
@@ -37,29 +37,26 @@ namespace mirage::detours
 			return s;
 		}
 
-		// MinHook on `target` to the chain's first detour, every *original set: a detour's to the next, the last's to
+		// The hook on `target` to the chain's first detour, every *original set: a detour's to the next, the last's to
 		// the real function. "" when done.
 		std::string Relink(void* target, Target& t)
 		{
-			// MinHook can't move a hook to another detour: the hook is made again (the trampoline changes with it)
+			// A hook can't be moved to another detour: it is made again (the trampoline changes with it)
 			if (t.trampoline) {
-				MH_DisableHook(target);
-				MH_RemoveHook(target);
+				hooking::Remove(target);
 				t.trampoline = nullptr;
 			}
 			if (t.chain.empty()) return {};
 			void* trampoline = nullptr;
-			const MH_STATUS created = MH_CreateHook(target, t.chain.front().detour, &trampoline);
-			if (created != MH_OK)
-				return created == MH_ERROR_ALREADY_CREATED ? "the menu hooks this function itself" : MH_StatusToString(created);
+			const hooking::Status created = hooking::Create(target, t.chain.front().detour, &trampoline, "mod detour");
+			if (!created) return created.alreadyHooked ? "the loader hooks this function itself" : created.error;
 			t.trampoline = trampoline;
 			for (std::size_t i = 0; i < t.chain.size(); ++i)
 				*t.chain[i].original = i + 1 < t.chain.size() ? t.chain[i + 1].detour : trampoline;
-			const MH_STATUS enabled = MH_EnableHook(target);
-			if (enabled != MH_OK) {
-				MH_RemoveHook(target);
+			if (const hooking::Status enabled = hooking::Enable(target); !enabled) {
+				hooking::Remove(target);
 				t.trampoline = nullptr;
-				return MH_StatusToString(enabled);
+				return enabled.error;
 			}
 			return {};
 		}

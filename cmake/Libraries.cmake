@@ -7,23 +7,6 @@ include(${CMAKE_CURRENT_LIST_DIR}/Versions.cmake)   # Pinned versions (fmt, spdl
 # Threads
 find_package(Threads REQUIRED)
 
-# MinHook (built by hand so we skip its own CMake project entirely)
-CPMAddPackage(
-        NAME minhook
-        GITHUB_REPOSITORY TsudaKageyu/minhook
-        GIT_TAG ${MINHOOK_VERSION}
-        DOWNLOAD_ONLY YES
-)
-if(minhook_ADDED)
-    add_library(minhook STATIC
-            ${minhook_SOURCE_DIR}/src/buffer.c
-            ${minhook_SOURCE_DIR}/src/hook.c
-            ${minhook_SOURCE_DIR}/src/trampoline.c
-            ${minhook_SOURCE_DIR}/src/hde/hde32.c   # 32-bit only, matches the guard in CMakeLists.txt
-    )
-    target_include_directories(minhook SYSTEM PUBLIC ${minhook_SOURCE_DIR}/include)
-endif()
-
 # ImGui
 CPMAddPackage(
         NAME imgui
@@ -78,7 +61,7 @@ CPMAddPackage(
 )
 
 # zstd: compresses the previous session's log into logs/.old/ (log.cpp) and the TAS's memory snapshots
-# (tas/snapshot.cpp). Built by hand like MinHook: zstd's own CMake project is large and sets its own runtime-library
+# (tas/snapshot.cpp). Built by hand: zstd's own CMake project is large and sets its own runtime-library
 # flags. The target keeps its old name; it has the decompressor too.
 # gh: https://github.com/facebook/zstd
 CPMAddPackage(
@@ -100,10 +83,15 @@ endif()
 
 
 # MirageHook: Mirage's own x86 hooking library (inline, mid-function, vtable, IAT hooks, transactions, SIMD signature
-# scanning), meant to replace MinHook. Added after fmt/spdlog so it builds on the same copies; its other pins (magic_enum,
-# fast_float, unordered_dense) match Versions.cmake, and CPM keeps one copy of each. A local checkout can stand in with
+# scanning); every hook goes through it (loader/src/core/hooking.h). Added after fmt/spdlog so it builds on the same
+# copies; its other pins (magic_enum, fast_float, unordered_dense) match Versions.cmake, and CPM keeps one copy of each.
+# The staged build's stages without logging compile its logging out. A local checkout can stand in with
 # -D CPM_MirageHook_SOURCE=<path>.
-if(MIRAGE_GAME)
+if(_need_spdlog)
+    set(_miragehook_logging ON)
+else()
+    set(_miragehook_logging OFF)
+endif()
 CPMAddPackage(
         NAME MirageHook
         GITHUB_REPOSITORY connorfrancey/miragehook
@@ -113,8 +101,8 @@ CPMAddPackage(
             "MIRAGEHOOK_BUILD_EXAMPLES OFF"
             "MIRAGEHOOK_BUILD_BENCHMARKS OFF"
             "MIRAGEHOOK_BUILD_DOCS OFF"
+            "MIRAGEHOOK_LOGGING ${_miragehook_logging}"
 )
-endif()
 
 if(_need_themes)
 
@@ -152,7 +140,7 @@ endif()
 endif()
 
 if(MIRAGE_BARE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE imgui minhook d3d9)
+    target_link_libraries(${PROJECT_NAME} PRIVATE imgui MirageHook::MirageHook d3d9)
     if(_need_spdlog)
         target_link_libraries(${PROJECT_NAME} PRIVATE spdlog::spdlog zstd_compress)
     endif()
@@ -388,9 +376,9 @@ endif()
 # -------------------------------------------------------------------------------------------------
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-        imgui imjson minhook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads)
+        imgui imjson MirageHook::MirageHook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads)
 if(MIRAGE_GAME)
-  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler MirageHook::MirageHook lua::lua toml11::toml11 stb_headers)
+  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler lua::lua toml11::toml11 stb_headers)
   target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/loader/include)   # mirage/api.h: the mod ABI
 endif()
 

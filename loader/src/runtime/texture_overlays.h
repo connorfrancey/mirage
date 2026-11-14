@@ -41,6 +41,6 @@ namespace mirage::textures
 	// Waits until no work is left (for the self-test). False on timeout.
 	bool WaitIdle(double seconds);
 
-	// The worker ends and the redirects go (at unload, before MinHook is shut down).
+	// The worker ends and the redirects go (at unload, before the hooks are shut down).
 	void Shutdown();
 }

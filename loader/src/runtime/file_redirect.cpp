@@ -1,7 +1,7 @@
 #include "runtime/file_redirect.h"
 
 #include <Windows.h>
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <spdlog/spdlog.h>
 
 #include <atomic>
@@ -139,16 +139,17 @@ namespace mirage::files
 			spdlog::error("Content: kernelbase's CreateFileW / GetFileAttributesExW not found: package files can't be redirected");
 			return false;
 		}
-		if (MH_CreateHook(create, reinterpret_cast<void*>(&CreateFileHook), reinterpret_cast<void**>(&g_createFile)) != MH_OK)
-			return spdlog::error("Content: CreateFileW can't be hooked"), false;
-		if (MH_CreateHook(attrs, reinterpret_cast<void*>(&GetAttributesHook), reinterpret_cast<void**>(&g_getAttributes)) != MH_OK) {
-			MH_RemoveHook(create);
-			return spdlog::error("Content: GetFileAttributesExW can't be hooked"), false;
+		if (const hooking::Status st = hooking::Create(create, &CreateFileHook, &g_createFile, "CreateFileW"); !st)
+			return spdlog::error("Content: CreateFileW can't be hooked: {}", st.error), false;
+		if (const hooking::Status st = hooking::Create(attrs, &GetAttributesHook, &g_getAttributes, "GetFileAttributesExW"); !st) {
+			hooking::Remove(create);
+			return spdlog::error("Content: GetFileAttributesExW can't be hooked: {}", st.error), false;
 		}
-		if (MH_EnableHook(create) != MH_OK || MH_EnableHook(attrs) != MH_OK) {
-			MH_RemoveHook(create);
-			MH_RemoveHook(attrs);
-			return spdlog::error("Content: the file hooks can't be enabled"), false;
+		void* const both[] = {create, attrs};
+		if (const hooking::Status st = hooking::Enable(both); !st) {
+			hooking::Remove(create);
+			hooking::Remove(attrs);
+			return spdlog::error("Content: the file hooks can't be enabled: {}", st.error), false;
 		}
 		g_createTarget = create;
 		g_attributesTarget = attrs;
@@ -160,10 +161,8 @@ namespace mirage::files
 	{
 		Set({}, {}, nullptr);
 		if (!g_createTarget) return;
-		MH_DisableHook(g_createTarget);
-		MH_DisableHook(g_attributesTarget);
-		MH_RemoveHook(g_createTarget);
-		MH_RemoveHook(g_attributesTarget);
+		hooking::Remove(g_createTarget);
+		hooking::Remove(g_attributesTarget);
 		g_createTarget = g_attributesTarget = nullptr;
 	}
 

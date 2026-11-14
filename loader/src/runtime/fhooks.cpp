@@ -5,7 +5,7 @@
 #include "game/uobject.h"
 #include "sdk/SDK.hpp"
 
-#include <MinHook.h>
+#include "core/hooking.h"
 #include <spdlog/spdlog.h>
 
 #include <windows.h>
@@ -80,7 +80,7 @@ namespace mirage::hooks
 		std::array<std::atomic<std::uintptr_t>, kTable> g_table{};
 		std::array<std::atomic<int>, kTable> g_tableSlot{};
 		Native g_processInternal = nullptr;	// Its address (UFunction::Func of every script function)
-		Native g_processOriginal = nullptr;	// MinHook's trampoline to it
+		Native g_processOriginal = nullptr;	// The hook's way to the real function
 
 		std::uint32_t Dword(const void* p, int at)
 		{
@@ -252,16 +252,15 @@ namespace mirage::hooks
 		}
 		const std::array<Native, kSlots> kThunks = MakeThunks(std::make_integer_sequence<int, kSlots>{});
 
-		// Detours ProcessInternal once (MinHook is set up by the menu's hooks). With g_lock.
+		// Detours ProcessInternal once (core/hooking.h). With g_lock.
 		bool HookProcessInternal()
 		{
 			if (g_processOriginal) return true;
 			if (!g_processInternal) return false;
-			if (MH_CreateHook(reinterpret_cast<void*>(g_processInternal), reinterpret_cast<void*>(&ProcessInternalDetour),
-							  reinterpret_cast<void**>(&g_processOriginal)) != MH_OK ||
-				MH_EnableHook(reinterpret_cast<void*>(g_processInternal)) != MH_OK) {
+			if (const hooking::Status st = hooking::Install(reinterpret_cast<void*>(g_processInternal), &ProcessInternalDetour,
+															&g_processOriginal, "UObject::ProcessInternal"); !st) {
 				g_processOriginal = nullptr;
-				g_why = "UObject::ProcessInternal can't be detoured";
+				g_why = "UObject::ProcessInternal can't be detoured: " + st.error;
 				spdlog::error("Function hooks: {}", g_why);
 				return false;
 			}
@@ -402,7 +401,7 @@ namespace mirage::hooks
 		std::lock_guard lock(g_lock);
 		for (auto& [path, h] : g_hooked) Uninstall(path, h);
 		g_hooked.clear();
-		if (g_processOriginal) MH_RemoveHook(reinterpret_cast<void*>(g_processInternal));
+		if (g_processOriginal) hooking::Remove(reinterpret_cast<void*>(g_processInternal));
 		g_processOriginal = nullptr;
 	}
 

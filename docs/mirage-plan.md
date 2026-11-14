@@ -1444,7 +1444,7 @@ rendering, streaming, audio) is C++ with no `UFunction`.
 - **A symbol database:** engine functions named by signature (pattern + verification), collected from the Ghidra work
   already done, shipped as data (`symbols.toml`, versioned with the game build), extendable by mods.
 - **Detours through the runtime:** a mod hooks an engine function by symbol name: before / after / replace, with typed
-  arguments for known signatures, and one owner (the runtime) for every detour (MinHook today), chained in priority
+  arguments for known signatures, and one owner (the runtime) for every detour (MirageHook today, through `core/hooking.h`), chained in priority
   order. Mid-function hooks (register context in, registers out) for the places with no clean boundary.
 - **Safety:** detours installed only with the game thread parked at a frame boundary; each one is SEH-wrapped and
   attributed; a crash inside one removes it and names the mod; the TAS treats detour trampolines as runtime memory.

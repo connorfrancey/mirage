@@ -18,9 +18,9 @@
 
 namespace mirage::files
 {
-	// Hooks in place (idempotent). False if MinHook refused, logged.
+	// Hooks in place (idempotent). False if a hook couldn't be made, logged.
 	bool Install();
-	// Hooks gone (at unload: before MinHook is shut down).
+	// Hooks gone (at unload: before the hooks are shut down).
 	void Uninstall();
 
 	// Builds the copy of `original` and returns its file (empty: none, the original is opened).

@@ -43,7 +43,7 @@ option(MIRAGE_OPTIMIZATIONS   "Build the performance optimizations (caches, sche
 # The client only collects while the Tracy profiler is connected (on demand) and only listens on localhost.
 option(MIRAGE_TRACY           "Build with the Tracy profiler client (connect with the Tracy profiler, same version)" OFF)
 # Staged build (`mirage minimal --stage N`, presets x86-minimal-*): stage 0 is only the D3D9 hook and ImGui's demo
-# window (links only MinHook, ImGui and d3d9); each stage adds back a layer or a group of features, least likely to
+# window (links only MirageHook, ImGui and d3d9); each stage adds back a layer or a group of features, least likely to
 # break the game first, up to the whole trainer. The stages are listed in cmake/Features.cmake.
 option(MIRAGE_MINIMAL         "Staged build: only what MIRAGE_MINIMAL_STAGE adds back (ignores the feature options)" OFF)
 set(MIRAGE_MINIMAL_STAGE 0 CACHE STRING "Staged build: how far to go (0 = D3D9 hook + ImGui demo; see cmake/Features.cmake)")
@@ -93,8 +93,10 @@ if(NOT MIRAGE_GAME)   # Keep the IDE tree to what is built
   list(FILTER HEADER_FILES EXCLUDE REGEX "/src/(tas|game|runtime)/")
 endif()
 if(MIRAGE_BARE)    # Staged build before the menu: hooks.cpp + loader/src/minimal/ (its own DllMain and gui::)
-  set(SOURCE_FILES ${PROJECT_SOURCE_DIR}/loader/src/hooks.cpp ${PROJECT_SOURCE_DIR}/loader/src/minimal/minimal.cpp)
-  set(HEADER_FILES ${PROJECT_SOURCE_DIR}/loader/src/hooks.h ${PROJECT_SOURCE_DIR}/loader/src/gui.h ${PROJECT_SOURCE_DIR}/loader/src/paths.h)
+  set(SOURCE_FILES ${PROJECT_SOURCE_DIR}/loader/src/hooks.cpp ${PROJECT_SOURCE_DIR}/loader/src/core/hooking.cpp
+      ${PROJECT_SOURCE_DIR}/loader/src/core/clock.cpp
+      ${PROJECT_SOURCE_DIR}/loader/src/minimal/minimal.cpp)
+  set(HEADER_FILES ${PROJECT_SOURCE_DIR}/loader/src/hooks.h ${PROJECT_SOURCE_DIR}/loader/src/core/hooking.h ${PROJECT_SOURCE_DIR}/loader/src/gui.h ${PROJECT_SOURCE_DIR}/loader/src/paths.h)
   if(MIRAGE_STAGE GREATER_EQUAL MIRAGE_STAGE_LOGGING)
     list(APPEND SOURCE_FILES ${PROJECT_SOURCE_DIR}/loader/src/log.cpp)
     list(APPEND HEADER_FILES ${PROJECT_SOURCE_DIR}/loader/src/log.h)

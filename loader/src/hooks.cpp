@@ -11,10 +11,10 @@
 #include "render/debug_renderer.h"
 #endif
 #include "paths.h"
+#include "core/hooking.h"
 
 #include <Windows.h>
 #include <d3d9.h>
-#include <MinHook.h>
 #if MIRAGE_MINIMAL && MIRAGE_MINIMAL_STAGE < 1
 #define HOOKS_LOG(level, fmt, ...) OutputDebugStringA("[mirage] " fmt "\n")   // No spdlog: unformatted, to the debugger
 #define HOOKS_DIAG 0
@@ -761,35 +761,38 @@ bool hooks::Install()
 #endif
 #endif
 
-    MH_STATUS st = MH_Initialize();
-    if (st != MH_OK)
-    {
-        HOOKS_LOG(error, "MH_Initialize failed: {}", MH_StatusToString(st));
-        return false;
-    }
-
-    if ((st = MH_CreateHook(vt[kEndScene], reinterpret_cast<void*>(&HookedEndScene), reinterpret_cast<void**>(&oEndScene))) != MH_OK)
-    { HOOKS_LOG(error, "Hooking EndScene failed: {}", MH_StatusToString(st)); return false; }
-    if ((st = MH_CreateHook(vt[kReset], reinterpret_cast<void*>(&HookedReset), reinterpret_cast<void**>(&oReset))) != MH_OK)
-    { HOOKS_LOG(error, "Hooking Reset failed: {}", MH_StatusToString(st)); return false; }
+    // Every hook is made disabled with its original set, then all of them go live with one suspension of the threads
+    std::vector<void*> made;
+    const auto make = [&](void* target, auto detour, auto* original, const char* name) {
+        const hooking::Status st = hooking::Create(target, detour, original, name);
+        if (st) made.push_back(target);
+        return st;
+    };
+    hooking::Status st;
+    if (!(st = make(vt[kEndScene], &HookedEndScene, &oEndScene, "D3D9 EndScene")))
+    { HOOKS_LOG(error, "Hooking EndScene failed: {}", st.error); hooking::Shutdown(); return false; }
+    if (!(st = make(vt[kReset], &HookedReset, &oReset, "D3D9 Reset")))
+    { HOOKS_LOG(error, "Hooking Reset failed: {}", st.error); hooking::Shutdown(); return false; }
 
 #if MIRAGE_GAME
     // Optional: only the collision view's in-scene drawing needs it (it falls back to an overlay).
-    if ((st = MH_CreateHook(vt[kStretchRect], reinterpret_cast<void*>(&HookedStretchRect), reinterpret_cast<void**>(&oStretchRect))) != MH_OK)
-        HOOKS_LOG(warn, "Hooking StretchRect failed ({}): the collision view will draw as an overlay", MH_StatusToString(st));
-    if ((st = MH_CreateHook(vt[kSetVertexShaderConstantF], reinterpret_cast<void*>(&HookedSetVertexShaderConstantF),
-                            reinterpret_cast<void**>(&oSetVertexShaderConstantF))) != MH_OK)
-        HOOKS_LOG(warn, "Hooking SetVertexShaderConstantF failed ({}): the collision view will use the game camera",
-                  MH_StatusToString(st));
+    if (!(st = make(vt[kStretchRect], &HookedStretchRect, &oStretchRect, "D3D9 StretchRect")))
+        HOOKS_LOG(warn, "Hooking StretchRect failed ({}): the collision view will draw as an overlay", st.error);
+    if (!(st = make(vt[kSetVertexShaderConstantF], &HookedSetVertexShaderConstantF, &oSetVertexShaderConstantF,
+                    "D3D9 SetVertexShaderConstantF")))
+        HOOKS_LOG(warn, "Hooking SetVertexShaderConstantF failed ({}): the collision view will use the game camera", st.error);
 #endif
 
     // Optional: without these the menu still works, but the game keeps reading the mouse while it is open.
-    if ((st = MH_CreateHookApi(L"user32", "PeekMessageW", reinterpret_cast<void*>(&HookedPeekMessageW), reinterpret_cast<void**>(&oPeekMessageW))) != MH_OK)
-        HOOKS_LOG(warn, "Hooking PeekMessageW failed ({}): the game will still see mouse input while the menu is open", MH_StatusToString(st));
-    if ((st = MH_CreateHookApi(L"user32", "PeekMessageA", reinterpret_cast<void*>(&HookedPeekMessageA), reinterpret_cast<void**>(&oPeekMessageA))) != MH_OK)
-        HOOKS_LOG(warn, "Hooking PeekMessageA failed ({})", MH_StatusToString(st));
+    const HMODULE user32 = GetModuleHandleW(L"user32");
+    void* peekW = user32 ? reinterpret_cast<void*>(GetProcAddress(user32, "PeekMessageW")) : nullptr;
+    void* peekA = user32 ? reinterpret_cast<void*>(GetProcAddress(user32, "PeekMessageA")) : nullptr;
+    if (!(st = make(peekW, &HookedPeekMessageW, &oPeekMessageW, "PeekMessageW")))
+        HOOKS_LOG(warn, "Hooking PeekMessageW failed ({}): the game will still see mouse input while the menu is open", st.error);
+    if (!(st = make(peekA, &HookedPeekMessageA, &oPeekMessageA, "PeekMessageA")))
+        HOOKS_LOG(warn, "Hooking PeekMessageA failed ({})", st.error);
 
-    if ((st = MH_EnableHook(MH_ALL_HOOKS)) != MH_OK) { HOOKS_LOG(error, "MH_EnableHook failed: {}", MH_StatusToString(st)); return false; }
+    if (!(st = hooking::Enable(made))) { HOOKS_LOG(error, "Enabling the hooks failed: {}", st.error); hooking::Shutdown(); return false; }
 
     HOOKS_LOG(info, "Hooks installed (EndScene={}, Reset={})", vt[kEndScene], vt[kReset]);
     return true;
@@ -882,7 +885,7 @@ void hooks::Uninstall()
     for (int i = 0; i < 200 && !g_released.load() && g_imguiReady; ++i) Sleep(5);
     if (!g_released.load()) HOOKS_LOG(warn, "No frame within 1 s to release the menu's D3D objects on: releasing them here");
     else HOOKS_LOG(info, "Released the menu's D3D objects on the render thread");
-    MH_DisableHook(MH_ALL_HOOKS);
+    hooking::DisableAll();
     Sleep(250);     // Let in-flight hooked calls drain
     {
         std::lock_guard lock(g_renderQueueMutex);
@@ -904,6 +907,6 @@ void hooks::Uninstall()
         ImGui::DestroyContext();
         g_imguiReady = false;
     }
-    MH_Uninitialize();
+    hooking::Shutdown();
     HOOKS_LOG(info, "Hooks removed");
 }
