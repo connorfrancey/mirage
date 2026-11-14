@@ -37,8 +37,22 @@ namespace mirage::mods
 		struct Proxy			// uservalue 1: the path (string); 2: the call box (kInCall)
 		{
 			int kind;
-			void* handle;			// MirageObject* or MirageCall*
+			void* handle;			// MirageObject* or MirageCall*; an object's is cleared once it is gone (Refresh)
+			MirageHandle id;		// kObject / kInObject: what identifies the object (step 14); id.object is kept for ==
 		};
+		// The runtime's API (the same table for every mod): for what runs outside a Lua C function (event callbacks push
+		// objects), where Self(L) has no upvalue to read
+		const MirageApi* g_api = nullptr;
+
+		bool IsObjectKind(int kind) { return kind == kObject || kind == kInObject; }
+		// An object proxy whose object is gone (or replaced by another at its address) lets go of it: from then on it
+		// reads as a dead object (nil values, failed calls), and never reaches the new one
+		void Refresh(Proxy* p)
+		{
+			if (p && IsObjectKind(p->kind) && p->handle && g_api && MIRAGE_API_HAS(g_api, handle_object) &&
+				!g_api->handle_object(&p->id))
+				p->handle = nullptr;
+		}
 		struct CallBox
 		{
 			MirageCall* call;		// nullptr once the hook returned
@@ -185,6 +199,8 @@ namespace mirage::mods
 		static int Name(lua_State* L);
 		static int ClassName(lua_State* L);
 		static int IsA(lua_State* L);
+		static int Valid(lua_State* L);
+		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
 		static int ProxyIndex(lua_State* L);
 		static int ProxyLen(lua_State* L);
@@ -596,6 +612,12 @@ namespace mirage::mods
 		auto* p = static_cast<Proxy*>(lua_newuserdatauv(L, sizeof(Proxy), 2));
 		p->kind = kind;
 		p->handle = handle;
+		p->id = MirageHandle{};
+		if (IsObjectKind(kind) && handle && g_api && MIRAGE_API_HAS(g_api, object_handle)) {
+			p->id.size = sizeof(MirageHandle);
+			if (!g_api->object_handle(static_cast<MirageObject*>(handle), &p->id)) p->handle = nullptr;	// Already gone
+			p->id.object = static_cast<MirageObject*>(handle);
+		}
 		lua_pushlstring(L, path.data(), path.size());
 		lua_setiuservalue(L, -2, 1);
 		if (owner) {
@@ -631,6 +653,7 @@ namespace mirage::mods
 	{
 		auto* p = static_cast<Proxy*>(luaL_testudata(L, index, kProxyMeta));
 		if (!p || p->kind != kObject) luaL_typeerror(L, index, "game object");
+		Refresh(p);
 		return static_cast<MirageObject*>(p->handle);
 	}
 
@@ -658,6 +681,7 @@ namespace mirage::mods
 			case LUA_TNIL: out.type = MIRAGE_VALUE_OBJECT; return true;
 			case LUA_TUSERDATA:
 				if (auto* p = static_cast<Proxy*>(luaL_testudata(L, index, kProxyMeta)); p && p->kind == kObject) {
+					Refresh(p);
 					out.type = MIRAGE_VALUE_OBJECT;
 					out.o = static_cast<MirageObject*>(p->handle);
 					return true;
@@ -725,6 +749,7 @@ namespace mirage::mods
 	{
 		LuaMod& self = Self(L);
 		const ProxyAt at = OpenProxy(L);
+		Refresh(at.p);
 		if (lua_type(L, 2) == LUA_TNUMBER && luaL_checkinteger(L, 2) < 1) {
 			lua_pushnil(L);
 			return 1;
@@ -744,6 +769,7 @@ namespace mirage::mods
 	int LuaMod::ProxyNewIndex(lua_State* L)
 	{
 		const ProxyAt at = OpenProxy(L);
+		Refresh(at.p);
 		return Self(L).Set(L, at.p->kind, at.p->handle, Key(L, at.path), 3);
 	}
 
@@ -752,6 +778,7 @@ namespace mirage::mods
 	{
 		LuaMod& self = Self(L);
 		const ProxyAt at = OpenProxy(L);
+		Refresh(at.p);
 		MirageValue v;
 		const int ok = at.p->kind == kInCall ? self.api_->call_get(static_cast<MirageCall*>(at.p->handle), at.path.c_str(), &v)
 											 : self.api_->object_get(static_cast<MirageObject*>(at.p->handle), at.path.c_str(), &v);
@@ -763,7 +790,9 @@ namespace mirage::mods
 	{
 		auto* a = static_cast<Proxy*>(luaL_testudata(L, 1, kProxyMeta));
 		auto* b = static_cast<Proxy*>(luaL_testudata(L, 2, kProxyMeta));
-		lua_pushboolean(L, a && b && a->kind == kObject && b->kind == kObject && a->handle == b->handle);
+		// The same object: compared by the address it had (a removed actor's proxy equals the one a mod kept of it)
+		const auto address = [](const Proxy* p) { return p->id.object ? static_cast<void*>(p->id.object) : p->handle; };
+		lua_pushboolean(L, a && b && a->kind == kObject && b->kind == kObject && address(a) == address(b));
 		return 1;
 	}
 
@@ -771,6 +800,7 @@ namespace mirage::mods
 	{
 		LuaMod& self = Self(L);
 		const ProxyAt at = OpenProxy(L);
+		Refresh(at.p);
 		if (at.p->kind == kObject) {
 			char name[128];
 			self.api_->object_name(static_cast<MirageObject*>(at.p->handle), name, sizeof name);
@@ -1017,6 +1047,73 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.valid(object) -> whether it is still the object it was (false once it is gone, or for nil)
+	int LuaMod::Valid(lua_State* L)
+	{
+		auto* p = static_cast<Proxy*>(luaL_testudata(L, 1, kProxyMeta));
+		Refresh(p);
+		lua_pushboolean(L, p && p->kind == kObject && p->handle != nullptr);
+		return 1;
+	}
+
+	// mirage.actors{ class = "TdBotPawn", tag = "Door", name = "TdBotPawn_3", near = actor | {x, y, z}, radius = 2000 }
+	// -> the actors in play that match, nearest first when a radius is given (every field optional)
+	int LuaMod::Actors(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		MirageActorQuery q{};
+		q.size = sizeof q;
+		std::string cls, tag, name;
+		if (lua_istable(L, 1)) {
+			const auto text = [&](const char* key, std::string& out) {
+				if (lua_getfield(L, 1, key) == LUA_TSTRING) out = lua_tostring(L, -1);
+				lua_pop(L, 1);
+			};
+			text("class", cls);
+			text("tag", tag);
+			text("name", name);
+			if (lua_getfield(L, 1, "radius") == LUA_TNUMBER) q.radius = static_cast<float>(lua_tonumber(L, -1));
+			lua_pop(L, 1);
+			lua_getfield(L, 1, "near");
+			if (auto* p = static_cast<Proxy*>(luaL_testudata(L, -1, kProxyMeta)); p && p->kind == kObject) {
+				Refresh(p);
+				if (!p->handle) {		// Around an actor that is gone: nothing is near it
+					lua_newtable(L);
+					return 1;
+				}
+				q.near_object = static_cast<MirageObject*>(p->handle);
+			} else if (lua_istable(L, -1)) {
+				const auto coord = [&](int i, const char* key) {
+					float v = 0.f;
+					if (lua_rawgeti(L, -1, i) == LUA_TNUMBER) v = static_cast<float>(lua_tonumber(L, -1));
+					lua_pop(L, 1);
+					if (lua_getfield(L, -1, key) == LUA_TNUMBER) v = static_cast<float>(lua_tonumber(L, -1));
+					lua_pop(L, 1);
+					return v;
+				};
+				q.x = coord(1, "X");
+				q.y = coord(2, "Y");
+				q.z = coord(3, "Z");
+			}
+			lua_pop(L, 1);
+		}
+		q.class_name = cls.c_str();
+		q.tag = tag.c_str();
+		q.name = name.c_str();
+		std::vector<MirageObject*> found(256);
+		int32_t n = self.api_->actors_query(&q, found.data(), static_cast<int32_t>(found.size()));
+		if (n > static_cast<int32_t>(found.size())) {
+			found.resize(static_cast<std::size_t>(n));
+			n = self.api_->actors_query(&q, found.data(), n);
+		}
+		lua_createtable(L, std::max(n, 0), 0);
+		for (int32_t i = 0; i < n && i < static_cast<int32_t>(found.size()); ++i) {
+			PushObject(L, found[static_cast<std::size_t>(i)]);
+			lua_rawseti(L, -2, i + 1);
+		}
+		return 1;
+	}
+
 	// mirage.call(object, "Function", { Param = value, ... }): its return value (true if it returns nothing)
 	int LuaMod::CallGame(lua_State* L)
 	{
@@ -1075,6 +1172,19 @@ namespace mirage::mods
 			case MIRAGE_EVENT_DEATH: lua_pushboolean(L, e->value); n = 1; break;
 			case MIRAGE_EVENT_PLAYER_STATE: lua_pushinteger(L, e->value); lua_pushinteger(L, e->value2); n = 2; break;
 			case MIRAGE_EVENT_KEY: lua_pushinteger(L, e->value); n = 1; break;
+			case MIRAGE_EVENT_ACTOR_ADDED:
+				PushObject(L, e->object);
+				lua_pushstring(L, e->text ? e->text : "");
+				n = 2;
+				break;
+			case MIRAGE_EVENT_ACTOR_REMOVED: {
+				// The actor is gone: a proxy that is already dead, but == to the one the mod kept
+				PushProxy(L, kObject, nullptr, "", 0);
+				static_cast<Proxy*>(lua_touserdata(L, -1))->id.object = e->object;
+				n = 1;
+				break;
+			}
+			case MIRAGE_EVENT_LEVEL_STREAMED: lua_pushboolean(L, e->value); lua_pushstring(L, e->text ? e->text : ""); n = 2; break;
 			default: break;
 		}
 		// A player state callback that returns true skips the game's handling of the new state (event_skip)
@@ -1142,7 +1252,8 @@ namespace mirage::mods
 	int LuaMod::On(lua_State* L)
 	{
 		LuaMod& self = Self(L);
-		static const char* const kEvents[] = {"tick", "level_load", "death", "player_state", "key", "state_restored", "memory_pressure", nullptr};
+		static const char* const kEvents[] = {"tick", "level_load", "death", "player_state", "key", "state_restored", "memory_pressure",
+											  "actor_added", "actor_removed", "level_streamed", "restart", nullptr};
 		const int type = luaL_checkoption(L, 1, nullptr, kEvents);
 		luaL_checktype(L, 2, LUA_TFUNCTION);
 		auto c = std::make_unique<Callback>();
@@ -1597,6 +1708,7 @@ namespace mirage::mods
 
 	void LuaMod::Bind()
 	{
+		g_api = api_;
 		lua_State* L = state_.Get();
 		const auto set = [&](const luaL_Reg* fns) {	// Into the table on top, each with `this` as upvalue
 			lua_pushlightuserdata(L, this);
@@ -1658,7 +1770,7 @@ namespace mirage::mods
 			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn}, {"layer_actor", LayerActor},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
-			{"shared", Shared}, {nullptr, nullptr}};
+			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

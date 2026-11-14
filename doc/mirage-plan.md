@@ -771,6 +771,35 @@ a query during a load returns nothing.
 and properties, follow one actor through a level load and a rewind, and none of the five lifecycle cases above
 crashes or returns a wrong object; the self-test proves each case.
 
+**Status (2026-11-13): done for handles, queries and lifecycle events; three parts left.**
+
+- **Handles without a destruction hook** (the investigation's answer): a `MirageHandle` keeps the object's address,
+  slot, name and class. The engine names objects uniquely (`Class_N`, counting up), so a new object in a freed slot at
+  the same address has another name and the handle stops matching; a destroyed actor stays in the object list until
+  garbage collection (verified: its slot still holds it), so an actor with `bDeleteMe` doesn't match either. No serial,
+  no hook. ABI v1 appended `object_handle`, `handle_object`, `actors_query`, `MirageHandle`, `MirageActorQuery`, and
+  `MirageEvent.object` (the struct is size-prefixed: `sizeof` 24 → 28; C#'s layout check updated).
+- **Every Lua object is a handle:** a proxy keeps its object's identity and lets go of it once it no longer matches
+  (reads nil, calls fail); `mirage.valid(obj)`; `==` compares the address an object had, so `actor_removed`'s actor
+  equals the one a mod kept.
+- **Queries** (`actors_query`, Lua `mirage.actors{class, tag, name, near, radius}`, C# `Mod.Actors(...)`) read the
+  per-tick actor lists (`game::ActorsInPlay`); nearest first with a radius.
+- **Lifecycle events** (`runtime/world_events`): `actor_added` (with the class), `actor_removed`, `level_streamed`,
+  `restart` (a new pawn in the same level). Actors are found by comparing the levels' lists with the last tick's, only
+  while a mod subscribes: an unchanged list costs one compare of memory; a change sorts and diffs.
+- **Self-test "Mirage world access"** (`tests/mods/world-access`): a spawned, tagged actor comes as `actor_added` with
+  its class; found by tag (alone), around the player (the player first) and by class, a missing class matches nothing;
+  destroyed, it comes as `actor_removed` `==` the kept one, which is no longer valid and reads nil; its handle is
+  invalid, a forged handle (another name at the same address) is refused; a checkpoint restart comes as `restart` and
+  the old player's handle is invalid. Measured (debug, 4,449 actors in the Prologue): 2.4-2.7 ms a tick on average over
+  the test's ticks, where most ticks had a change (spawns, a restart); a restart's diff, with ~700 Lua events, 73-86 ms.
+
+Left: `level_streamed` and a TAS rewind aren't driven by the self-test yet (the streaming code is exercised by every
+level load); the cost of an unchanged tick isn't measured on its own, nor in release; the garbage-collection event
+was dropped (handles already cover what it was for); relationships (`Owner`, `Base`, `Outer`) are reached by path as
+before. The C# part of the milestone has its API (`Mod.Actors`, `GameObject.HandleOf` / `Resolve`, the events) but no
+C# test mod yet.
+
 ### 15. Reversible changes: the change log (P0, infrastructure)
 
 **Objective.** Everything a mod changes through the API is recorded, so unloading, disabling, hot reloading or
@@ -1894,8 +1923,8 @@ redesign), L (costs time).
 
 Each with the investigation that answers it.
 
-- **Handles:** is UE3's GObjects slot clearing plus a per-slot serial enough, or must object destruction be hooked?
-  (Step 14: destroy and respawn objects in the same slot in a test and see what the slot shows.)
+- ~~**Handles:**~~ answered in step 14: the slot, the object's unique name and its class identify it; destroyed actors
+  are caught by `bDeleteMe`. No serial and no destruction hook.
 - **Kismet writes:** what must the engine know beyond `SequenceObjects` for a new op to run; are cooked sequences
   missing editor data the editor needs; do checkpoint restarts reset runtime-edited sequences? (Step 18: read a level's
   sequences offline with UnrealLib and live, compare, then make the smallest edit and observe it.)

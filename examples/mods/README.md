@@ -107,7 +107,13 @@ pawn.Velocity = { X = 0, Y = 0, Z = 0 }          -- a struct from a table
 mirage.call(pawn, "SetLocation", { NewLocation = pawn.Location })   -- a function, with its parameters by name
 
 mirage.on("level_load", function(finished, map) if finished then mirage.log("now in", map) end end)
--- events: tick (seconds), level_load (finished, map), death (after), player_state (new, old), key (vk), state_restored
+-- events: tick (seconds), level_load (finished, map), death (after), player_state (new, old), key (vk), state_restored,
+--         actor_added (actor, class), actor_removed (actor), level_streamed (visible, level), restart
+
+-- The world (step 14): actors in play, every filter optional; with a radius, nearest first
+for _, bot in ipairs(mirage.actors { class = "TdBotPawn", near = pawn, radius = 2000 }) do mirage.info(mirage.name(bot)) end
+mirage.actors { tag = "Door" }                   -- by Actor.Tag; also name = "TdBotPawn_3", near = {x, y, z}
+mirage.valid(obj)                                -- false once the object is gone (or another took its place)
 
 local hook = mirage.hook("Engine.Actor.CheckMaxEffectDistance", function(call)
     call.params.CullDistance = 0                 -- before the function: change its parameters...
@@ -123,6 +129,14 @@ function, and they run by priority.
 
 Hooks run on the game thread. A mod's hooks, events and detours go away when it unloads, reloads or crashes. A TAS
 rewind puts the game's memory back but never a mod's: after `state_restored`, look game objects up again.
+
+Objects kept across ticks are safe to keep: a Lua object knows the object it was made for (its slot in the engine's
+object list, its name and its class), and once that object is gone (destroyed, a level unloaded, garbage collected, or
+another object at the same address) it reads as nothing and calls on it fail, instead of reaching another object.
+`mirage.valid(obj)` says which. Native mods get the same with `object_handle` / `handle_object` (a `MirageHandle` is
+plain data), C# with `GameObject.HandleOf()` / `GameObject.Resolve()`. `actor_removed` gives the actor that went, `==`
+to the one a mod kept (and no longer valid). Subscribing to `actor_added` / `actor_removed` makes the runtime compare
+the levels' actor lists each tick: subscribe only while you need them.
 
 ## Content mods: data, no code
 

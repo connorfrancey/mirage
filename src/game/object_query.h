@@ -54,6 +54,9 @@ namespace game
 
 	// Actors of `cls` or a subclass in the levels in play, as of this tick
 	std::vector<Classes::AActor*> ActorsOf(Classes::UClass* cls);
+	// Every actor in play this tick, in the levels' own order (no class filter, no copy): the persistent level's list,
+	// then each visible streaming level's. Valid until the next tick.
+	const std::vector<Classes::AActor*>& ActorsInPlay();
 
 	struct QueryStats
 	{

@@ -272,6 +272,12 @@ namespace game
 		}
 	}
 
+	const std::vector<Classes::AActor*>& ActorsInPlay()
+	{
+		ActorsOf(Classes::AActor::StaticClass());		// This tick's lists
+		return Actors().all;
+	}
+
 	std::vector<Classes::AActor*> ActorsOf(Classes::UClass* cls)
 	{
 		if (!cls) return {};
@@ -290,6 +296,7 @@ namespace game
 			}
 			s.stats.actors = c.all.size();
 		}
+		if (cls == Classes::AActor::StaticClass()) return c.all;		// Every actor: no class walk for each
 		auto [it, added] = c.byClass.try_emplace(cls);
 		if (added)
 			for (Classes::AActor* a : c.all)

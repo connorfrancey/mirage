@@ -146,8 +146,11 @@ MIRAGE_AT(class_define, 532);
 MIRAGE_AT(object_path, 536);
 MIRAGE_AT(object_keep, 540);
 MIRAGE_AT(layer_actor, 544);
+MIRAGE_AT(object_handle, 548);
+MIRAGE_AT(handle_object, 552);
+MIRAGE_AT(actors_query, 556);
 // managed/Mirage/Native/Structs.cs mirrors these by hand (Bridge.Initialize checks the same sizes in the game)
-static_assert(sizeof(MirageModuleDesc) == 56 && sizeof(MirageEvent) == 24 && sizeof(MirageValue) == 272);
+static_assert(sizeof(MirageModuleDesc) == 56 && sizeof(MirageEvent) == 28 && sizeof(MirageValue) == 272);
 static_assert(sizeof(MirageMemoryStats) == 56 && offsetof(MirageMemoryStats, process_private) == 8);
 static_assert(sizeof(MirageWorldVertex) == 16 && sizeof(MirageWorldLabel) == 20 && sizeof(MirageWorldMesh) == 36);
 static_assert(sizeof(MirageCamera) == 32);
@@ -166,7 +169,12 @@ static_assert(sizeof(MirageToken) == 384 && offsetof(MirageToken, name) == 48 &&
 // Size of ABI v1's table: a later version only makes it larger
 static_assert(sizeof(MirageApi) >= 224);
 static_assert(sizeof(MirageValue) == 272 && offsetof(MirageValue, text) == 16);
-static_assert(sizeof(MirageEvent) == 24 && offsetof(MirageEvent, number) == 16 && offsetof(MirageEvent, text) == 20);
+static_assert(sizeof(MirageEvent) == 28 && offsetof(MirageEvent, number) == 16 && offsetof(MirageEvent, text) == 20 &&
+              offsetof(MirageEvent, object) == 24, "MirageEvent moved (step 14 appended object)");
+static_assert(sizeof(MirageHandle) == 24 && offsetof(MirageHandle, slot) == 8 && offsetof(MirageHandle, object_class) == 20);
+static_assert(sizeof(MirageActorQuery) == 36 && offsetof(MirageActorQuery, near_object) == 16 && offsetof(MirageActorQuery, radius) == 32);
+static_assert(MIRAGE_EVENT_MEMORY_PRESSURE == 6 && MIRAGE_EVENT_ACTOR_ADDED == 7 && MIRAGE_EVENT_ACTOR_REMOVED == 8 &&
+              MIRAGE_EVENT_LEVEL_STREAMED == 9 && MIRAGE_EVENT_RESTART == 10);
 static_assert(MIRAGE_HOOK_BEFORE == 0 && MIRAGE_HOOK_AFTER == 1 && MIRAGE_HOOK_REPLACE == 2);
 static_assert(MIRAGE_EVENT_TICK == 0 && MIRAGE_EVENT_LEVEL_LOAD == 1 && MIRAGE_EVENT_DEATH == 2 &&
               MIRAGE_EVENT_PLAYER_STATE == 3 && MIRAGE_EVENT_KEY == 4 && MIRAGE_EVENT_STATE_RESTORED == 5);

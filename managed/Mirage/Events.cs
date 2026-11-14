@@ -14,6 +14,10 @@ namespace Mirage
         Key = Constants.EventKey,                      // A key went down: Value = virtual-key code
         StateRestored = Constants.EventStateRestored,  // The TAS put back a memory snapshot: look objects up again
         MemoryPressure = Constants.EventMemoryPressure, // Value = 0 normal .. 3 critical: give back what can be made again
+        ActorAdded = Constants.EventActorAdded,        // An actor came into play: Object = it, Text = its class
+        ActorRemoved = Constants.EventActorRemoved,    // An actor left play: Object = the one it was (compare, never use)
+        LevelStreamed = Constants.EventLevelStreamed,  // A streaming level shown (Value 1) or hidden (0): Text = its name
+        Restart = Constants.EventRestart,              // A checkpoint restart: a new player pawn in the same level
     }
 
     public readonly struct EventArgs
@@ -23,6 +27,8 @@ namespace Mirage
         public int Value2 { get; init; }
         public float Number { get; init; }
         public string Text { get; init; }
+        /// <summary>The event's object (actor events); for ActorRemoved only to compare with objects kept</summary>
+        public GameObject Object { get; init; }
     }
 
     /// <summary>An event subscription: ends when disposed or when the mod unloads.</summary>
@@ -67,7 +73,9 @@ namespace Mirage
             try {
                 s = GCHandle.FromIntPtr((IntPtr)user).Target as Subscription;
                 if (s == null || s._handle == null) return;
-                s._handler(new EventArgs { Type = (GameEvent)e->type, Value = e->value, Value2 = e->value2, Number = e->number, Text = Utf8.Read(e->text) });
+                void* o = e->size >= sizeof(MirageEvent) ? e->@object : null;
+                s._handler(new EventArgs { Type = (GameEvent)e->type, Value = e->value, Value2 = e->value2, Number = e->number,
+                                           Text = Utf8.Read(e->text), Object = new GameObject(o) });
             } catch (Exception ex) {
                 Bridge.Report(s?._mod, "event " + (GameEvent)e->type, ex);
             }

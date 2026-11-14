@@ -78,6 +78,7 @@
 #include <nlohmann/json.hpp>
 #include "game/object_ref.h"
 #include "util/float_util.h"
+#include "runtime/world_events.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -5360,6 +5361,121 @@ void TestLevelEditor()
     End(s);
 }
 
+// World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
+// "WorldGravityZ" (a name the game has, no class's) comes to the
+// mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
+// first) and an engine class's actors; destroyed, it comes as actor_removed equal (==) to the one the mod kept, which is
+// no longer valid and reads as nothing. Handles (object_handle / handle_object): valid while the object lives, invalid
+// once it is destroyed, and a handle naming another object at the same address is refused. A checkpoint restart comes
+// as restart, and a handle of the old player is invalid after it. The comparison's cost is in the notes.
+std::string WorldShared(const char* key)
+{
+    char v[256]{};
+    mirage::mods::game_api::ShareGet("world-access", key, v, sizeof v);
+    return v;
+}
+float WorldSharedNum(const char* key) { return util::ParseFloatOr(WorldShared(key), -1.f); }
+
+void TestWorldAccess()
+{
+    Step& s = Begin("Mirage world access");
+    Probe p(s);
+    namespace ga = mirage::mods::game_api;
+    Module* m = modules::Find("World access (Lua)");
+    if (!m) {
+        p.Problem("the World access (Lua) module is missing (tests/mods/world-access)");
+        End(s);
+        return;
+    }
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitTicks(5);
+
+    // 1. Spawned: an Actor with a tag, beside the player
+    Classes::AActor* probe = nullptr;
+    MirageHandle h{};
+    h.size = sizeof h;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        Classes::FVector at = pawn->Location;
+        at.X += 200.f;
+        probe = pawn->Spawn(Classes::ADynamicSMActor_Spawnable::StaticClass(), nullptr, Classes::FName{}, at, pawn->Rotation, nullptr, true);
+        if (!probe) return;
+        probe->Tag = Classes::FName("WorldGravityZ");   // A name the game has (FName only finds names)
+        ga::ObjectHandle(reinterpret_cast<MirageObject*>(probe), &h);
+    });
+    if (!probe) {
+        p.Problem("the probe actor didn't spawn");
+        End(s);
+        return;
+    }
+    WaitFor(5.0, [] { return WorldSharedNum("queried") == 1.f; });      // Set last, after every query
+    if (WorldShared("probe_class") != "DynamicSMActor_Spawnable") p.Problem("actor_added didn't bring the probe with its class (got '" + WorldShared("probe_class") + "')");
+    if (WorldSharedNum("probe_valid") != 1.f) p.Problem("the probe wasn't valid in its actor_added event");
+    if (WorldSharedNum("query_tag") != 1.f || WorldSharedNum("query_tag_is_probe") != 1.f)
+        p.Problem(fmt::format("actors{{tag}} found {} actor(s), not the probe alone", WorldShared("query_tag")));
+    if (WorldSharedNum("query_near_has_probe") != 1.f || WorldSharedNum("query_near_first_is_pawn") != 1.f)
+        p.Problem("actors{near = pawn, radius} didn't list the player first and the probe among them");
+    if (WorldSharedNum("query_class") < 1.f) p.Problem("actors{class = \"Engine.PlayerStart\"} found none");
+    if (WorldSharedNum("query_missing") != 0.f) p.Problem("a class that doesn't exist matched actors");
+
+    // 2. Handles: valid now; another object at that address (a different name) is refused
+    MirageObject* back = nullptr;
+    MirageObject* forged = nullptr;
+    OnGameThread([&] {
+        back = ga::HandleObject(&h);
+        MirageHandle other = h;
+        ++other.name_number;
+        forged = ga::HandleObject(&other);
+    });
+    if (back != reinterpret_cast<MirageObject*>(probe)) p.Problem("the probe's handle didn't give the probe back");
+    if (forged) p.Problem("a handle with another name at the same address gave an object");
+
+    // 3. Destroyed: actor_removed is the kept one, which is no longer valid; the handle is invalid too
+    const float removedBefore = WorldSharedNum("removed");
+    OnGameThread([&] { if (probe && !probe->bDeleteMe) probe->Destroy(); });
+    WaitFor(5.0, [] { return WorldSharedNum("probe_removed") == 1.f; });
+    if (WorldSharedNum("probe_removed") != 1.f) p.Problem("actor_removed didn't come equal (==) to the probe the mod kept");
+    if (WorldSharedNum("kept_valid_after") != 0.f) p.Problem("the kept probe was still valid after it was destroyed");
+    if (WorldShared("kept_z_after") != "nil") p.Problem("the destroyed probe read " + WorldShared("kept_z_after") + ", not nothing");
+    if (WorldSharedNum("removed") <= removedBefore) p.Problem("no actor_removed counted");
+    MirageObject* after = reinterpret_cast<MirageObject*>(1);
+    WaitTicks(3);
+    OnGameThread([&] { after = ga::HandleObject(&h); });
+    if (after) p.Problem("the destroyed probe's handle still gave an object");
+
+    // 4. A checkpoint restart: the restart event; the old player's handle is invalid after it
+    MirageHandle oldPawn{};
+    oldPawn.size = sizeof oldPawn;
+    const float restartsBefore = WorldSharedNum("restarts");
+    const void* pawnBefore = nullptr;
+    OnGameThread([&] {
+        pawnBefore = game::Pawn();
+        ga::ObjectHandle(reinterpret_cast<MirageObject*>(game::Pawn()), &oldPawn);
+        levels::RestartFromLastCheckpoint();
+    });
+    WaitFor(30.0, [&] {
+        const void* now = nullptr;
+        OnGameThread([&] { now = game::Pawn(); }, 1.0);
+        return now && now != pawnBefore && !game::IsLoading();
+    });
+    WaitFor(10.0, [&] { return WorldSharedNum("restarts") > restartsBefore; });
+    MirageObject* oldBack = reinterpret_cast<MirageObject*>(1);
+    OnGameThread([&] { oldBack = ga::HandleObject(&oldPawn); });
+    if (WorldSharedNum("restarts") <= restartsBefore) p.Problem("no restart event after the checkpoint restart");
+    if (oldBack) p.Problem("the old player's handle still gave an object after the restart");
+
+    const auto st = mirage::world_events::GetStats();
+    s.notes.push_back(fmt::format("{} actors in play; compared on {} ticks, {} with a change: {:.3f} ms a tick on average, "
+                                  "max {:.3f} (a restart's); seen: {:.0f} added, {:.0f} removed, {:.0f} restart(s), {:.0f} streamed",
+                                  st.actors, st.compares, st.changed, st.compares ? st.totalCompareMs / st.compares : 0.0,
+                                  st.maxCompareMs, WorldSharedNum("added"), WorldSharedNum("removed"), WorldSharedNum("restarts"),
+                                  WorldSharedNum("streamed")));
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitGrounded();
+    End(s);
+}
+
 // The Mirage Showcase (mods/memenu-showcase), each of its parts doing what it says in the game: its window draws; it
 // reads the player live; its hook on TdPlayerPawn.Landed counts a jump's landing; its injection into
 // TdMove_Jump.StartMove makes a standing jump lower and its low gravity makes one higher (each measured against a jump
@@ -6395,6 +6511,7 @@ const Named* FeatureList()
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
+        {"Mirage world access", &TestWorldAccess, false},
         {"Mirage showcase", &TestShowcase, false},
         {"Mirage time trials", &TestTimeTrials, false},
 #endif

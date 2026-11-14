@@ -14,6 +14,21 @@ namespace Mirage
 
         public bool IsValid => Handle != null;
 
+        /// <summary>
+        /// A handle that stays right across ticks and level loads (step 14): <see cref="Resolve"/> gives the object back
+        /// while it is still that object, and an invalid one once it is gone or another object took its place.
+        /// </summary>
+        public MirageHandle HandleOf()
+        {
+            var h = new MirageHandle { size = (uint)sizeof(MirageHandle) };
+            if (Handle != null) Bridge.Api->object_handle(Handle, &h);
+            return h;
+        }
+        public static GameObject Resolve(in MirageHandle handle)
+        {
+            fixed (MirageHandle* h = &handle) return new GameObject(Bridge.Api->handle_object(h));
+        }
+
         public static GameObject Player => new(Bridge.Api->player_pawn());
         public static GameObject Controller => new(Bridge.Api->player_controller());
         public static GameObject World => new(Bridge.Api->world_info());

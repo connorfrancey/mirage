@@ -31,6 +31,29 @@ namespace Mirage.Native
         public int value, value2;
         public float number;
         public byte* text;
+        public void* @object;       // Appended (step 14): the event's object (actor events)
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageHandle
+    {
+        public uint size;
+        public void* @object;
+        public uint slot;
+        public int name_index, name_number;
+        public void* object_class;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageActorQuery
+    {
+        public uint size;
+        public byte* class_name;
+        public byte* tag;
+        public byte* name;
+        public void* near_object;
+        public float x, y, z;
+        public float radius;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -57,7 +80,7 @@ namespace Mirage.Native
         public const uint ModuleAction = 0x1, ModuleEnabledByDefault = 0x2, ModuleEveryTick = 0x4, ModulePanelOpen = 0x8;
         public const int ValueNone = 0, ValueBool = 1, ValueInt = 2, ValueFloat = 3, ValueObject = 4, ValueText = 5, ValueStruct = 6, ValueArray = 7;
         public const int EventTick = 0, EventLevelLoad = 1, EventDeath = 2, EventPlayerState = 3, EventKey = 4, EventStateRestored = 5,
-            EventMemoryPressure = 6;
+            EventMemoryPressure = 6, EventActorAdded = 7, EventActorRemoved = 8, EventLevelStreamed = 9, EventRestart = 10;
         public const int HookBefore = 0, HookAfter = 1, HookReplace = 2;
     }
 }

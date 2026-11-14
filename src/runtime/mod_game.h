@@ -19,6 +19,9 @@ namespace mirage::mods::game_api
 	uint32_t MIRAGE_CALL ObjectPath(MirageObject* object, char* buffer, uint32_t capacity);
 	int32_t MIRAGE_CALL ObjectKeep(MirageMod* mod, MirageObject* object, int32_t keep);
 	MirageObject* MIRAGE_CALL LayerActor(MirageMod* mod, const char* modId, const char* name);
+	int32_t MIRAGE_CALL ObjectHandle(MirageObject* object, MirageHandle* out);
+	MirageObject* MIRAGE_CALL HandleObject(const MirageHandle* handle);
+	int32_t MIRAGE_CALL ActorsQuery(const MirageActorQuery* query, MirageObject** out, int32_t capacity);
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
 											   MirageHookFn fn, void* user);
 	MirageHook* MIRAGE_CALL HookFunction(MirageMod* mod, const char* function, int32_t when, int32_t priority,
@@ -84,4 +87,10 @@ namespace mirage::mods
 	void DispatchKey(int vk);										// The window's thread
 	void DispatchStateRestored();									// Game thread: a TAS snapshot was put back
 	void DispatchMemoryPressure(int level);							// Game thread: the memory manager's level changed (or holds high)
+	// World lifecycle (step 14; runtime/world_events tells these). Game thread.
+	void DispatchActor(bool added, void* actor, const std::string& className);	// actor: a Classes::AActor*
+	void DispatchLevelStreamed(bool visible, const std::string& level);
+	void DispatchRestart();
+	// Whether any mod listens to MIRAGE_EVENT_<type> now (so the work to find out can be skipped). Any thread.
+	bool HasSubscribers(int type);
 }

@@ -178,7 +178,9 @@ namespace mirage::mods
 		{
 			const auto subs = g_subs.load(std::memory_order_acquire);
 			if (subs->empty()) return;
-			static const char* const kNames[] = {"tick", "level load", "death", "player state", "key", "state restored"};
+			static const char* const kNames[] = {"tick", "level load", "death", "player state", "key", "state restored",
+												 "memory pressure", "actor added", "actor removed", "level streamed", "restart"};
+			static_assert(std::size(kNames) == MIRAGE_EVENT_RESTART + 1);
 			for (const auto& s : *subs) {
 				if (s->type != e.type || !s->active.load(std::memory_order_relaxed)) continue;
 				EventArgs args{s.get(), &e};
@@ -295,11 +297,35 @@ namespace mirage::mods
 		Dispatch(e);
 	}
 
+	void DispatchActor(bool added, void* actor, const std::string& className)
+	{
+		MirageEvent e = Event(added ? MIRAGE_EVENT_ACTOR_ADDED : MIRAGE_EVENT_ACTOR_REMOVED);
+		e.object = static_cast<MirageObject*>(actor);
+		e.text = className.c_str();
+		Dispatch(e);
+	}
+	void DispatchLevelStreamed(bool visible, const std::string& level)
+	{
+		MirageEvent e = Event(MIRAGE_EVENT_LEVEL_STREAMED);
+		e.value = visible ? 1 : 0;
+		e.text = level.c_str();
+		Dispatch(e);
+	}
+	void DispatchRestart() { Dispatch(Event(MIRAGE_EVENT_RESTART)); }
+
+	bool HasSubscribers(int type)
+	{
+		const auto subs = g_subs.load(std::memory_order_acquire);
+		for (const auto& s : *subs)
+			if (s->type == type && s->active.load(std::memory_order_relaxed)) return true;
+		return false;
+	}
+
 	namespace game_api
 	{
 		MirageSubscription* MIRAGE_CALL EventSubscribe(MirageMod* mod, int32_t type, MirageEventFn fn, void* user)
 		{
-			if (!mod || !fn || type < MIRAGE_EVENT_TICK || type > MIRAGE_EVENT_MEMORY_PRESSURE) return nullptr;
+			if (!mod || !fn || type < MIRAGE_EVENT_TICK || type > MIRAGE_EVENT_RESTART) return nullptr;
 			auto s = std::make_shared<Subscription>();
 			s->mod = mod;
 			s->type = type;
@@ -718,6 +744,75 @@ namespace mirage::mods
 			for (Classes::UStruct* c = Obj(object)->Class; c && depth < 64; c = game::SuperOf(c), ++depth)
 				if (c->GetName() == className) return 1;
 			return 0;
+		}
+
+		// ---- World access (step 14) ------------------------------------------------------------------------------
+		// A handle is the object plus what identifies it: its slot, its name and its class. A new object in a freed
+		// slot can come at the same address, but the engine names objects uniquely (Class_N, counting up), so it
+		// doesn't have the old one's name: the handle no longer matches.
+		int32_t MIRAGE_CALL ObjectHandle(MirageObject* object, MirageHandle* out)
+		{
+			if (!out || out->size < sizeof(MirageHandle)) return 0;
+			const uint32_t size = out->size;
+			*out = MirageHandle{};
+			out->size = size;
+			Classes::UObject* o = Obj(object);
+			std::size_t slot = 0;
+			if (!o || !Classes::UObject::GObjects || !ReadIndex(o, &slot) || !game::AliveAt(o, slot)) return 0;
+			out->object = object;
+			out->slot = static_cast<uint32_t>(slot);
+			out->name_index = o->Name.Index;
+			out->name_number = o->Name.Number;
+			out->object_class = Handle(o->Class);
+			return 1;
+		}
+
+		MirageObject* MIRAGE_CALL HandleObject(const MirageHandle* h)
+		{
+			if (!h || h->size < sizeof(MirageHandle) || !h->object || !Classes::UObject::GObjects) return nullptr;
+			Classes::UObject* o = Obj(h->object);
+			if (!game::AliveAt(o, h->slot)) return nullptr;		// The slot holds this address (reads the slot only)
+			if (o->Name.Index != h->name_index || o->Name.Number != h->name_number || Handle(o->Class) != h->object_class)
+				return nullptr;		// Another object at the same address
+			// A destroyed actor stays in the object list (bDeleteMe) until the next garbage collection: gone already
+			if (game::IsA(o, Classes::AActor::StaticClass()) && static_cast<Classes::AActor*>(o)->bDeleteMe) return nullptr;
+			return h->object;
+		}
+
+		int32_t MIRAGE_CALL ActorsQuery(const MirageActorQuery* q, MirageObject** out, int32_t capacity)
+		{
+			if (!q || q->size < sizeof(MirageActorQuery)) return -1;
+			Classes::UClass* cls = Classes::AActor::StaticClass();
+			if (q->class_name && *q->class_name) {
+				cls = game::FindClass(q->class_name);
+				if (!cls) return 0;
+			}
+			const bool byTag = q->tag && *q->tag, byName = q->name && *q->name;
+			Classes::FVector center{q->x, q->y, q->z};
+			if (q->radius > 0.f && q->near_object) {
+				auto* around = static_cast<Classes::AActor*>(Obj(q->near_object));
+				if (!Alive(around) || !game::IsA(around, Classes::AActor::StaticClass())) return 0;
+				center = around->Location;
+			}
+			const float r2 = q->radius * q->radius;
+			std::vector<std::pair<float, Classes::AActor*>> found;
+			for (Classes::AActor* a : game::ActorsOf(cls)) {
+				if (a->bDeleteMe) continue;
+				float d2 = 0.f;
+				if (q->radius > 0.f) {
+					const float dx = a->Location.X - center.X, dy = a->Location.Y - center.Y, dz = a->Location.Z - center.Z;
+					d2 = dx * dx + dy * dy + dz * dz;
+					if (d2 > r2) continue;
+				}
+				if (byTag && a->Tag.GetName() != q->tag) continue;
+				if (byName && a->GetName() != q->name) continue;
+				found.emplace_back(d2, a);
+			}
+			if (q->radius > 0.f)
+				std::sort(found.begin(), found.end(), [](const auto& x, const auto& y) { return x.first < y.first; });
+			if (out)
+				for (int32_t i = 0; i < capacity && i < static_cast<int32_t>(found.size()); ++i) out[i] = Handle(found[static_cast<std::size_t>(i)].second);
+			return static_cast<int32_t>(found.size());
 		}
 	}
 }

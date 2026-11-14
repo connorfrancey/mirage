@@ -130,6 +130,40 @@ namespace Mirage
             }
         }
 
+        /// <summary>
+        /// The actors in play that match (step 14): of a class (and its subclasses), with a tag or a name, within
+        /// <paramref name="radius"/> of <paramref name="near"/> or of a point (nearest first). Every filter optional.
+        /// Game thread.
+        /// </summary>
+        public GameObject[] Actors(string? className = null, string? tag = null, string? name = null, GameObject near = default,
+                                   float radius = 0f, float x = 0f, float y = 0f, float z = 0f)
+        {
+            var cls = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(className ?? "");
+            var t = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(tag ?? "");
+            var n = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(name ?? "");
+            try
+            {
+                var q = new MirageActorQuery
+                {
+                    size = (uint)sizeof(MirageActorQuery), class_name = (byte*)cls, tag = (byte*)t, name = (byte*)n,
+                    near_object = near.Handle, x = x, y = y, z = z, radius = radius,
+                };
+                int count = Bridge.Api->actors_query(&q, null, 0);
+                if (count <= 0) return Array.Empty<GameObject>();
+                var found = new void*[count];
+                fixed (void** p = found) count = Math.Min(count, Bridge.Api->actors_query(&q, p, count));
+                var result = new GameObject[count];
+                for (int i = 0; i < count; i++) result[i] = new GameObject(found[i]);
+                return result;
+            }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(cls);
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(t);
+                System.Runtime.InteropServices.Marshal.FreeCoTaskMem(n);
+            }
+        }
+
         /// <summary>Keeps an object from the garbage collector until <see cref="Release"/> or the mod's unload.</summary>
         public bool Keep(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 1) != 0;
         public bool Release(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 0) != 0;

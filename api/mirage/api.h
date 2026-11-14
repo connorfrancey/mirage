@@ -151,17 +151,54 @@ typedef void(MIRAGE_CALL* MirageNativeFn)(void* user, MirageNativeCall* call);
 #define MIRAGE_EVENT_MEMORY_PRESSURE 6 /* Game thread: the memory manager's pressure level changed, or holds at High or
                                          Critical (again every 5 s): value = MIRAGE_MEMORY_* now. Give back what can be
                                          made again (caches; Lua: collectgarbage()). Never the game's memory */
+/* World lifecycle (step 14). Game thread. Actors are compared tick to tick, only while a mod subscribes to them: an
+ * actor made and destroyed within one tick isn't seen, and a level streaming in or out adds or removes its actors. */
+#define MIRAGE_EVENT_ACTOR_ADDED 7    /* An actor came into play (spawned, or its level streamed in): object = it,
+                                         text = its class's name */
+#define MIRAGE_EVENT_ACTOR_REMOVED 8  /* An actor left play (destroyed, or its level went): object = the handle it had,
+                                         to compare with ones kept; never use it (it is no longer valid) */
+#define MIRAGE_EVENT_LEVEL_STREAMED 9 /* A streaming level became visible (value 1) or stopped being (value 0): text = its
+                                         package name */
+#define MIRAGE_EVENT_RESTART 10       /* A checkpoint restart: the player is a new pawn in the same level. Objects of the
+                                         old player are gone */
 typedef struct MirageEvent {
     uint32_t size;              /* sizeof(MirageEvent) */
     int32_t type;               /* MIRAGE_EVENT_* */
     int32_t value, value2;
     float number;
     const char* text;           /* Valid during the callback; "" if none */
+    MirageObject* object;       /* The event's object (MIRAGE_EVENT_ACTOR_*), else NULL. Appended (step 14): check
+                                   size >= offsetof(MirageEvent, object) + sizeof(void*) before reading it */
 } MirageEvent;
 typedef void(MIRAGE_CALL* MirageEventFn)(void* user, const MirageEvent* event);
 
 /* objects_of_class: flags */
 #define MIRAGE_OBJECTS_DEFAULTS 0x1u    /* Class default objects too */
+
+/* ---- World access (step 14) -----------------------------------------------------------------------------------------
+ * A MirageObject is the object's address: once the object is gone, another object can come at the same address and in
+ * the same slot of the engine's object list, and the old pointer would quietly mean the new object. A MirageHandle
+ * also keeps what identifies the object (its slot, its name, its class): handle_object gives the object back only
+ * while all of it still matches, else NULL. Plain data: keep it as long as you like, across ticks and level loads. */
+typedef struct MirageHandle {
+    uint32_t size;              /* sizeof(MirageHandle) */
+    MirageObject* object;
+    uint32_t slot;              /* Its index in the engine's object list */
+    int32_t name_index, name_number;    /* Its name (an FName) */
+    MirageObject* object_class;
+} MirageHandle;
+
+/* actors_query: which actors (every field optional; zero = any). Actors of the levels in play (the persistent level and
+ * the visible streaming levels), from the runtime's per-tick actor lists: no walk of the whole object list. */
+typedef struct MirageActorQuery {
+    uint32_t size;              /* sizeof(MirageActorQuery) */
+    const char* class_name;     /* "TdBotPawn", or by path "TdGame.TdBotPawn": that class and its subclasses */
+    const char* tag;            /* Actor.Tag */
+    const char* name;           /* The object's name ("TdBotPawn_3") */
+    MirageObject* near_object;  /* With radius > 0: around this actor's Location ... */
+    float x, y, z;              /* ... or around this point (when near_object is NULL) */
+    float radius;               /* > 0: only within this distance; the results then come nearest first */
+} MirageActorQuery;
 
 /* ---- Script patching (step 8) ---------------------------------------------------------------------------------------
  * A loaded UnrealScript function's bytecode, opened as a tree of tokens (script_open), edited (script_set, script_add,
@@ -786,6 +823,14 @@ typedef struct MirageApi {
      * again, fresh, at every checkpoint restart; removed with the mod). The actor named `name` there in the current
      * level, of the mod `mod_id` (NULL or "": the calling mod's own). NULL: none (not spawned, another level). Game thread. */
     MirageObject*(MIRAGE_CALL* layer_actor)(MirageMod* mod, const char* mod_id, const char* name);
+
+    /* ---- World access (step 14; see MirageHandle, MirageActorQuery, MIRAGE_EVENT_ACTOR_*). Game thread. */
+    /* The handle of a live object: 1, or 0 (no object, or it is gone). Set out->size first. */
+    int32_t(MIRAGE_CALL* object_handle)(MirageObject* object, MirageHandle* out);
+    /* The object a handle names, while it is still that object; NULL once it is gone (or another took its place) */
+    MirageObject*(MIRAGE_CALL* handle_object)(const MirageHandle* handle);
+    /* The actors in play that match, up to `capacity` of them into `out` (may be NULL to count); returns how many match */
+    int32_t(MIRAGE_CALL* actors_query)(const MirageActorQuery* query, MirageObject** out, int32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

@@ -72,7 +72,7 @@ namespace Mirage
                     WriteError($"Mirage.dll needs a runtime with {sizeof(MirageApi)} bytes of API, this one has {apiSize}", error, capacity);
                     return 0;
                 }
-                if (sizeof(MirageModuleDesc) != 56 || sizeof(MirageEvent) != 24 || sizeof(MirageValue) != 272) {
+                if (sizeof(MirageModuleDesc) != 56 || sizeof(MirageEvent) != 28 || sizeof(MirageValue) != 272) {
                     WriteError($"struct layouts differ from api.h (desc {sizeof(MirageModuleDesc)}, event {sizeof(MirageEvent)}, value {sizeof(MirageValue)})",
                                error, capacity);
                     return 0;
