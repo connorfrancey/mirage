@@ -1,5 +1,0 @@
-# Self-test (step 13): time-trial routes on a game map (the Prologue) and on a mod's map (map-test's MirageTestMap, a
-# copy of the Prologue: the same route fits both)
-id = "route-test"
-version = "1.0.0"
-mirage = "^0.1"

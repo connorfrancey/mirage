@@ -13,8 +13,6 @@
 
 namespace mirage::firstparty
 {
-	void MigrateKeyBindings(const std::filesystem::path& modsDir);
-	void MigrateFolder(const std::filesystem::path& modsDir, const char* folder, const char* mod);
 	void MigrateCollisionCache(const std::filesystem::path& modsDir);
 
 	namespace
@@ -69,50 +67,10 @@ namespace mirage::firstparty
 			++written;
 		}
 		if (written) spdlog::info("Mods: {} first-party mod file(s) written ({} mods)", written, mods.size());
-		MigrateKeyBindings(modsDir);
-		MigrateFolder(modsDir, "input_layouts", "memenu-input-overlay");
-		MigrateFolder(modsDir, "speedrun", "memenu-speedrun");
-		MigrateFolder(modsDir, "hud", "memenu-info-lines");
-		MigrateFolder(modsDir, "savestates", "memenu-savestate");
 		MigrateCollisionCache(modsDir);
 		return written;
 	}
 
-	// Keep Key Bindings was native and kept <menu folder>/keybindings.json; it is mods/memenu-misc now, keeping them in
-	// its config.toml ("bindings" = "Key=Command;..."). Once: the old file is moved into the mod's config.
-	void MigrateKeyBindings(const std::filesystem::path& modsDir)
-	{
-		const auto old = modsDir.parent_path() / "keybindings.json";
-		std::error_code ec;
-		if (!std::filesystem::exists(old, ec)) return;
-		const auto config = modsDir / "memenu-misc" / "config.toml";
-		toml::value table = toml::table{};
-		if (std::filesystem::exists(config, ec)) {
-			try {
-				table = toml::parse(config);
-			} catch (const std::exception&) {
-				return;		// Not touched: the mod reports its own config
-			}
-		}
-		if (table.is_table() && table.contains("bindings")) return;
-		std::ifstream in(old);
-		const auto j = nlohmann::json::parse(in, nullptr, false);
-		in.close();
-		if (!j.is_object() || !j.contains("bindings") || !j["bindings"].is_array()) return;
-		std::set<std::string> list;
-		for (const auto& b : j["bindings"])
-			if (b.is_object() && b.contains("key") && b.contains("command") && b["key"].is_string() && b["command"].is_string())
-				list.insert(b["key"].get<std::string>() + "=" + b["command"].get<std::string>());
-		std::string joined;
-		for (const std::string& b : list) joined += (joined.empty() ? "" : ";") + b;
-		table.as_table()["bindings"] = joined;
-		std::filesystem::create_directories(config.parent_path(), ec);
-		std::ofstream out(config, std::ios::binary | std::ios::trunc);
-		if (!(out << toml::format(table))) return;
-		out.close();
-		std::filesystem::rename(old, old.parent_path() / "keybindings.json.migrated", ec);
-		spdlog::info("Mods: {} kept key bindings moved into memenu-misc's config", list.size());
-	}
 
 	// The collision view's level caches (<menu folder>/cache/*.mevc and *.baked; the folder also holds the runtime's
 	// texture cache) are copied once into mods/memenu-collision/cache/, where the mod keeps them now
@@ -135,24 +93,4 @@ namespace mirage::firstparty
 		if (copied) spdlog::info("Mods: {} collision view level cache(s) copied into memenu-collision", copied);
 	}
 
-	// Features that became first-party mods kept files in <menu folder>/<folder>/ (Input Overlay's input_layouts, the
-	// Speedrun Timer's speedrun records); the mods keep them in their own folder. Once: the player's files are copied
-	// there (none replaced) and the old folder renamed .migrated
-	void MigrateFolder(const std::filesystem::path& modsDir, const char* folder, const char* mod)
-	{
-		namespace fs = std::filesystem;
-		const fs::path old = modsDir.parent_path() / folder;
-		std::error_code ec;
-		if (!fs::is_directory(old, ec)) return;
-		const fs::path target = modsDir / mod / folder;
-		fs::create_directories(target, ec);
-		int moved = 0;
-		for (const auto& e : fs::directory_iterator(old, ec)) {
-			if (!e.is_regular_file(ec) || fs::exists(target / e.path().filename(), ec)) continue;
-			fs::copy_file(e.path(), target / e.path().filename(), ec);
-			if (!ec) ++moved;
-		}
-		fs::rename(old, old.parent_path() / (std::string(folder) + ".migrated"), ec);
-		spdlog::info("Mods: {} file(s) of {} moved into {}", moved, folder, mod);
-	}
 }

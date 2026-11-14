@@ -6,20 +6,13 @@ add_executable(memenu_tests
         test_float_util.cpp
         test_cache_system.cpp
         test_mesh.cpp
-        test_replay.cpp
-        test_timeline.cpp
-        test_speedrun.cpp
         test_geometry.cpp
         test_static_scene.cpp
-        test_history.cpp
-        test_splits.cpp
-        test_input_layout.cpp
         test_settings.cpp
         test_keys.cpp
         test_cache.cpp
         test_cache2.cpp
         test_shell.cpp
-        test_hud_template.cpp
         test_semver.cpp
         test_manifest.cpp
         test_abi.cpp
@@ -46,12 +39,6 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/runtime/manifest.cpp
         ${CMAKE_SOURCE_DIR}/src/render/mesh.cpp
         ${CMAKE_SOURCE_DIR}/mods/memenu-collision/render/static_scene.cpp   # A native first-party mod's pure part
-        ${CMAKE_SOURCE_DIR}/src/tas/replay.cpp
-        ${CMAKE_SOURCE_DIR}/src/tas/timeline.cpp
-        ${CMAKE_SOURCE_DIR}/mods/memenu-speedrun/timer.cpp   # A native first-party mod's pure part
-        ${CMAKE_SOURCE_DIR}/src/tas/history.cpp
-        ${CMAKE_SOURCE_DIR}/src/tas/splits.cpp
-        ${CMAKE_SOURCE_DIR}/mods/memenu-input-overlay/input_layout.cpp   # A native first-party mod's pure part
         # The settings framework and what it needs (test_settings.cpp): no game, no window
         ${CMAKE_SOURCE_DIR}/src/core/setting.cpp
         ${CMAKE_SOURCE_DIR}/src/core/module.cpp
@@ -69,8 +56,7 @@ add_executable(memenu_tests
         ${CMAKE_SOURCE_DIR}/src/core/address_cache.cpp
         ${CMAKE_SOURCE_DIR}/src/core/string_cache.cpp
         ${CMAKE_SOURCE_DIR}/src/core/hardware.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/shell.cpp
-        ${CMAKE_SOURCE_DIR}/mods/memenu-info-lines/template.cpp)   # A native first-party mod's pure part
+        ${CMAKE_SOURCE_DIR}/src/core/shell.cpp)
 target_include_directories(memenu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/api ${CMAKE_SOURCE_DIR}/mods)
 target_compile_definitions(memenu_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MEMENU_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")

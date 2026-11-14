@@ -3,9 +3,8 @@
 
 #include "runtime/mod_internal.h"
 
-#if MEMENU_FEATURE_TAS
+#if MEMENU_FEATURE_INPUT
 #include "tas/input_monitor.h"
-#include "tas/tas.h"
 #endif
 
 #include <Windows.h>
@@ -68,7 +67,7 @@ namespace mirage::mods::io
 	{
 		if (!key || !out || out->size < sizeof(MirageKeyState)) return 0;
 		*out = MirageKeyState{sizeof(MirageKeyState), 0, 0, -1.0, -1.0};
-#if MEMENU_FEATURE_TAS
+#if MEMENU_FEATURE_INPUT
 		if (!tas::input::Installed()) return 0;
 		const auto snap = tas::input::Get(0.05);
 		if (const auto it = snap.keys.find(Lower(key)); it != snap.keys.end()) {
@@ -86,7 +85,7 @@ namespace mirage::mods::io
 	void MIRAGE_CALL InputMouse(float window, float* x, float* y)
 	{
 		float mx = 0.f, my = 0.f;
-#if MEMENU_FEATURE_TAS
+#if MEMENU_FEATURE_INPUT
 		if (tas::input::Installed()) {
 			const auto snap = tas::input::Get(window > 0.f ? window : 0.05);
 			mx = snap.mouseX;
@@ -101,7 +100,7 @@ namespace mirage::mods::io
 
 	int32_t MIRAGE_CALL InputKps()
 	{
-#if MEMENU_FEATURE_TAS
+#if MEMENU_FEATURE_INPUT
 		if (tas::input::Installed()) return tas::input::Get(0.05).kps;
 #endif
 		return 0;
@@ -109,7 +108,7 @@ namespace mirage::mods::io
 
 	double MIRAGE_CALL InputNow()
 	{
-#if MEMENU_FEATURE_TAS
+#if MEMENU_FEATURE_INPUT
 		if (tas::input::Installed()) return tas::input::Now();
 #endif
 		LARGE_INTEGER f, c;
@@ -120,22 +119,14 @@ namespace mirage::mods::io
 
 	void MIRAGE_CALL InputResetCounts()
 	{
-#if MEMENU_FEATURE_TAS
+#if MEMENU_FEATURE_INPUT
 		tas::input::ResetCounts();
 #endif
 	}
 
 	int32_t MIRAGE_CALL TasSession()
 	{
-#if MEMENU_FEATURE_TAS
-		switch (tas::GetStatus().mode) {
-			case tas::Mode::Recording: return 1;
-			case tas::Mode::Playing: return 2;
-			default: return 0;
-		}
-#else
-		return 0;
-#endif
+		return 0;		// No TAS in the loader (kept for ABI v1)
 	}
 
 	// ---- Files ----------------------------------------------------------------------------------------------------------

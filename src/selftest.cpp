@@ -53,20 +53,11 @@
 #include "runtime/packages.h"
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
-#include "features/misc/level_editor.h"
-#endif
-#if MEMENU_FEATURE_SCRIPT_EDITOR
-#include "features/misc/script_editor.h"
 #endif
 #include <shlobj.h>
-#if MEMENU_FEATURE_TAS
-#include "tas/input_monitor.h"
-#include "tas/macro.h"
+#if MEMENU_FEATURE_INPUT
 #include "tas/engine.h"
-#include "tas/memory_map.h"
-#include "tas/snapshot.h"
-#include "tas/timeline.h"
-#include "tas/tas.h"
+#include "tas/input_monitor.h"
 #endif
 
 #include "sdk/SDK.hpp"
@@ -80,7 +71,6 @@
 #include "util/float_util.h"
 #include "runtime/world_events.h"
 #include "runtime/changes.h"
-#include "features/editor/editor_core.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -276,19 +266,6 @@ bool WaitTicks(unsigned n, double timeout = 10.0)
     if (WaitFor(timeout, done) || g_aborted) return true;
     spdlog::error("Stall: {} frames and ticks did not come within {:.0f} s (frames {} -> {})", n, timeout, frames0,
                   hooks::EndSceneCalls());
-#if MEMENU_FEATURE_TAS
-    // Where the game's threads are (once per test run: enough to see a hang)
-    static bool dumped = false;
-    if (!dumped) {
-        dumped = true;
-        for (const auto& t : tas::memmap::Threads()) {
-            if (t.startModule != "mirrorsedge.exe" && t.startModule.rfind("physx", 0) != 0) continue;
-            std::string line;
-            for (const auto& w : tas::memmap::StackSample(t.id, 28)) line += w + " ";
-            spdlog::warn("Stall: thread {} ({}) state {} wait {}: {}", t.id, t.startModule, t.state, t.waitReason, line);
-        }
-    }
-#endif
     return false;
 }
 
@@ -831,7 +808,6 @@ void TestInputBlocking()
     End(s);
 }
 
-#if MEMENU_FEATURE_TAS
 // The player's own key for a binding command ("GBA_MoveForward"): keyboard keys only, no modifier combos. Game thread.
 std::string KeyFor(ATdPlayerController* pc, const std::string& command, const char* fallback)
 {
@@ -878,1079 +854,7 @@ private:
     bool was_ = false;
 };
 
-// A macro played through the TAS: the player's forward key held for a second with a jump half way, written with
-// tas::Macro instead of recorded. Proves the whole playback path in the game: the replay's key names resolve, the
-// inputs reach the player through the engine, every frame runs, and the keys are let go at the end.
-void TestTasMacro()
-{
-    Step& s = Begin("TAS macro");
-    Probe p(s);
-    if (!tas::Available()) {
-        p.Problem("the TAS engine hooks were not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
 
-    struct Pose { Classes::FVector at{}; int yaw = 0; bool ok = false; };
-    std::string forward, jump;
-    Pose start;
-    OnGameThread([&] {
-        auto* pc = game::Controller();
-        forward = KeyFor(pc, "GBA_MoveForward", "W");
-        jump = KeyFor(pc, "GBA_Jump", "SpaceBar");
-        if (auto* pawn = game::Pawn(); pawn && pc) {
-            start = {pawn->Location, static_cast<int>(pc->Rotation.Yaw), true};
-            player_state::Save();   // Put back afterwards: running on a rooftop can end badly
-        }
-    });
-    if (!start.ok) {
-        p.Problem("no player to drive");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-    s.notes.push_back("keys: forward " + forward + ", jump " + jump);
-    if (const std::string why = WaitPlayerReady(10.0); !why.empty()) {
-        p.Problem("the player can't be moved: " + why);
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-
-    tas::Macro m(60.f);
-    m.Describe("memenu self-test: run forward, jump").Wait(5).Press(forward).Wait(30).Hold(jump, 2).Wait(28)
-        .Release(forward).Wait(20);
-    const tas::Replay macro = m.Build();
-
-    tas::Replay saved;   // Whatever the user has loaded in the TAS editor
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = macro; });
-    OnRenderThread([] { gui::visible = false; });
-    tas::Play();
-
-    // Follow it: the highest point the player reaches. Playback paces itself at the replay's 60 fps.
-    float topZ = start.at.Z;
-    bool airborne = false, started = false, pausedOnce = false;
-    tas::Status st{};
-    const ULONGLONG deadline = GetTickCount64() + 30000;
-    while (GetTickCount64() < deadline && !g_aborted) {
-        st = tas::GetStatus();
-        if (st.mode == tas::Mode::Playing) started = true;
-        if (started && (st.mode != tas::Mode::Playing || st.frame >= st.frames)) break;   // Done (or paused at the end)
-        if (started && !pausedOnce && !st.armed && st.frame >= 20) {
-            // Paused, the game thread stands still and draws the menu itself, through every overlay's Present hook
-            // (a crash on 2026-11-02). Not OnGameThread meanwhile: the game doesn't tick while paused.
-            pausedOnce = true;
-            gui::visible = true;
-            const unsigned before = hooks::StalledFrames();
-            const ULONGLONG pausedAt = GetTickCount64();
-            tas::TogglePause();
-            // 20 menu frames drawn by the paused game thread (or 3 s without them: the problem below)
-            WaitFor(3.0, [before] { return hooks::StalledFrames() - before >= 20; });
-            if (!tas::GetStatus().paused) p.Problem("pausing the playback didn't pause it");
-            const unsigned drawn = hooks::StalledFrames() - before;
-            if (drawn == 0) p.Problem("the menu was not drawn while paused");
-            s.notes.push_back("paused " + std::to_string(GetTickCount64() - pausedAt) + " ms: " + std::to_string(drawn) +
-                              " menu frames drawn meanwhile");
-            tas::TogglePause();
-            gui::visible = false;
-            continue;
-        }
-        OnGameThread([&] {
-            if (auto* pawn = game::Pawn()) {
-                topZ = std::max(topZ, pawn->Location.Z);
-                airborne |= pawn->Physics == Classes::EPhysics::PHYS_Falling;
-            }
-        }, 0.5);
-    }
-    const std::size_t reached = st.frame, frames = macro.FrameCount();
-    tas::Stop();
-    if (!WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; })) p.Problem("the session did not stop");
-    WaitTicks(30);   // Let the player come to a stop
-
-    if (!started) p.Problem("playback never started: " + tas::GetStatus().message);
-    else if (reached < frames)
-        p.Problem("playback stopped at frame " + std::to_string(reached) + " of " + std::to_string(frames) + ": " +
-                  tas::GetStatus().message);
-
-    // Ran the way they were facing (Unreal yaw: 65536 = a full turn), left the ground, and stopped again
-    const std::string moved = Verify([&] {
-        return WithPlayer([&](ATdPlayerPawn* pawn, ATdPlayerController*) {
-            const double yaw = start.yaw * (6.283185307179586 / 65536.0);
-            const double dx = pawn->Location.X - start.at.X, dy = pawn->Location.Y - start.at.Y;
-            const double along = dx * std::cos(yaw) + dy * std::sin(yaw), dist = std::sqrt(dx * dx + dy * dy);
-            const double speed = std::sqrt(pawn->Velocity.X * pawn->Velocity.X + pawn->Velocity.Y * pawn->Velocity.Y);
-            char info[200];
-            std::snprintf(info, sizeof info, "moved %.0f units (%.0f forward), %.0f units up at most, speed after %.0f",
-                          dist, along, topZ - start.at.Z, speed);
-            std::string problems;
-            if (along < 150.0 || along < 0.7 * dist) problems += "did not run forward; ";
-            if (!airborne && topZ - start.at.Z < 30.f) problems += "never jumped; ";
-            if (speed > 100.0) problems += "still running after the macro released the key; ";
-            return problems.empty() ? std::string("ok: ") + info : problems + info;
-        });
-    });
-    if (moved.rfind("ok: ", 0) == 0) s.notes.push_back(moved.substr(4));
-    else p.Problem(moved);
-
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnGameThread([] { player_state::Load(); });
-    WaitTicks(5);
-    OnRenderThread([] { gui::visible = true; });
-    p.Check(1, true);
-    End(s);
-}
-
-// Camera keyframes: a macro with no input but two camera keys 90 degrees apart must turn the player by 90 degrees,
-// the TAS setting the look direction itself. The timeline window is open meanwhile (drawn in the game).
-void TestTasCamera()
-{
-    Step& s = Begin("TAS camera keys");
-    Probe p(s);
-    if (!tas::Available()) {
-        p.Problem("the TAS engine hooks were not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-
-    std::int32_t startYaw = 0;
-    bool ok = false;
-    OnGameThread([&] {
-        if (auto* pc = game::Controller(); pc && game::Pawn()) {
-            startYaw = static_cast<std::int32_t>(pc->Rotation.Yaw);
-            ok = true;
-            player_state::Save();
-        }
-    });
-    if (!ok) {
-        p.Problem("no player to turn");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-
-    constexpr double kUnits = 65536.0 / 360.0;
-    const float yaw0 = static_cast<float>(startYaw / kUnits);
-    tas::Macro m(60.f);
-    m.Describe("memenu self-test: turn 90 degrees with camera keys").Wait(40);
-    tas::Replay macro = m.Build();
-    tas::timeline::SetCameraKey(macro, {5, yaw0, 0.f, tas::Ease::Linear});
-    tas::timeline::SetCameraKey(macro, {30, yaw0 + 90.f, 0.f, tas::Ease::Smooth});
-
-    // The TAS module's timeline window, open while it plays
-    ctl::Checkbox* timeline = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& mod) {
-        for (ctl::Setting* c : mod.Settings())
-            if (c->Name() == "Timeline" && mod.Name() == "TAS / Macro") timeline = dynamic_cast<ctl::Checkbox*>(c);
-    });
-    const bool timelineWas = timeline && timeline->Get();
-
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = macro; });
-    OnRenderThread([timeline] {
-        gui::visible = true;
-        if (timeline) timeline->Set(true);
-    });
-    tas::Play();
-
-    bool started = false;
-    tas::Status st{};
-    const ULONGLONG deadline = GetTickCount64() + 20000;
-    while (GetTickCount64() < deadline && !g_aborted) {
-        st = tas::GetStatus();
-        if (st.mode == tas::Mode::Playing) started = true;
-        if (started && (st.mode != tas::Mode::Playing || st.frame >= st.frames)) break;
-        Sleep(20);
-    }
-    tas::Stop();
-    if (!WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; })) p.Problem("the session did not stop");
-
-    std::int32_t endYaw = startYaw;
-    OnGameThread([&] {
-        if (auto* pc = game::Controller()) endYaw = static_cast<std::int32_t>(pc->Rotation.Yaw);
-    });
-    const double turned = (endYaw - startYaw) / kUnits;
-    char info[96];
-    std::snprintf(info, sizeof info, "turned %.2f degrees (keys: %.2f -> %.2f)", turned, yaw0, yaw0 + 90.f);
-    if (!started) p.Problem("playback never started: " + tas::GetStatus().message);
-    else if (std::abs(turned - 90.0) > 0.5) p.Problem(std::string("the camera keys didn't turn the player: ") + info);
-    else s.notes.push_back(info);
-
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([timeline, timelineWas] {
-        if (timeline) timeline->Set(timelineWas);
-    });
-    OnGameThread([] { player_state::Load(); });
-    WaitTicks(5);
-    p.Check(1, true);
-    End(s);
-}
-
-// Go to + frame advance, the replay editor's way: from idle, go to frame 20 of a macro (it plays up to there and
-// pauses), step one frame, and stop. The Replay Editor window is open meanwhile (drawn in the game).
-void TestTasGoto()
-{
-    Step& s = Begin("TAS go to and step");
-    Probe p(s);
-    if (!tas::Available()) {
-        p.Problem("the TAS engine hooks were not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-
-    tas::Macro m(60.f);
-    m.Describe("memenu self-test: go to and step").Wait(60);
-    const tas::Replay macro = m.Build();
-
-    ctl::Checkbox* editor = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& mod) {
-        for (ctl::Setting* c : mod.Settings())
-            if (c->Name() == "Replay editor" && mod.Name() == "TAS / Macro") editor = dynamic_cast<ctl::Checkbox*>(c);
-    });
-    const bool editorWas = editor && editor->Get();
-
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = macro; });
-    OnRenderThread([editor] {
-        gui::visible = true;
-        if (editor) editor->Set(true);
-    });
-
-    // Not OnGameThread while paused: the game doesn't tick then
-    const auto pausedOn = [](std::size_t frame) {
-        const tas::Status st = tas::GetStatus();
-        return st.mode == tas::Mode::Playing && st.paused && st.frame == frame;
-    };
-    tas::Goto(20);
-    if (!WaitFor(10.0, [&] { return pausedOn(20); })) {
-        const tas::Status st = tas::GetStatus();
-        p.Problem("go to 20 didn't pause on frame 20 (frame " + std::to_string(st.frame) +
-                  (st.paused ? ", paused" : ", running") + "): " + st.message);
-    } else {
-        tas::Advance(1);
-        if (!WaitFor(5.0, [&] { return pausedOn(21); }))
-            p.Problem("stepping from 20 didn't stop on 21 (frame " + std::to_string(tas::GetStatus().frame) + ")");
-        else s.notes.push_back("went to frame 20, stepped to 21");
-    }
-    tas::Stop();
-    if (!WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; })) p.Problem("the session did not stop");
-
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([editor, editorWas] {
-        if (editor) editor->Set(editorWas);
-    });
-    WaitTicks(5);
-    p.Check(1, true);
-    End(s);
-}
-
-// Opt-in investigation: the engine's rendering thread switched off (ToggleRenderingThread), then the level loaded again.
-// If the load hangs, the game thread's stack is logged.
-void TestRenderingThreadOff()
-{
-    Step& s = Begin("Rendering thread off");
-    Probe p(s);
-    const auto exeThreads = [] {
-        int n = 0;
-        for (const auto& t : tas::memmap::Threads()) n += t.startModule == "mirrorsedge.exe" ? 1 : 0;
-        return n;
-    };
-    const int before = exeThreads();
-    OnGameThread([] { game::ConsoleCommand("ToggleRenderingThread"); });
-    WaitTicks(5);
-    const int after = exeThreads();
-    s.notes.push_back("exe threads " + std::to_string(before) + " -> " + std::to_string(after));
-
-    std::atomic<bool> done{false};
-    DWORD gameThread = 0;
-    OnGameThread([&] { gameThread = GetCurrentThreadId(); });
-    std::thread watchdog([&] {
-        for (int i = 0; i < 80 && !done; ++i) Sleep(100);
-        if (done) return;
-        for (int round = 0; round < 3; ++round) {
-            for (const auto& t : tas::memmap::Threads()) {
-                if (t.startModule != "mirrorsedge.exe" && t.id != gameThread) continue;
-                std::string line;
-                for (const auto& w : tas::memmap::StackSample(t.id, 28)) line += w + " ";
-                spdlog::warn("Rendering off: thread {}{} state {} wait {}: {}", t.id, t.id == gameThread ? " (game)" : "",
-                             t.state, t.waitReason, line);
-            }
-            Sleep(1000);
-        }
-    });
-    const int loads = g_loadsFinished.load();
-    const auto maps = levels::Maps();
-    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
-        if (Lower(maps[i].label).find(Lower(g_options.map)) != std::string::npos) {
-            OnGameThread([&] { levels::Load(i, g_options.checkpoint, levels::Method::Game, false); });
-            break;
-        }
-    const bool loaded = WaitFor(25.0, [&] { return g_loadsFinished.load() > loads && !game::IsLoading(); });
-    done = true;
-    watchdog.join();
-    if (!loaded) p.Problem("the level didn't load with the rendering thread off");
-    else {
-        const std::string why = WaitPlayerReady(20.0);
-        if (!why.empty()) p.Problem("after loading: " + why);
-        else s.notes.push_back("loaded with the rendering thread off");
-    }
-    p.Check(1, false);
-    End(s);
-}
-
-// Memory snapshots (tas/snapshot.h), on a macro from a level start that runs, jumps and turns:
-//   1. a playback keeps keyframes (the loader tracks the game's memory)
-//   2. Go to an earlier frame puts the game back without loading the level: the player is exactly (bit for bit) where
-//      the recording had them on that frame
-//   3. playing on from there to the end gets exactly the same end state; keyframes reached again are compared
-//   4. Frame back, ten times: each one exact, and how long one takes
-//   5. Restart goes back to frame 0 without a level load
-// Then the session stops and the game must still be playable.
-void TestTasSnapshots()
-{
-    Step& s = Begin("TAS snapshots");
-    Probe p(s);
-    const auto fail = [&](const std::string& why) {
-        p.Problem(why);
-        p.Check(1, false);
-        End(s);
-    };
-    if (!tas::Available()) return fail("the TAS engine hooks were not found");
-
-    const auto maps = levels::Maps();
-    int index = -1;
-    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
-        if (Lower(maps[i].label).find(Lower(g_options.map)) != std::string::npos) { index = i; break; }
-    if (index < 0) return fail("no level matching '" + g_options.map + "'");
-    const int cp = std::min(g_options.checkpoint, static_cast<int>(maps[index].checkpoints.size()));
-
-    Module* tasModule = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "TAS / Macro") tasModule = &m; });
-    auto* atEnd = tasModule ? dynamic_cast<ctl::Combo*>(tasModule->FindSetting("At the end")) : nullptr;
-    auto* instant = tasModule ? dynamic_cast<ctl::Checkbox*>(tasModule->FindSetting("Instant rewind")) : nullptr;
-    if (!atEnd || !instant) return fail("the TAS module's At the end / Instant rewind controls were not found");
-    const int atEndWas = atEnd->Get();
-    const bool instantWas = instant->Get();
-
-    std::string forward, jump;
-    OnGameThread([&] {
-        auto* pc = game::Controller();
-        forward = KeyFor(pc, "GBA_MoveForward", "W");
-        jump = KeyFor(pc, "GBA_Jump", "SpaceBar");
-    });
-    tas::Macro m(60.f);
-    m.Describe("memenu self-test: snapshots").Wait(5).Press(forward).Wait(30);
-    for (int i = 0; i < 20; ++i) m.Axis("MouseX", 6.f).Wait(1);     // turning while running
-    m.Hold(jump, 3).Wait(50).Release(forward).Wait(40);
-    tas::Replay macro = m.Build();
-    macro.start = tas::StartKind::Checkpoint;
-    macro.map = maps[index].label;
-    macro.checkpoint = cp > 0 ? maps[index].checkpoints[static_cast<std::size_t>(cp - 1)] : std::string();
-    macro.syncValidUntil = 0;                       // this playback records the reference states
-    const std::size_t frames = macro.FrameCount();
-
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = macro; });
-    OnRenderThread([&] {
-        gui::visible = false;
-        atEnd->Set(static_cast<int>(tas::AtEnd::Pause));
-        instant->Set(true);
-    });
-    WaitTicks(3);
-
-    const auto pausedOn = [](std::size_t frame) {
-        const tas::Status st = tas::GetStatus();
-        return st.mode == tas::Mode::Playing && st.paused && !st.seeking && st.frame == frame;
-    };
-    const auto describe = [](const tas::Sync& a) {
-        char text[160];
-        std::snprintf(text, sizeof text, "(%.3f, %.3f, %.3f) v (%.3f, %.3f, %.3f) move %u", a.x, a.y, a.z, a.vx, a.vy,
-                      a.vz, a.state);
-        return std::string(text);
-    };
-    const auto reference = [&](std::size_t frame) {
-        tas::Sync want;
-        tas::WithReplay([&](tas::Replay& r) { if (frame < r.sync.size()) want = r.sync[frame]; });
-        return want;
-    };
-    // Goes to `frame` and checks the player against the recording; the milliseconds it took (-1: it didn't get there)
-    const auto goTo = [&](std::size_t frame, bool back) -> double {
-        const ULONGLONG t0 = GetTickCount64();
-        if (back) tas::FrameBack(1);
-        else tas::Goto(frame);
-        if (!WaitFor(20.0, [&] { return pausedOn(frame); })) {
-            const tas::Status st = tas::GetStatus();
-            p.Problem("going to frame " + std::to_string(frame) + " stopped on " + std::to_string(st.frame) +
-                      (st.paused ? " (paused)" : " (running)") + ": " + st.message);
-            return -1.0;
-        }
-        const double ms = static_cast<double>(GetTickCount64() - t0);
-        const tas::Sync now = tas::GetStatus().player;
-        const tas::Sync want = frame < frames ? reference(frame) : now;
-        if (frame < frames && !(now == want))
-            p.Problem("frame " + std::to_string(frame) + ": the player is at " + describe(now) + ", recorded " +
-                      describe(want));
-        return ms;
-    };
-
-    // 1. The reference run, keyframes kept
-    const int loadsBefore = g_loadsFinished.load();
-    tas::Play();
-    bool started = false;
-    WaitFor(90.0, [&] {
-        const tas::Status st = tas::GetStatus();
-        started |= st.mode != tas::Mode::Idle;
-        return pausedOn(frames) || (started && st.mode == tas::Mode::Idle);
-    });
-    tas::Status end = tas::GetStatus();
-    if (!pausedOn(frames)) {
-        tas::Stop();
-        tas::WithReplay([&](tas::Replay& r) { r = saved; });
-        OnRenderThread([&] { atEnd->Set(atEndWas); instant->Set(instantWas); gui::visible = true; });
-        return fail("the playback didn't pause at its end (frame " + std::to_string(end.frame) + " of " +
-                    std::to_string(frames) + "): " + end.message);
-    }
-    if (!end.snapshots) {
-        tas::Stop();
-        tas::WithReplay([&](tas::Replay& r) { r = saved; });
-        OnRenderThread([&] { atEnd->Set(atEndWas); instant->Set(instantWas); gui::visible = true; });
-        return fail("no snapshots: " + end.snapshotsOff);
-    }
-    const tas::Sync endPlayer = end.player;
-    char line[200];
-    std::snprintf(line, sizeof line, "%zu frames, %zu keyframes, %.1f MB stored; base %.0f ms, last keyframe %.1f ms",
-                  frames, end.keyframes, static_cast<double>(end.snapshotBytes) / 1048576.0, end.snapshotBeginMs,
-                  end.captureMs);
-    s.notes.push_back(line);
-    const int loadsAfterPlay = g_loadsFinished.load();
-    // 2. Back to an earlier frame
-    const double backMs = goTo(37, false);
-    if (backMs >= 0) {
-        std::snprintf(line, sizeof line, "went back to frame 37 in %.0f ms (restore %.1f ms), exactly as recorded", backMs,
-                      tas::GetStatus().restoreMs);
-        s.notes.push_back(line);
-    }
-
-    // 3. On to the end again: the same end state
-    const double fwdMs = goTo(frames, false);
-    if (fwdMs >= 0) {
-        const tas::Status st = tas::GetStatus();
-        if (!(st.player == endPlayer))
-            p.Problem("playing on from 37 ended at " + describe(st.player) + ", the first time " + describe(endPlayer));
-        std::snprintf(line, sizeof line, "played on to the end in %.0f ms: %s; %zu keyframes reached again differed "
-                      "(%zu pages, put back)", fwdMs, st.player == endPlayer ? "same end state" : "DIFFERENT end state",
-                      st.snapped, st.snappedPages);
-        s.notes.push_back(line);
-    }
-
-    // 4. Frame back, ten times
-    double total = 0.0, worst = 0.0;
-    int steps = 0;
-    for (std::size_t f = frames; f > frames - 10 && !g_aborted; --f) {
-        const double ms = goTo(f - 1, true);
-        if (ms < 0) break;
-        total += ms;
-        worst = std::max(worst, ms);
-        ++steps;
-    }
-    if (steps) {
-        std::snprintf(line, sizeof line, "frame back x%d: %.0f ms each on average, %.0f ms at most", steps,
-                      total / steps, worst);
-        s.notes.push_back(line);
-    }
-
-    // 4b. Early keyframes, the frames right after the level loaded, before frame 0 itself
-    for (std::size_t f : {std::size_t{12}, std::size_t{6}}) {
-        const double ms = goTo(f, false);
-        if (ms >= 0) s.notes.push_back("went back to frame " + std::to_string(f));
-        else break;
-    }
-
-    // 5. Restart: frame 0 without loading the level
-    tas::Restart();
-    if (!WaitFor(10.0, [] { const auto st = tas::GetStatus(); return st.mode == tas::Mode::Playing && st.frame <= 3 && !st.armed; }))
-        p.Problem("Restart didn't go back to frame 0 (frame " + std::to_string(tas::GetStatus().frame) + ")");
-    else if (g_loadsFinished.load() != loadsAfterPlay)
-        p.Problem("Restart loaded the level instead of putting frame 0 back");
-    else
-        s.notes.push_back("restart: back at frame 0 without loading the level");
-    (void)loadsBefore;
-
-    // 6. A small memory budget: older keyframes are thinned out, and going back there is still exact (from an earlier
-    // keyframe, running the frames between)
-    auto* budget = dynamic_cast<ctl::Slider*>(tasModule->FindSetting("Memory"));
-    if (budget) {
-        const float budgetWas = budget->Get();
-        OnRenderThread([&] { budget->Set(256.f); });
-        WaitFor(90.0, [&] { return pausedOn(frames); });
-        const tas::Status thin = tas::GetStatus();
-        std::snprintf(line, sizeof line, "with 256 MB: %zu keyframes, %.1f MB", thin.keyframes,
-                      static_cast<double>(thin.snapshotBytes) / 1048576.0);
-        s.notes.push_back(line);
-        if (thin.snapshotBytes > end.snapshotBytes) p.Problem("the budget didn't thin any keyframe out");
-        for (std::size_t f : {std::size_t{10}, std::size_t{20}, std::size_t{100}})
-            if (goTo(f, false) < 0) break;
-        s.notes.push_back("went back to frames 10, 20 and 100 after thinning");
-        OnRenderThread([&] { budget->Set(budgetWas); });
-    } else {
-        p.Problem("the TAS module's Memory control was not found");
-    }
-
-    tas::Stop();
-    if (!WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; })) p.Problem("the session did not stop");
-    if (tas::GetStatus().snapshots) p.Problem("the snapshots weren't let go of when the session stopped");
-
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([&] {
-        atEnd->Set(atEndWas);
-        instant->Set(instantWas);
-        gui::visible = true;
-    });
-    if (const std::string why = WaitPlayerReady(); !why.empty()) p.Problem("after the session: " + why);
-    WaitTicks(10);
-    p.Check(1, true);
-    End(s);
-}
-
-// The TAS's workflow helpers, with a "now" macro recorded on the spot:
-//   1. a recording is autosaved when it stops, and counts as not saved until it is
-//   2. bookmarks survive a save and a load (and count as changes)
-//   3. "At the end: Loop" plays it again from the start
-//   4. while a session runs, its keys don't reach module hotkeys (No Clip and TAS pause both on F5 by default)
-// The user's macro, settings and files are put back.
-void TestTasWorkflow()
-{
-    Step& s = Begin("TAS workflow");
-    Probe p(s);
-    const auto fail = [&](const std::string& why) {
-        p.Problem(why);
-        p.Check(1, false);
-        End(s);
-    };
-    if (!tas::Available()) return fail("the TAS engine hooks were not found");
-    Module* tasModule = nullptr;
-    Module* noClip = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) {
-        if (m.Name() == "TAS / Macro") tasModule = &m;
-        if (m.Name() == "No Clip") noClip = &m;
-    });
-    auto* atEnd = tasModule ? dynamic_cast<ctl::Combo*>(tasModule->FindSetting("At the end")) : nullptr;
-    auto* pauseKey = tasModule ? dynamic_cast<ctl::KeyHold*>(tasModule->FindSetting("Pause / resume")) : nullptr;
-    if (!atEnd || !pauseKey) return fail("the TAS module's At the end / Pause key controls were not found");
-    const int atEndWas = atEnd->Get();
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; });
-
-    namespace fs = std::filesystem;
-    const auto newestAutosave = [] {
-        fs::path newest;
-        fs::file_time_type at{};
-        std::error_code ec;
-        for (const auto& e : fs::directory_iterator(tas::AutosaveFolder(), ec))
-            if (e.is_regular_file(ec) && e.last_write_time(ec) > at) { at = e.last_write_time(ec); newest = e.path(); }
-        return newest;
-    };
-    const fs::path autosaveBefore = newestAutosave();
-    const auto idle = [] { return tas::GetStatus().mode == tas::Mode::Idle; };
-
-    // 1. Record a second, stop
-    OnRenderThread([] { gui::visible = false; });
-    tas::Record(tas::StartKind::Now, "", "", "");
-    if (!WaitFor(10.0, [] { const auto st = tas::GetStatus(); return st.mode == tas::Mode::Recording && st.frame >= 60; }))
-        p.Problem("the recording didn't get going");
-    tas::Stop();
-    WaitFor(5.0, idle);
-    const fs::path autosave = newestAutosave();
-    if (autosave.empty() || autosave == autosaveBefore) p.Problem("the recording was not autosaved");
-    else s.notes.push_back("autosaved as " + autosave.filename().string());
-    if (!tas::Unsaved()) p.Problem("a new recording doesn't count as not saved");
-
-    // 2. Bookmarks through a save and a load
-    const fs::path file = tas::Folder() / "memenu self-test.merp";
-    tas::WithReplay([](tas::Replay& r) { r.SetMarker(10, "self-test mark"); });
-    std::string error;
-    if (!tas::SaveFile(file, &error)) p.Problem("saving failed: " + error);
-    else if (tas::Unsaved()) p.Problem("still not saved after saving");
-    tas::WithReplay([](tas::Replay& r) { r.EraseMarker(10); });
-    if (!tas::Unsaved()) p.Problem("deleting a bookmark doesn't count as a change");
-    if (!tas::LoadFile(file, &error)) p.Problem("loading failed: " + error);
-    bool marked = false;
-    WaitFor(5.0, [&] {
-        tas::WithReplay([&](tas::Replay& r) { const auto* m = r.MarkerAt(10); marked = m && m->name == "self-test mark"; });
-        return marked;
-    });
-    if (!marked) p.Problem("the bookmark was not in the saved file");
-    else if (tas::Unsaved()) p.Problem("a macro just loaded counts as not saved");
-    std::error_code ec;
-    fs::remove(file, ec);
-
-    // (Undo is the TAS mod's own, in its UI: tests/test_history.cpp covers it)
-
-    // 3. Loop, and 4. the session's keys while it plays. The timeline and the replay editor are open meanwhile (drawn
-    // with a macro running: they must not trip over it).
-    auto* timelineBox = dynamic_cast<ctl::Checkbox*>(tasModule->FindSetting("Timeline"));
-    auto* editorBox = dynamic_cast<ctl::Checkbox*>(tasModule->FindSetting("Replay editor"));
-    const bool timelineWas = timelineBox && timelineBox->Get(), editorWas = editorBox && editorBox->Get();
-    OnRenderThread([&] {
-        atEnd->Set(static_cast<int>(tas::AtEnd::Loop));
-        gui::visible = true;
-        if (timelineBox) timelineBox->Set(true);
-        if (editorBox) editorBox->Set(true);
-    });
-    WaitTicks(2);
-    tas::Play();
-    bool nearEnd = false, looped = false;
-    const ULONGLONG deadline = GetTickCount64() + 15000;
-    while (GetTickCount64() < deadline && !g_aborted && !looped) {
-        const auto st = tas::GetStatus();
-        if (st.mode == tas::Mode::Playing && !st.armed && st.frames > 0) {
-            if (st.frame + 5 >= st.frames) nearEnd = true;
-            else if (nearEnd && st.frame < 20) looped = true;
-        }
-        Sleep(5);
-    }
-    if (!looped) p.Problem(std::string("Loop didn't play it again (") + (nearEnd ? "reached the end" : "never reached the end") + ")");
-    else s.notes.push_back("looped back to the start");
-
-    if (noClip && tas::GetStatus().mode == tas::Mode::Playing) {
-        const int vk = pauseKey->Get(), keyWas = noClip->key;
-        const bool onWas = noClip->Enabled();
-        bool switched = false;
-        OnRenderThread([&] {
-            noClip->key = vk;               // The same key as the TAS's pause, like the defaults
-            modules::OnKey(vk);
-            switched = noClip->Enabled() != onWas;
-            if (switched) noClip->SetEnabled(onWas);
-            noClip->key = keyWas;
-        });
-        if (switched) p.Problem("the TAS's pause key also switched No Clip during a session");
-        else s.notes.push_back("the pause key didn't reach No Clip during the session");
-    }
-    tas::Stop();
-    WaitFor(5.0, idle);
-
-    // Back as it was
-    if (!autosave.empty() && autosave != autosaveBefore) fs::remove(autosave, ec);
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([&] {
-        atEnd->Set(atEndWas);
-        if (timelineBox) timelineBox->Set(timelineWas);
-        if (editorBox) editorBox->Set(editorWas);
-        gui::visible = true;
-    });
-    WaitTicks(3);
-    p.Check(1, true);
-    End(s);
-}
-
-// Input Overlay is a native first-party mod (mods/memenu-input-overlay); the monitor it reads is the runtime's
-// The input overlay during a TAS playback: a macro holds the forward key for half a second; the input the engine gets
-// (what the overlay draws) must show it held while it plays and let go after. The overlay writes its layouts on first use.
-void TestInputOverlay()
-{
-    Step& s = Begin("Input overlay");
-    Probe p(s);
-    const auto fail = [&](const std::string& why) {
-        p.Problem(why);
-        p.Check(1, false);
-        End(s);
-    };
-    if (!tas::input::Installed()) return fail("the engine's input monitor isn't installed");
-    Module* overlay = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "Input Overlay") overlay = &m; });
-    if (!overlay) return fail("the Input Overlay module was not found");
-    const bool enabledWas = overlay->Enabled();
-    OnRenderThread([&] { overlay->SetEnabled(true); });
-
-    std::string forward;
-    OnGameThread([&] { forward = KeyFor(game::Controller(), "GBA_MoveForward", "W"); });
-    std::string key = forward;
-    std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-
-    tas::Macro m(60.f);
-    m.Describe("memenu self-test: input overlay").Wait(5).Press(forward).Wait(30).Release(forward).Wait(15);
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = m.Build(); });
-    OnRenderThread([] { gui::visible = false; });
-    const auto pressesOf = [&key](const tas::input::Snapshot& sn) {
-        const auto it = sn.keys.find(key);
-        return it == sn.keys.end() ? 0u : it->second.presses;
-    };
-    const unsigned pressesBefore = pressesOf(tas::input::Get());
-    tas::Play();
-
-    bool started = false, sawHeld = false;
-    const ULONGLONG deadline = GetTickCount64() + 15000;
-    while (GetTickCount64() < deadline && !g_aborted) {
-        const auto st = tas::GetStatus();
-        if (st.mode == tas::Mode::Playing) started = true;
-        if (started && (st.mode != tas::Mode::Playing || st.frame + 1 >= st.frames)) break;
-        const auto snap = tas::input::Get();
-        if (const auto it = snap.keys.find(key); it != snap.keys.end() && it->second.held) sawHeld = true;
-        Sleep(2);
-    }
-    tas::Stop();
-    WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
-    WaitTicks(5);
-    const auto after = tas::input::Get();
-    const auto it = after.keys.find(key);
-    const unsigned pressed = pressesOf(after) - pressesBefore;
-    if (!started) p.Problem("the macro didn't play");
-    else if (pressed != 1) p.Problem("the overlay counted " + std::to_string(pressed) + " presses of " + forward + ", not 1");
-    else if (it != after.keys.end() && it->second.held) p.Problem(forward + " still shows as held after the playback");
-    else s.notes.push_back(forward + " pressed once during the playback" + (sawHeld ? " (seen held)" : "") +
-                           ", let go after");
-
-    std::error_code ec;
-    // Input Overlay is a native first-party mod: its layouts are in its own folder
-    if (!std::filesystem::exists(paths::Dir() / "mods" / "memenu-input-overlay" / "input_layouts" / "Movement.json", ec))
-        p.Problem("the layout files were not written (mods\\memenu-input-overlay\\input_layouts\\Movement.json)");
-
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([&] {
-        overlay->SetEnabled(enabledWas);
-        gui::visible = true;
-    });
-    WaitTicks(3);
-    p.Check(1, true);
-    End(s);
-}
-
-// Desync prevention and fixing, with a macro that starts at the self-test's checkpoint (only those are checked):
-//   1. the first playback records the reference player states, with the macro's recorded mouse sensitivity set for it
-//      (and the player's own back afterwards)
-//   2. the recorded positions are moved 10 units from frame 30 on: with "On desync: Pause" it stops on frame 30 and
-//      says the position is off by 10
-//   3. with "Correct small drift" it plays to the end, putting the player back on the recording
-void TestTasDesync()
-{
-    Step& s = Begin("TAS desync fixing");
-    Probe p(s);
-    const auto fail = [&](const std::string& why) {
-        p.Problem(why);
-        p.Check(1, false);
-        End(s);
-    };
-    if (!tas::Available()) return fail("the TAS engine hooks were not found");
-
-    const auto maps = levels::Maps();
-    int index = -1;
-    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
-        if (Lower(maps[i].label).find(Lower(g_options.map)) != std::string::npos) { index = i; break; }
-    if (index < 0) return fail("no level matching '" + g_options.map + "'");
-    const int cp = std::min(g_options.checkpoint, static_cast<int>(maps[index].checkpoints.size()));
-
-    Module* tasModule = nullptr;
-    modules::ForEach([&](modules::Tab&, Module& m) { if (m.Name() == "TAS / Macro") tasModule = &m; });
-    auto* onDesync = tasModule ? dynamic_cast<ctl::Combo*>(tasModule->FindSetting("On desync")) : nullptr;
-    auto* match = tasModule ? dynamic_cast<ctl::Checkbox*>(tasModule->FindSetting("Match the recording")) : nullptr;
-    if (!onDesync || !match) return fail("the TAS module's On desync / Match the recording controls were not found");
-    const int onDesyncWas = onDesync->Get();
-    const bool matchWas = match->Get();
-
-    std::string forward;
-    float sens = 0.f;
-    OnGameThread([&] {
-        auto* pc = game::Controller();
-        forward = KeyFor(pc, "GBA_MoveForward", "W");
-        if (pc && pc->PlayerInput) sens = pc->PlayerInput->MouseSensitivity;
-    });
-    const float recordedSens = sens + 1.f;
-
-    tas::Macro m(60.f);
-    m.Describe("memenu self-test: desync fixing").Wait(5).Press(forward).Wait(60).Release(forward).Wait(10);
-    tas::Replay macro = m.Build();
-    macro.start = tas::StartKind::Checkpoint;
-    macro.map = maps[index].label;
-    macro.checkpoint = cp > 0 ? maps[index].checkpoints[static_cast<std::size_t>(cp - 1)] : std::string();
-    macro.syncValidUntil = 0;                       // the first playback records the reference
-    char text[32];
-    std::snprintf(text, sizeof text, "%.4f", recordedSens);
-    macro.extensions["env.sensitivity"] = text;
-    macro.extensions["env.invertMouse"] = "0";
-    macro.extensions["env.blockStreaming"] = "1";
-
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = macro; });
-    OnRenderThread([&] {
-        gui::visible = false;
-        onDesync->Set(static_cast<int>(tas::OnDesync::Pause));
-        match->Set(true);
-    });
-    WaitTicks(3);
-
-    // Plays it (loading the checkpoint), until it ends or pauses; the status then
-    float sensDuring = 0.f;
-    const auto play = [&]() {
-        tas::Play();
-        bool started = false, sampled = false;
-        tas::Status st{};
-        const ULONGLONG deadline = GetTickCount64() + 90000;
-        while (GetTickCount64() < deadline && !g_aborted) {
-            st = tas::GetStatus();
-            if (st.mode == tas::Mode::Playing && !st.armed) started = true;
-            if (started && !sampled && st.frame > 10 && !st.paused) {
-                OnGameThread([&] {
-                    if (auto* pc = game::Controller(); pc && pc->PlayerInput) sensDuring = pc->PlayerInput->MouseSensitivity;
-                }, 1.0);
-                sampled = true;
-            }
-            if (started && (st.mode != tas::Mode::Playing || st.paused || st.frame >= st.frames)) break;
-            Sleep(20);
-        }
-        tas::Stop();
-        WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
-        return std::make_pair(started, st);
-    };
-
-    // 1. The reference
-    const auto [ran, first] = play();
-    std::size_t recorded = 0;
-    tas::WithReplay([&](tas::Replay& r) { recorded = r.syncValidUntil; });
-    float sensAfter = 0.f;
-    OnGameThread([&] {
-        if (auto* pc = game::Controller(); pc && pc->PlayerInput) sensAfter = pc->PlayerInput->MouseSensitivity;
-    });
-    if (!ran) p.Problem("the first playback never started: " + tas::GetStatus().message);
-    else if (first.desyncFrame >= 0) p.Problem("the first playback desynced, with nothing to compare against yet");
-    else if (recorded < macro.FrameCount()) p.Problem("the first playback recorded " + std::to_string(recorded) + " of " +
-                                                      std::to_string(macro.FrameCount()) + " reference states");
-    if (std::abs(sensDuring - recordedSens) > 1e-3f)
-        p.Problem("playback didn't use the recorded mouse sensitivity (" + std::to_string(sensDuring) + ", recorded " +
-                  std::to_string(recordedSens) + ")");
-    if (std::abs(sensAfter - sens) > 1e-3f)
-        p.Problem("the player's own mouse sensitivity wasn't restored (" + std::to_string(sensAfter) + ", was " +
-                  std::to_string(sens) + ")");
-
-    // 2. Off by 10 from frame 30: Pause stops there and says so
-    tas::WithReplay([&](tas::Replay& r) {
-        for (std::size_t f = 30; f < r.sync.size(); ++f) r.sync[f].x += 10.f;
-    });
-    const auto [ran2, paused] = play();
-    if (!ran2) p.Problem("the second playback never started");
-    else if (paused.desyncFrame != 30)
-        p.Problem("with the recording moved on frame 30, the desync was found on " + std::to_string(paused.desyncFrame));
-    else if (paused.desyncInfo.find("position off by 10") == std::string::npos)
-        p.Problem("the desync was described as '" + paused.desyncInfo + "'");
-    else s.notes.push_back("paused at frame 30: " + paused.desyncInfo);
-
-    // 3. Correct puts the player back and plays to the end
-    OnRenderThread([&] { onDesync->Set(static_cast<int>(tas::OnDesync::Correct)); });
-    WaitTicks(3);
-    const auto [ran3, corrected] = play();
-    if (!ran3) p.Problem("the third playback never started");
-    else if (corrected.desyncFrame >= 0)
-        p.Problem("Correct didn't fix the desync on frame " + std::to_string(corrected.desyncFrame) + ": " +
-                  corrected.desyncInfo);
-    else if (corrected.corrections == 0) p.Problem("Correct made no corrections");
-    else if (corrected.frame < macro.FrameCount()) p.Problem("Correct stopped on frame " + std::to_string(corrected.frame));
-    else s.notes.push_back("corrected " + std::to_string(corrected.corrections) + " frames, played to the end");
-
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([&] {
-        onDesync->Set(onDesyncWas);
-        match->Set(matchWas);
-        gui::visible = true;
-    });
-    WaitTicks(5);
-    p.Check(1, true);
-    End(s);
-}
-#endif
-
-#if MEMENU_FEATURE_TAS
-// Not a check: measures what memory snapshots of the game would hold (opt-in: --only "TAS memory survey"). How much of
-// the process is the game's, how much of it changes in one frame and in a second, which threads there are and what
-// switching the rendering thread off does. Everything goes to the notes and the log.
-void TestTasMemorySurvey()
-{
-    using namespace tas::memmap;
-    Step& s = Begin("TAS memory survey");
-    Probe p(s);
-    const auto note = [&](std::string text) {
-        spdlog::info("Survey: {}", text);
-        s.notes.push_back(std::move(text));
-    };
-    const auto mb = [](std::uint64_t bytes) { return std::to_string(bytes / (1024 * 1024)) + " MB"; };
-    if (!Tracking()) note("the allocation tracker is not running: virtual memory can't be attributed");
-
-    // Threads
-    const auto threadLines = [&](const char* when) {
-        std::map<std::string, int> byModule;
-        for (const auto& t : Threads()) {
-            ++byModule[t.startModule];
-            spdlog::info("Survey: thread {} start {}+{:#x} state {} wait {} stack {:#x}-{:#x} cycles {}", t.id,
-                         t.startModule, t.start, t.state, t.waitReason, t.stackLow, t.stackHigh, t.cycles);
-        }
-        std::string line = std::string("threads ") + when + ":";
-        for (const auto& [m, n] : byModule) line += " " + m + " x" + std::to_string(n);
-        note(line);
-    };
-    threadLines("now");
-
-    // The game's own threads: how busy each is over a second, and where it is (a few stack samples)
-    {
-        std::map<std::uint32_t, std::uint64_t> cycles0;
-        for (const auto& t : Threads()) cycles0[t.id] = t.cycles;
-        Wait(1.0);
-        for (const auto& t : Threads()) {
-            if (t.startModule != "mirrorsedge.exe" && t.startModule.rfind("physx", 0) != 0) continue;
-            const double mcycles = static_cast<double>(t.cycles - cycles0[t.id]) / 1e6;
-            note("thread " + std::to_string(t.id) + " (" + t.startModule + ") " + std::to_string(static_cast<int>(mcycles)) +
-                 " Mcycles/s, state " + std::to_string(t.state) + " wait " + std::to_string(t.waitReason));
-            if (tas::engine::IsGameThread()) continue;
-            for (int sample = 0; sample < 3; ++sample) {
-                std::string line = "  ";
-                for (const auto& w : StackSample(t.id, 10)) line += w + " ";
-                spdlog::info("Survey: thread {} sample {}: {}", t.id, sample, line);
-                if (sample == 0) s.notes.push_back(line);
-                Wait(0.05);
-            }
-        }
-    }
-    // Every heap: its size, and every module whose data holds its handle (who uses it)
-    {
-        const auto modules = Modules();
-        for (const auto& h : Heaps()) {
-            std::uint64_t bytes = 0, blocks = 0;
-            if (HeapLock(h.handle)) {
-                PROCESS_HEAP_ENTRY e{};
-                while (HeapWalk(h.handle, &e))
-                    if (e.wFlags & PROCESS_HEAP_ENTRY_BUSY) { bytes += e.cbData; ++blocks; }
-                HeapUnlock(h.handle);
-            }
-            std::string refs;
-            const auto value = reinterpret_cast<std::uintptr_t>(h.handle);
-            for (const auto& m : modules) {
-                for (std::uintptr_t q = m.base; q < m.base + m.size;) {
-                    MEMORY_BASIC_INFORMATION mbi{};
-                    if (!VirtualQuery(reinterpret_cast<void*>(q), &mbi, sizeof mbi)) break;
-                    const auto lo = reinterpret_cast<std::uintptr_t>(mbi.BaseAddress);
-                    const auto hi = std::min<std::uintptr_t>(lo + mbi.RegionSize, m.base + m.size);
-                    bool found = false;
-                    if (mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_READWRITE | PAGE_WRITECOPY)) && !(mbi.Protect & PAGE_GUARD))
-                        for (auto a = lo; a + 4 <= hi && !found; a += 4)
-                            found = *reinterpret_cast<const std::uintptr_t*>(a) == value;
-                    if (found) { refs += " " + m.name; break; }
-                    q = hi;
-                }
-            }
-            char text[256];
-            std::snprintf(text, sizeof text, "heap %p %s%s: %llu KB in %llu blocks; referenced by:%s", h.handle,
-                          h.what.c_str(), h.game ? " (game)" : "", static_cast<unsigned long long>(bytes / 1024),
-                          static_cast<unsigned long long>(blocks), refs.empty() ? " nobody" : refs.c_str());
-            note(text);
-        }
-    }
-
-    // Regions by owner, and the biggest kinds
-    std::vector<Region> regions;
-    double regionsMs = 0.0;
-    OnGameThread([&] {
-        const ULONGLONG t0 = GetTickCount64();
-        regions = Regions();
-        regionsMs = static_cast<double>(GetTickCount64() - t0);
-    }, 30.0);
-    std::map<std::string, std::uint64_t> byOwner, byWhat;
-    for (const auto& r : regions) {
-        byOwner[OwnerName(r.owner)] += r.size;
-        byWhat[std::string(OwnerName(r.owner)) + ": " + r.what] += r.size;
-    }
-    std::string owners = "writable memory (" + std::to_string(regions.size()) + " regions, listed in " +
-                         std::to_string(static_cast<int>(regionsMs)) + " ms):";
-    for (const auto& [o, b] : byOwner) owners += " " + o + " " + mb(b) + ";";
-    note(owners);
-    std::vector<std::pair<std::uint64_t, std::string>> whats;
-    for (const auto& [w, b] : byWhat) whats.emplace_back(b, w);
-    std::sort(whats.rbegin(), whats.rend());
-    for (std::size_t i = 0; i < whats.size() && i < 25; ++i) note("  " + whats[i].second + ": " + mb(whats[i].first));
-
-    std::string callers = "VirtualAlloc callers since the TAS started (bytes, live):";
-    int shown = 0;
-    for (const auto& c : AllocationCallers())
-        if (c.bytes && shown++ < 12) callers += " " + c.module + " " + mb(c.bytes) + "/" + mb(c.live) + ";";
-    note(callers);
-
-    // How much changes: page hashes of the game's memory and of the unattributed memory, now, a frame later, a second later
-    using Hashes = std::unordered_map<std::uintptr_t, std::pair<std::uint64_t, std::uint8_t>>;   // page -> hash, kind
-    const auto kindOf = [](const Region& r) -> int {
-        if (r.owner == Owner::GameImage) return 0;
-        if (r.owner == Owner::GameHeap) return 1;
-        if (r.owner == Owner::GameVirtual) return 2;
-        if (r.what == "virtual (unknown)") return 3;
-        return -1;
-    };
-    const char* kindNames[] = {"game image", "game heap", "game virtual", "unknown virtual"};
-    const auto hashAll = [&](Hashes& out, double& ms) {
-        OnGameThread([&] {
-            const ULONGLONG t0 = GetTickCount64();
-            out.clear();
-            for (const auto& r : Regions()) {
-                const int kind = kindOf(r);
-                if (kind < 0) continue;
-                for (std::uintptr_t a = r.base; a < r.base + r.size; a += kPage) {
-                    std::uint64_t h = 0;
-                    if (HashPage(reinterpret_cast<const void*>(a), h)) out[a] = {h, static_cast<std::uint8_t>(kind)};
-                }
-            }
-            ms = static_cast<double>(GetTickCount64() - t0);
-        }, 60.0);
-    };
-    const auto compare = [&](const Hashes& a, const Hashes& b, const char* when) {
-        std::uint64_t changed[4]{}, total[4]{}, added[4]{};
-        for (const auto& [page, hk] : b) {
-            total[hk.second] += kPage;
-            const auto it = a.find(page);
-            if (it == a.end()) added[hk.second] += kPage;
-            else if (it->second.first != hk.first) changed[hk.second] += kPage;
-        }
-        std::string line = std::string("changed ") + when + ":";
-        for (int k = 0; k < 4; ++k)
-            line += std::string(" ") + kindNames[k] + " " + std::to_string(changed[k] / 1024) + " KB of " + mb(total[k]) +
-                    " (+" + std::to_string(added[k] / 1024) + " KB new);";
-        note(line);
-    };
-    Hashes h0, h1, h2;
-    double ms0 = 0, ms1 = 0, ms2 = 0;
-    hashAll(h0, ms0);
-    WaitTicks(1);
-    hashAll(h1, ms1);
-    compare(h0, h1, "over 1 tick");
-    WaitTicks(62);
-    hashAll(h2, ms2);
-    compare(h1, h2, "over 62 ticks");
-    note("hashing took " + std::to_string(static_cast<int>(ms0)) + " / " + std::to_string(static_cast<int>(ms1)) + " / " +
-         std::to_string(static_cast<int>(ms2)) + " ms");
-
-    // The rendering thread: off and back on with the engine's own console command
-    std::set<std::uint32_t> before, after;
-    for (const auto& t : Threads()) before.insert(t.id);
-    OnGameThread([] { game::ConsoleCommand("ToggleRenderingThread"); });
-    WaitTicks(10);
-    for (const auto& t : Threads()) after.insert(t.id);
-    std::string gone, added;
-    for (auto id : before) if (!after.count(id)) gone += " " + std::to_string(id);
-    for (auto id : after) if (!before.count(id)) added += " " + std::to_string(id);
-    note("ToggleRenderingThread: threads gone [" + gone + " ] new [" + added + " ]");
-    threadLines("after the toggle");
-    Hashes r0, r1;
-    double rm0 = 0, rm1 = 0;
-    hashAll(r0, rm0);
-    WaitTicks(1);
-    hashAll(r1, rm1);
-    compare(r0, r1, "over 1 tick without the rendering thread");
-    OnGameThread([] { game::ConsoleCommand("ToggleRenderingThread"); });
-    WaitTicks(10);
-    std::set<std::uint32_t> back;
-    for (const auto& t : Threads()) back.insert(t.id);
-    note("toggled back: " + std::to_string(back.size()) + " threads (" + std::to_string(before.size()) + " before)");
-
-    p.Check(1, true);
-    End(s);
-}
-#endif
 
 // The collision view's inspector: with the panel open it lists the volumes near the player; facing one of them (the
 // Nearby list's click) must make the look-at report that same volume: as the one looked at, or on the line behind
@@ -1972,76 +876,6 @@ void WaitGrounded()
     WaitTicks(5);
 }
 
-// Kickglitch Helper is mods/memenu-trainer (helper.lua): what it measured comes from what it shares (kg_helper.*).
-// A kick is faked (the wallrun kick's move state on a player standing on the ground: "landed" the next tick), then the
-// game is told to jump like the Kickglitch tool does. The helper must count one attempt and time the jump.
-void TestKickglitchHelper()
-{
-    Step& s = Begin("Kickglitch helper");
-    Probe p(s);
-    Module* helper = modules::Find("Kickglitch Helper");
-    if (!helper) {
-        p.Problem("the Kickglitch Helper module was not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-    const bool enabledWas = helper->Enabled();
-    WaitGrounded();
-    OnRenderThread([&] { helper->SetEnabled(false); helper->SetEnabled(true); });
-    WaitTicks(3);
-
-    // The game's real kick move can't be started without a wall (in the open it never ends, and the game then ignores
-    // the jump), so only its state is shown, for a few ticks of a real fall. The Kickglitch tool is armed in the air (it
-    // does nothing while falling), so on the game's own landing it jumps on the first walking frame, as after a real
-    // kick: the helper must time that jump and take it as its calibration.
-    Module* tool = modules::Find("Kickglitch");
-    auto* frame = dynamic_cast<ctl::SliderInt*>(helper->FindSetting("Perfect frame"));
-    const int frameWas = frame ? frame->Get() : 1;
-    if (frame) OnRenderThread([&] { frame->Set(5); });   // Must be overwritten by the calibration
-    OnGameThread([tool] {
-        auto* pawn = game::Pawn();
-        if (!pawn) return;
-        pawn->Location.Z += 150.f;
-        pawn->Velocity = Classes::FVector{};
-        pawn->Physics = Classes::EPhysics::PHYS_Falling;
-        mirage::engine::SetMove(pawn, Classes::EMovement::MOVE_Falling);
-        if (tool) tool->SetEnabled(true);
-    });
-    WaitTicks(1);
-    OnGameThread([] { if (auto* pawn = game::Pawn()) pawn->MovementState = Classes::EMovement::MOVE_MeleeWallrun; });
-    WaitTicks(2);
-    OnGameThread([] { if (auto* pawn = game::Pawn()) pawn->MovementState = Classes::EMovement::MOVE_Falling; });
-    struct Last { int attempts, jumpFrame; bool calibrated; };
-    const auto get = [] {
-        return Last{SharedInt("memenu-trainer", "kg_helper.attempts"), SharedInt("memenu-trainer", "kg_helper.jump_frame"),
-                    SharedInt("memenu-trainer", "kg_helper.calibrated") != 0};
-    };
-    WaitFor(5.0, [&] { return get().attempts > 0; });
-
-    const Last last = get();
-    if (last.attempts != 1) p.Problem("it counted " + std::to_string(last.attempts) + " attempts, not 1");
-    else if (last.jumpFrame < 0) p.Problem("it saw the kick and the landing but not the jump");
-    else s.notes.push_back("jump timed " + std::to_string(last.jumpFrame) + " frame(s) after landing (the Kickglitch tool's jump)");
-    if (!tool) p.Problem("the Kickglitch tool was not found (no calibration)");
-    else if (last.jumpFrame >= 0 && !last.calibrated)
-        p.Problem("the attempt was not taken as the Kickglitch tool's (no calibration)");
-    else if (frame && last.jumpFrame >= 0 && frame->Get() != std::clamp(last.jumpFrame, 0, 5))
-        p.Problem("the tool's attempt did not calibrate the perfect frame (" + std::to_string(frame->Get()) + ")");
-
-    OnRenderThread([&] {
-        if (tool) tool->SetEnabled(false);
-        if (frame) frame->Set(frameWas);
-        helper->SetEnabled(enabledWas);
-    });
-    OnGameThread([] {
-        if (auto* pawn = game::Pawn(); pawn && game::Controller()) player_state::ResetMovement(pawn, game::Controller());
-    });
-    WaitGrounded();     // Before the next test
-    p.Check(1, false);
-    End(s);
-}
-
 // What Auto Kickglitch's kick buffer did (mods/memenu-trainer shares it: kick_buffer.*)
 struct KickBufferStats {
     int held = 0, onWall = 0, late = 0, dropped = 0;
@@ -2056,148 +890,6 @@ KickBufferStats KickBuffer()
     };
     return {get("kick_buffer.held"), get("kick_buffer.on_wall"), get("kick_buffer.late"), get("kick_buffer.dropped"),
             get("kick_buffer.hooked") != 0};
-}
-
-// Auto Kickglitch is a first-party mod (mods/memenu-trainer). Same faked kick as the helper's test (the kick's state for a few ticks of a real fall): on the game's landing the
-// module must jump by itself, with nothing else armed.
-void TestAutoKickglitch()
-{
-    Step& s = Begin("Auto kickglitch");
-    Probe p(s);
-    Module* autoKg = modules::Find("Auto Kickglitch");
-    if (!autoKg) {
-        p.Problem("the Auto Kickglitch module was not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-    const bool enabledWas = autoKg->Enabled();
-    WaitGrounded();     // A test before may have left the player in the air
-    OnRenderThread([&] { autoKg->SetEnabled(true); });
-    OnGameThread([] {
-        auto* pawn = game::Pawn();
-        if (!pawn) return;
-        pawn->Location.Z += 150.f;
-        pawn->Velocity = Classes::FVector{};
-        pawn->Physics = Classes::EPhysics::PHYS_Falling;
-        mirage::engine::SetMove(pawn, Classes::EMovement::MOVE_Falling);
-    });
-    WaitTicks(1);
-    OnGameThread([] { if (auto* pawn = game::Pawn()) pawn->MovementState = Classes::EMovement::MOVE_MeleeWallrun; });
-    WaitTicks(2);
-    OnGameThread([] { if (auto* pawn = game::Pawn()) pawn->MovementState = Classes::EMovement::MOVE_Falling; });
-
-    // Landed, then up again on its own: the jump
-    bool landed = false, jumped = false;
-    WaitFor(5.0, [&] {
-        OnGameThread([&] {
-            auto* pawn = game::Pawn();
-            if (!pawn) return;
-            if (pawn->Physics == Classes::EPhysics::PHYS_Walking) landed = true;
-            else if (landed && (pawn->MovementState == Classes::EMovement::MOVE_Jump || pawn->Velocity.Z > 100.f))
-                jumped = true;
-        }, 1.0);
-        return jumped;
-    });
-    if (!landed) p.Problem("the player never landed");
-    else if (!jumped) p.Problem("no jump after the kick's landing");
-
-    // The kick buffer: a kick pressed in the air (the console runs AttackPress the way a key binding does) is held
-    // back, then let go late when no wall comes within the window. The wall kick itself needs a real wall.
-    auto* buffer = dynamic_cast<ctl::Checkbox*>(autoKg->FindSetting("Kick buffer"));
-    auto* window = dynamic_cast<ctl::SliderInt*>(autoKg->FindSetting("Buffer window"));
-    auto* onMiss = dynamic_cast<ctl::Combo*>(autoKg->FindSetting("No wall in time"));
-    if (!buffer || !window || !onMiss) {
-        p.Problem("the kick buffer settings were not found");
-    } else {
-        const bool bufferWas = buffer->Get();
-        const int windowWas = window->Get(), onMissWas = onMiss->Get();
-        OnRenderThread([&] {
-            buffer->Set(true);
-            window->Set(100);
-            onMiss->Set(0);         // Kick anyway
-        });
-        WaitGrounded();
-        const auto before = KickBuffer();
-        OnGameThread([] {
-            auto* pawn = game::Pawn();
-            if (!pawn) return;
-            pawn->Location.Z += 400.f;
-            pawn->Velocity = Classes::FVector{};
-            pawn->Physics = Classes::EPhysics::PHYS_Falling;
-            mirage::engine::SetMove(pawn, Classes::EMovement::MOVE_Falling);
-        });
-        WaitTicks(2);
-        bool airKick = false;
-        OnGameThread([&] {
-            game::ConsoleCommand("AttackPress");
-            game::ConsoleCommand("AttackRelease");
-            if (auto* pawn = game::Pawn()) airKick = pawn->MovementState == Classes::EMovement::MOVE_MeleeAir;
-        });
-        WaitTicks(1);
-        const auto held = KickBuffer();
-        WaitFor(3.0, [&] {
-            const auto st = KickBuffer();
-            return st.late + st.dropped > before.late + before.dropped;
-        });
-        const auto after = KickBuffer();
-        char note[160];
-        std::snprintf(note, sizeof note, "kick buffer: hooked %s, held %d, let go late %d, dropped %d",
-                      after.hooked ? "yes" : "no", after.held - before.held, after.late - before.late,
-                      after.dropped - before.dropped);
-        s.notes.push_back(note);
-        if (!after.hooked) p.Problem("the kick press can't be held back (AttackPress not watched)");
-        else if (held.held <= before.held) p.Problem("a kick pressed in the air was not held back");
-        else if (airKick) p.Problem("the held kick still kicked in the air at once");
-        else if (after.late <= before.late) p.Problem("the held kick was not let go when no wall came");
-        OnRenderThread([&] {
-            buffer->Set(bufferWas);
-            window->Set(windowWas);
-            onMiss->Set(onMissWas);
-        });
-    }
-
-    OnRenderThread([&] { autoKg->SetEnabled(enabledWas); });
-    OnGameThread([] {
-        if (auto* pawn = game::Pawn(); pawn && game::Controller()) player_state::ResetMovement(pawn, game::Controller());
-    });
-    WaitGrounded();     // Before the next test
-    p.Check(1, false);
-    End(s);
-}
-
-// Kill Bots is a first-party mod (mods/memenu-trainer). Only checks the kills where the level has enemies (start game-test with --map at one); elsewhere, that it runs.
-void TestKillBots()
-{
-    Step& s = Begin("Kill bots");
-    Probe p(s);
-    Module* kill = modules::Find("Kill Bots");
-    if (!kill) {
-        p.Problem("the Kill Bots module was not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-    const auto alive = [] {
-        int n = 0;
-        OnGameThread([&] {
-            auto* world = game::World();
-            for (Classes::APawn* pawn = world ? world->PawnList : nullptr; pawn; pawn = pawn->NextPawn)
-                if (pawn != game::Pawn() && game::IsA(pawn, Classes::ATdBotPawn::StaticClass()) && pawn->Health > 0 &&
-                    !pawn->bDeleteMe)
-                    ++n;
-        });
-        return n;
-    };
-    const int before = alive();
-    OnRenderThread([&] { kill->Toggle(); });
-    WaitTicks(10);
-    const int after = alive();
-    if (before == 0) s.notes.push_back("no enemies in this level: only checked that it runs");
-    else if (after > 0) p.Problem(std::to_string(after) + " of " + std::to_string(before) + " enemies still alive");
-    else s.notes.push_back("killed " + std::to_string(before) + (before == 1 ? " enemy" : " enemies"));
-    p.Check(1, false);
-    End(s);
 }
 
 // ---- Engine hooks ---------------------------------------------------------------------------------------------------
@@ -2319,76 +1011,6 @@ void TestEngineScriptEvents()
         else s.notes.push_back("before/after/block all work (" + std::to_string(b1 - b0) + " calls in 10 ticks)");
     }
     p->Check(1, false);
-    End(s);
-}
-
-// Frame Rate Limit (mods/memenu-visual): on, the engine's cap is the module's; off, the engine has exactly what it had
-// before (the game's 62, or the test's own uncapped fast mode): normal play is never left at another frame rate.
-void TestFrameRate()
-{
-    Step& s = Begin("Frame rate limit");
-    Probe p(s);
-    Module* fps = modules::Find("Frame Rate Limit");
-    auto* cap = fps ? dynamic_cast<ctl::Slider*>(fps->FindSetting("Cap")) : nullptr;
-    auto* uncapped = fps ? dynamic_cast<ctl::Checkbox*>(fps->FindSetting("Uncapped")) : nullptr;
-    if (!fps || !cap || !uncapped) {
-        p.Problem("the Frame Rate Limit module or its settings were not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-    struct Cap { bool smooth = false; float max = 0.f; bool found = false; };
-    const auto read = [] {
-        Cap c;
-        OnGameThread([&] {
-            const auto& objects = Classes::UObject::GetGlobalObjects();
-            for (std::size_t i = 0; i < objects.Num(); ++i) {
-                auto* o = objects.GetByIndex(i);
-                if (!o || !game::IsA(o, Classes::UGameEngine::StaticClass()) || o->GetName().rfind("Default__", 0) == 0)
-                    continue;
-                auto* e = static_cast<Classes::UGameEngine*>(o);
-                c = {e->bSmoothFrameRate != 0, e->MaxSmoothedFrameRate, true};
-                break;
-            }
-        });
-        return c;
-    };
-    const bool enabledWas = fps->Enabled(), uncappedWas = uncapped->Get();
-    const float capWas = cap->Get();
-    if (enabledWas) {
-        OnRenderThread([&] { fps->SetEnabled(false); });
-        WaitTicks(3);
-    }
-    const Cap before = read();
-    if (!before.found) p.Problem("no game engine object");
-
-    OnRenderThread([&] {
-        cap->Set(30.f);
-        uncapped->Set(false);
-        fps->SetEnabled(true);
-    });
-    WaitTicks(5);
-    const Cap on = read();
-    OnRenderThread([&] { fps->SetEnabled(false); });
-    WaitTicks(5);
-    const Cap after = read();
-
-    char note[200];
-    std::snprintf(note, sizeof note, "before: cap %s %.0f; module at 30: %s %.0f; off again: %s %.0f",
-                  before.smooth ? "on" : "off", before.max, on.smooth ? "on" : "off", on.max,
-                  after.smooth ? "on" : "off", after.max);
-    s.notes.push_back(note);
-    if (!on.smooth || std::fabs(on.max - 30.f) > 0.01f) p.Problem("the module's 30 fps cap was not set on the engine");
-    if (after.smooth != before.smooth || std::fabs(after.max - before.max) > 0.01f)
-        p.Problem("switching the module off did not put the engine's cap back");
-
-    OnRenderThread([&] {
-        cap->Set(capWas);
-        uncapped->Set(uncappedWas);
-        fps->SetEnabled(enabledWas);
-    });
-    WaitTicks(3);
-    p.Check(1, false);
     End(s);
 }
 
@@ -2682,22 +1304,6 @@ void TestEngineDeath()
         pawn->TakeDamage(pawn->Health + 10000, nullptr, pawn->Location, Classes::FVector{},
                          Classes::UTdDmgType_Fell::StaticClass(), hit, nullptr);
     });
-#if MEMENU_FEATURE_TAS
-    // With the rendering thread off (TAS snapshots) the hooked functions aren't reached: a respawn is the death then
-    if (tas::snapshot::RenderingThreadOff()) {
-        bool respawned = false;
-        WaitFor(10.0, [&] {
-            OnGameThread([&] { auto* pawn = game::Pawn(); respawned = pawn && pawn != pawnBefore && pawn->Health > 0; }, 1.0);
-            return respawned;
-        });
-        if (!respawned) p->Problem("the player didn't die and come back (rendering thread off: the hook can't see it)");
-        else s.notes.push_back("rendering thread off (TAS snapshots): death seen as a respawn, the hook isn't reached");
-        WaitPlayerReady();
-        p->Check(1, false);
-        End(s);
-        return;
-    }
-#endif
     if (!WaitFor(10.0, [&] { return g_deathBefore > before; })) {
         std::string state = "no player";
         OnGameThread([&] {
@@ -2744,101 +1350,6 @@ std::filesystem::path TdInputIni()
     wchar_t docs[MAX_PATH]{};
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PERSONAL, nullptr, 0, docs))) return {};
     return std::filesystem::path(docs) / L"EA Games" / L"Mirror's Edge" / L"TdGame" / L"Config" / L"TdInput.ini";
-}
-
-// A kept alternate key the game doesn't have (as after a restart) must be put back at the next reset moment (the
-// module switched on), on a key nothing else uses. Uses a file of its own, and the game's ini is written back after.
-void TestKeepKeyBindings()
-{
-    Step& s = Begin("Keep key bindings");
-    Probe p(s);
-    Module* keep = modules::Find("Keep Key Bindings");
-    const auto ini = TdInputIni();
-    std::string iniWas;
-    const bool hadIni = !ini.empty() && std::filesystem::exists(ini);
-    if (hadIni) {
-        std::ifstream in(ini, std::ios::binary);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        iniWas = ss.str();
-    }
-    if (!keep) {
-        p.Problem("the Keep Key Bindings module was not found");
-        p.Check(1, false);
-        End(s);
-        return;
-    }
-    const bool enabledWas = keep->Enabled();
-    OnRenderThread([&] { keep->SetEnabled(false); });
-
-    // A key nothing is bound to, and the bindings the game has now
-    std::string freeKey;
-    std::string list;       // "Key=Command;..." as the mod keeps them
-    OnGameThread([&] {
-        auto* pc = game::Controller();
-        if (!pc || !pc->PlayerInput) return;
-        std::set<std::string> used;
-        auto& binds = pc->PlayerInput->Bindings;
-        for (std::size_t i = 0; i < binds.Num(); ++i) {
-            const auto& b = binds[i];
-            used.insert(b.Name.GetName());
-            if (b.Control || b.Shift || b.Alt || !b.Command.IsValid()) continue;
-            const std::string key = b.Name.GetName(), cmd = b.Command.ToString();
-            if (cmd.rfind("GBA_", 0) == 0 && key.rfind("GBA_", 0) != 0 && key.rfind("XboxTypeS_", 0) != 0)
-                list += key + "=" + cmd + ";";
-        }
-        for (const char* k : {"NumPadNine", "NumPadEight", "NumPadSeven", "Home", "End", "PageUp"})
-            if (!used.count(k)) { freeKey = k; break; }
-    });
-    if (freeKey.empty()) p.Problem("no free key to test with");
-    else {
-        // Keep Key Bindings is mods/memenu-misc: it takes this list instead of its own config (and never writes it)
-        list += freeKey + "=GBA_Jump";
-        mirage::mods::Share("keep_bindings.test", list);
-        OnRenderThread([&] { keep->SetEnabled(true); });     // A reset moment: what is missing comes back
-        const auto bound = [&] {
-            bool found = false;
-            OnGameThread([&] {
-                auto* pc = game::Controller();
-                if (!pc || !pc->PlayerInput) return;
-                auto& binds = pc->PlayerInput->Bindings;
-                for (std::size_t i = 0; i < binds.Num() && !found; ++i)
-                    found = binds[i].Name.GetName() == freeKey && binds[i].Command.IsValid() &&
-                            binds[i].Command.ToString() == "GBA_Jump";
-            }, 1.0);
-            return found;
-        };
-        if (!WaitFor(5.0, bound)) p.Problem("the kept binding " + freeKey + " = GBA_Jump was not put back");
-        else s.notes.push_back("put back " + freeKey + " = GBA_Jump");
-
-        // Undo: the module off first (it would put it back), then the binding gone and the game's ini as it was
-        OnRenderThread([&] { keep->SetEnabled(false); });
-        mirage::mods::Share("keep_bindings.test", "");
-        // Taken out of the list, not blanked: the game saves TdInput.ini from memory later (on a level load), and a
-        // blanked entry ("NumPadNine", Command=) would end up in the player's file. Removing needs no allocation: the
-        // entries after it move down one and the count drops (its command string is left to leak, a few bytes).
-        OnGameThread([&] {
-            auto* pc = game::Controller();
-            if (!pc || !pc->PlayerInput) return;
-            auto& binds = pc->PlayerInput->Bindings;
-            struct RawArray { Classes::FKeyBind* data; int count; int max; };
-            static_assert(sizeof(RawArray) == sizeof(binds), "TArray layout");
-            auto* raw = reinterpret_cast<RawArray*>(&binds);
-            for (int i = raw->count - 1; i >= 0; --i) {
-                if (raw->data[i].Name.GetName() != freeKey) continue;
-                std::memmove(&raw->data[i], &raw->data[i + 1], sizeof(Classes::FKeyBind) * (raw->count - i - 1));
-                --raw->count;
-            }
-        });
-        if (bound()) p.Problem("could not remove the test binding again");
-    }
-    if (hadIni) {
-        std::ofstream out(ini, std::ios::binary | std::ios::trunc);
-        out << iniWas;
-    }
-    OnRenderThread([&] { keep->SetEnabled(enabledWas); });
-    p.Check(1, false);
-    End(s);
 }
 
 // Collision View is a native first-party mod (mods/memenu-collision): what it sees comes from what it shares (JSON).
@@ -3028,128 +1539,6 @@ namespace speedrun_test
     }
 }
 
-void TestSpeedrunTimer()
-{
-    using namespace speedrun_test;
-    Step& s = Begin("Speedrun timer");
-    Probe p(s);
-    const auto fail = [&](const std::string& why) {
-        p.Problem(why);
-        p.Check(1, false);
-        End(s);
-    };
-
-    Module* timer = modules::Find("Speedrun Timer");
-    auto* category = timer ? dynamic_cast<ctl::Combo*>(timer->FindSetting("Category")) : nullptr;
-    auto* autoStart = timer ? dynamic_cast<ctl::Checkbox*>(timer->FindSetting("Auto start")) : nullptr;
-    auto* autoReset = timer ? dynamic_cast<ctl::Checkbox*>(timer->FindSetting("Auto reset")) : nullptr;
-    if (!category || !autoStart || !autoReset) return fail("the Speedrun Timer module or its controls were not found");
-    constexpr int kIndividualLevel = 3, kAnyPercent = 0;
-
-    const auto maps = levels::Maps();
-    int index = -1;
-    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
-        if (Lower(maps[i].label).find(Lower(g_options.map)) != std::string::npos) { index = i; break; }
-    if (index < 0) return fail("no level matching '" + g_options.map + "'");
-    const int cp = std::min(g_options.checkpoint, static_cast<int>(maps[index].checkpoints.size()));
-
-    const bool enabledWas = timer->Enabled();
-    const int categoryWas = category->Get();
-    const bool autoStartWas = autoStart->Get(), autoResetWas = autoReset->Get();
-    OnRenderThread([&] {
-        category->Set(kIndividualLevel);
-        autoStart->Set(true);
-        autoReset->Set(true);
-        if (timer->Enabled()) timer->SetEnabled(false);     // A clean start: no run left from before
-        timer->SetEnabled(true);
-    });
-    WaitTicks(10);
-    Command("reset");
-    WaitTicks(5);
-
-    if (!WaitFor(10.0, [] { return Get("run.hooked") == "1"; }))
-        p.Problem("the level completed event is not hooked (no auto splits): see the log");
-    else s.notes.push_back("level completed event hooked");
-
-    // Its record file (in the mod's folder), kept to put back
-    const auto file = paths::Dir() / "mods" / "memenu-speedrun" / std::filesystem::path(Get("run.file"));
-    std::string fileWas;
-    const bool hadFile = std::filesystem::exists(file);
-    if (hadFile) {
-        std::ifstream in(file, std::ios::binary);
-        std::stringstream ss;
-        ss << in.rdbuf();
-        fileWas = ss.str();
-    }
-
-    const auto reload = [&]() -> bool {
-        const int before = g_loadsFinished.load();
-        OnRenderThread([&] { levels::Load(index, cp, levels::Method::Game, false); });
-        if (!WaitFor(120.0, [&] { return g_loadsFinished.load() > before; })) { p.Problem("the level did not reload"); return false; }
-        if (!WaitFor(60.0, [] { return game::GetStatus().hasPawn && !game::IsLoading(); })) { p.Problem("no player after reloading"); return false; }
-        WaitPlayerReady(30.0);
-        return true;
-    };
-
-    if (reload()) {
-        WaitFor(5.0, [] { return Get("run.phase") == "running" && Num("run.lrt") > 0.1; });
-        if (Get("run.phase") != "running")
-            p.Problem("no run started when the level loaded (map '" + Get("run.map") + "', last: " + Get("run.event") + ")");
-        else {
-            s.notes.push_back("started: " + Get("run.event"));
-            OnRenderThread([&] { autoReset->Set(false); });
-            WaitTicks(3);
-            const double lrt0 = Num("run.lrt"), rta0 = Num("run.rta");
-            if (reload()) {
-                WaitTicks(2);
-                const double lrt = Num("run.lrt") - lrt0, rta = Num("run.rta") - rta0;
-                char buf[160];
-                std::snprintf(buf, sizeof buf, "across a reload: real time +%.2f s, load removed time +%.2f s", rta, lrt);
-                s.notes.push_back(buf);
-                if (Get("run.phase") != "running") p.Problem("the run stopped on a reload with auto reset off");
-                else if (rta - lrt < 0.3) p.Problem(std::string("the load was not removed: ") + buf);
-                else if (lrt <= 0.0) p.Problem(std::string("the load removed time did not move: ") + buf);
-
-                const int completedBefore = std::atoi(Get("run.completed").c_str());
-                Command("start_or_split");               // The only segment: finishes the run
-                WaitTicks(5);
-                if (Get("run.phase") != "finished") p.Problem("a split on the only segment did not finish the run");
-                else if (std::atoi(Get("run.completed").c_str()) != completedBefore + 1) p.Problem("the finished run was not counted");
-                else if (Num("run.pb") < 0.0) p.Problem("the finished run left no personal best");
-                else {
-                    char fin[96];
-                    std::snprintf(fin, sizeof fin, "finished in %.3f s%s", Num("run.lrt"), Get("run.new_pb") == "1" ? ", a personal best" : "");
-                    s.notes.push_back(fin);
-                }
-
-                Command("undo");
-                WaitTicks(5);
-                if (Get("run.phase") != "running") p.Problem("undoing the final split did not resume the run");
-                else if (std::atoi(Get("run.completed").c_str()) != completedBefore) p.Problem("undoing the final split did not take back the finish");
-            }
-        }
-    }
-
-    // Back as it was: a different category first, so the restored file is read again when the old one comes back
-    Command("reset");
-    WaitTicks(3);
-    OnRenderThread([&] { category->Set(kAnyPercent); });
-    WaitTicks(5);
-    std::error_code ec;
-    if (hadFile) {
-        std::ofstream out(file, std::ios::binary | std::ios::trunc);
-        out << fileWas;
-    } else std::filesystem::remove(file, ec);
-    OnRenderThread([&] {
-        category->Set(categoryWas);
-        autoStart->Set(autoStartWas);
-        autoReset->Set(autoResetWas);
-        timer->SetEnabled(enabledWas);
-    });
-    WaitTicks(5);
-    p.Check(1, true);
-    End(s);
-}
 #endif
 
 // Setting values of every module, to put back after the test
@@ -3553,19 +1942,6 @@ void TestMirageModHooks()
     if (nativeUs > 5.0) p.Problem("a native hook adds " + std::to_string(nativeUs) + " us a call (budget 5)");
     if (luaUs > 50.0) p.Problem("a Lua hook adds " + std::to_string(luaUs) + " us a call (budget 50)");
     s.notes.push_back("map " + (lastMap ? lastMap->Get() : std::string()) + ", " + std::to_string(ticks ? ticks->Get() : 0) + " tick events");
-#if MEMENU_FEATURE_TAS
-    // A TAS rewind puts back the game's memory only: no mod's code or data is ever counted as the game's
-    {
-        std::size_t mods = 0;
-        for (const auto& m : tas::memmap::Modules()) {
-            if (m.path.find("\\selftest-mods\\") == std::string::npos) continue;
-            ++mods;
-            if (m.game) p.Problem(m.name + " (a mod) is counted as the game's memory: a TAS rewind would put it back");
-        }
-        if (mods == 0) p.Problem("no mod DLL was found among the process's modules");
-        else s.notes.push_back(std::to_string(mods) + " mod DLLs, none in TAS snapshots");
-    }
-#endif
     p.Check(1, true);
     End(s);
 }
@@ -3910,84 +2286,6 @@ void TestCSharpMods()
 }
 
 #if MEMENU_FEATURE_SCRIPT_EDITOR
-// The script editor's work without its window: a new mod from the template is made and loaded while the game runs
-// (mirage::mods::LoadNew), the check finds an error in unsaved text and says where, a saved error makes the hot reload
-// fail with the file and line, and saving the fix loads it again.
-void TestScriptEditor()
-{
-    Step& s = Begin("Mirage script editor");
-    Probe p(s);
-    namespace mm = mirage::mods;
-    namespace fs = std::filesystem;
-    const std::string id = "selftest-new";
-    const fs::path dir = paths::Dir() / "selftest-mods" / id;
-    std::error_code ec;
-    fs::remove_all(dir, ec);
-    const auto info = [&]() -> std::optional<mm::Info> {
-        for (const mm::Info& i : mm::List())
-            if (i.id == id) return i;
-        return std::nullopt;
-    };
-
-    // Parsing what the compilers say
-    const auto cs = script_editor::ParseDiagnostics("main.cs(5,17): error CS0029: no\nmain.cs(2,1): warning CS0168: x\n(12 ms)");
-    if (cs.size() != 2 || cs[0].line != 5 || cs[0].column != 17 || !cs[0].error || cs[1].error || cs[0].file != "main.cs")
-        p.Problem("C# diagnostics parsed wrong (" + std::to_string(cs.size()) + ")");
-    const auto lua = script_editor::ParseDiagnostics("main.lua:7: '=' expected near 'x'");
-    if (lua.size() != 1 || lua[0].line != 7 || lua[0].file != "main.lua") p.Problem("Lua diagnostics parsed wrong");
-
-    // 1. A new mod, made and loaded now
-    if (const std::string why = script_editor::CreateModFiles(dir.parent_path(), id); !why.empty()) {
-        p.Problem("making the mod: " + why);
-        End(s);
-        return;
-    }
-    if (script_editor::CreateModFiles(dir.parent_path(), id).empty()) p.Problem("a second mod with the same id was made");
-    if (script_editor::CreateModFiles(dir.parent_path(), "Bad Id").empty()) p.Problem("an id with spaces was accepted");
-    std::string loaded = "timed out";
-    const auto t0 = std::chrono::steady_clock::now();
-    OnGameThread([&] { loaded = mm::LoadNew(dir); }, 30.0);
-    char line[160];
-    std::snprintf(line, sizeof line, "new %s mod made and loaded in %.0f ms", mirage::dotnet::ScriptLanguage(),
-                  std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
-    s.notes.push_back(line);
-    if (!loaded.empty()) p.Problem("the new mod didn't load: " + loaded);
-    if (!WaitFor(3.0, [&] { return modules::Find(id) != nullptr; })) p.Problem("the new mod's module isn't in the menu");
-    std::string again = "timed out";
-    OnGameThread([&] { again = mm::LoadNew(dir); });
-    if (again.empty()) p.Problem("the same folder loaded twice");
-
-    // 2. The check sees unsaved text
-    const fs::path main = dir / mirage::dotnet::ScriptFile();
-    const std::string good = script_editor::Template(id);
-    std::string bad = good;
-    const std::string anchor = mirage::dotnet::kEnabled ? "if (!pawn.IsValid) return;" : "on_tick = function()";
-    bad.insert(bad.find(anchor), mirage::dotnet::kEnabled ? "int broken = \"text\"; " : "local = ");
-    const int badLine = static_cast<int>(std::count(bad.begin(), bad.begin() + static_cast<std::ptrdiff_t>(bad.find(anchor)), '\n')) + 1;
-    const auto checked = script_editor::Check(dir, main, bad);
-    if (!checked.ran) p.Problem("the check didn't run: " + checked.note);
-    else if (checked.Errors() == 0 || checked.diagnostics.front().line != badLine)
-        p.Problem("the check of broken text: " + std::to_string(checked.Errors()) + " error(s), first at line " +
-                  (checked.diagnostics.empty() ? std::string("-") : std::to_string(checked.diagnostics.front().line)) +
-                  " (expected " + std::to_string(badLine) + ")");
-    else s.notes.push_back("check of unsaved text: " + checked.diagnostics.front().text + " (" + checked.note + ")");
-    if (const auto ok = script_editor::Check(dir, main, good); ok.Errors() != 0) p.Problem("the template doesn't compile: " + ok.diagnostics.front().text);
-
-    // 3. Saved broken: the hot reload fails and says where; saved fixed: it loads again
-    const auto write = [&](const std::string& text) { std::ofstream(main, std::ios::binary | std::ios::trunc) << text; };
-    write(bad);
-    const std::string where = std::string(mirage::dotnet::ScriptFile()) + (mirage::dotnet::kEnabled ? "(" : ":") + std::to_string(badLine);
-    if (!WaitFor(10.0, [&] { const auto i = info(); return i && !i->loaded && i->problem.find(where) != std::string::npos; }))
-        p.Problem("saving broken code didn't fail the reload with " + where + ": " + (info() ? info()->problem : "gone"));
-    write(good);
-    if (!WaitFor(10.0, [&] { const auto i = info(); return i && i->loaded; }))
-        p.Problem("saving the fix didn't load it again: " + (info() ? info()->problem : "gone"));
-    if (const auto i = info()) {
-        if (!i->script) p.Problem("the new mod isn't listed as a script mod");
-        s.notes.push_back("reloaded " + std::to_string(i->reloads) + "x by saving");
-    }
-    End(s);
-}
 #endif
 
 void TestCacheSystem()
@@ -4230,7 +2528,6 @@ void TestMirageTextures()
     End(s);
 }
 
-#if MEMENU_FEATURE_TAS
 // Mirage step 8: a script patch from a Lua mod (examples/mods/higher-jumps). On, TdMove_Jump.StartMove's bytecode
 // multiplies the jump's upward speed by 1.5: a standing jump goes about 2.25 times as high, with no native detour.
 // Off, the function's own bytecode is back and the jump is as before.
@@ -4936,11 +3233,14 @@ void TestModMaps()
     End(s);
 }
 
+double GameSeconds();
+bool HoldKey(const std::string& key, double seconds, const std::function<void()>& each = {});
+
 // A map made with the game's own 2008 editor (step 13's milestone): tests/mods/map-test's maps/MirageEditorRoom.me1
 // (a room, a light and a player start, built in UnrealEd: tests/maps-src/MirageEditorRoom) is in the level select and
-// loads with the player standing in the room. A TAS walking forward records, then plays back verified, the player
-// having walked (not fallen) somewhere else in the room. The room has no checkpoints: restarting it is loading its start
-// again, which each TAS run does (the game's Restart Checkpoint needs a checkpoint: without one it leaves no player).
+// loads with the player standing in the room; walking forward (the forward key held for a second of game time) takes
+// the player across its floor, not off it. The room has no checkpoints: the game's Restart Checkpoint needs one (without
+// it, it leaves no player), so restarting it is loading its start again.
 void TestEditorMap()
 {
     Step& s = Begin("Mirage editor map");
@@ -4949,8 +3249,8 @@ void TestEditorMap()
     int index = -1;
     for (int i = 0; i < static_cast<int>(maps.size()); ++i)
         if (maps[static_cast<std::size_t>(i)].file == "MirageEditorRoom") index = i;
-    if (index < 0 || !tas::Available()) {
-        p.Problem(index < 0 ? "MirageEditorRoom isn't in the Levels list (is map-test loaded?)" : "the TAS isn't available");
+    if (index < 0) {
+        p.Problem("MirageEditorRoom isn't in the Levels list (is map-test loaded?)");
         End(s);
         return;
     }
@@ -4995,53 +3295,17 @@ void TestEditorMap()
         if (Lower(start.map) != "mirageeditorroom") p.Problem("the level loaded is " + start.map + ", not MirageEditorRoom");
         else if (!inRoom(start.at) || !start.walking) p.Problem("the player isn't standing in the editor's room");
 
-        // A TAS from the level start: walks forward, recorded, then played back verified
+        // Walked forward for a second of game time: somewhere else on the room's floor
         std::string forward;
         OnGameThread([&] { forward = KeyFor(game::Controller(), "GBA_MoveForward", "W"); });
-        tas::Replay saved;
-        tas::WithReplay([&](tas::Replay& r) { saved = r; });
-        tas::Macro m(60.f);
-        m.Describe("memenu self-test: walk in the editor's room").Wait(5).Press(forward).Wait(60).Release(forward).Wait(20);
-        tas::Replay macro = m.Build();
-        macro.start = tas::StartKind::Checkpoint;
-        macro.map = maps[static_cast<std::size_t>(index)].label;
-        macro.checkpoint.clear();              // The level's start
-        macro.syncValidUntil = 0;              // The first playback records the reference
-        tas::WithReplay([&](tas::Replay& r) { r = macro; });
-        OnRenderThread([] { gui::visible = false; });
-        const auto play = [&] {
-            tas::Play();
-            bool started = false;
-            tas::Status st{};
-            const ULONGLONG deadline = GetTickCount64() + 90000;
-            while (GetTickCount64() < deadline && !g_aborted) {
-                st = tas::GetStatus();
-                if (st.mode == tas::Mode::Playing && !st.armed) started = true;
-                if (started && (st.mode != tas::Mode::Playing || st.paused || st.frame >= st.frames)) break;
-                Sleep(10);
-            }
-            WaitFor(5.0, [&] { st = tas::GetStatus(); return st.mode != tas::Mode::Playing || st.paused; });
-            tas::Stop();        // At its end the TAS holds the game paused: where the player is, read after it let go
-            WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
-            WaitTicks(3);
-            return std::make_tuple(started, st, where());
-        };
-        const auto [ran1, first, end1] = play();
-        spdlog::info("Self-test: editor map, after the recording run: {}", end1.text);
-        const auto [ran2, second, end2] = play();      // From the level's start again: the room restarted
-        spdlog::info("Self-test: editor map, after the playback: {}", end2.text);
-        const float walked = std::hypot(end2.at.X - start.at.X, end2.at.Y - start.at.Y);
-        s.notes.push_back(fmt::format("TAS: walked {:.0f} units; playback {} ({} frames checked), ended {:.3f} units from the recording",
-                                      walked, second.verified ? "verified" : "not verified", second.syncChecked,
-                                      std::hypot(end2.at.X - end1.at.X, end2.at.Y - end1.at.Y)));
-        if (!ran1 || !ran2) p.Problem("the TAS didn't play in the editor's room: " + tas::GetStatus().message);
-        else if (!second.verified || second.desyncFrame >= 0)
-            p.Problem(fmt::format("the playback wasn't verified (desync on frame {}: {})", second.desyncFrame, second.desyncInfo));
-        if (walked < 100.f) p.Problem(fmt::format("the TAS walked the player only {:.0f} units", walked));
-        else if (!inRoom(end2.at) || !end2.walking) p.Problem("the walk didn't end on the room's floor: " + end2.text);
-        if (Lower(end2.map) != "mirageeditorroom") p.Problem("after the TAS the level is " + end2.map);
-        tas::WithReplay([&](tas::Replay& r) { r = saved; });
-        OnRenderThread([] { gui::visible = true; });
+        if (!HoldKey(forward, 1.0)) p.Problem("the forward key couldn't be pressed (no engine input)");
+        const double settle = GameSeconds();
+        while (!g_aborted && GameSeconds() - settle < 0.5) WaitTicks(1);
+        const Where end = where();
+        const float walked = std::hypot(end.at.X - start.at.X, end.at.Y - start.at.Y);
+        s.notes.push_back(fmt::format("walked {:.0f} units across the room", walked));
+        if (walked < 100.f) p.Problem(fmt::format("walking forward moved the player only {:.0f} units", walked));
+        else if (!inRoom(end.at) || !end.walking) p.Problem("the walk didn't end on the room's floor: " + end.text);
     }
 
     // Back to the test level
@@ -5051,394 +3315,6 @@ void TestEditorMap()
             loadMap(i, std::min(g_options.checkpoint, static_cast<int>(maps[static_cast<std::size_t>(i)].checkpoints.size())), g_options.map);
             break;
         }
-    End(s);
-}
-
-// Time-trial routes (step 13), the milestone: tests/mods/route-test has a route on the Prologue and the same one on
-// map-test's MirageTestMap (a copy of the Prologue). For each, a TAS macro starts at After_Intro and runs forward through
-// the start, the checkpoint and the finish: its first playback records the reference, the second plays back verified
-// (every recorded frame matched) and finishes the route in the very same game time; the speedrun timer follows (its
-// "TT - <route>" run splits and finishes) and the best run is kept as the ghost.
-void TestTimeTrials()
-{
-    Step& s = Begin("Mirage time trials");
-    Probe p(s);
-    namespace routes = mirage::routes;
-    Module* timer = modules::Find("Speedrun Timer");
-    Module* trials = modules::Find("Time Trials");
-    if (!tas::Available() || !timer || !trials) {
-        p.Problem(!tas::Available() ? "the TAS isn't available" : "the Speedrun Timer or Time Trials module is missing");
-        End(s);
-        return;
-    }
-    std::vector<routes::Route> list;
-    WaitFor(10.0, [&] {
-        list.clear();
-        for (const auto& r : routes::List())
-            if (r.mod == "route-test") list.push_back(r);
-        return list.size() >= 2;
-    });
-    if (list.size() < 2) {
-        p.Problem(fmt::format("{} route-test route(s) found, not 2 (edge_p and miragetestmap)", list.size()));
-        End(s);
-        return;
-    }
-    const bool timerWas = timer->Enabled(), trialsWas = trials->Enabled();
-    OnRenderThread([&] {
-        timer->SetEnabled(true);
-        trials->SetEnabled(true);
-        gui::visible = false;
-    });
-    std::string forward;
-    OnGameThread([&] { forward = KeyFor(game::Controller(), "GBA_MoveForward", "W"); });
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; });
-    const auto maps = levels::Maps();
-    const auto shared = [](const char* key) {
-        char v[256]{};
-        mirage::mods::game_api::ShareGet("memenu-speedrun", key, v, sizeof v);
-        return std::string(v);
-    };
-
-    for (const char* mapFile : {"edge_p", "miragetestmap"}) {
-        const auto route = std::find_if(list.begin(), list.end(), [&](const routes::Route& r) { return r.map == mapFile; });
-        const auto map = std::find_if(maps.begin(), maps.end(), [&](const levels::MapView& m) { return Lower(m.file) == mapFile; });
-        if (route == list.end() || map == maps.end()) {
-            p.Problem(std::string("no route or no level for ") + mapFile);
-            continue;
-        }
-        const auto cp = std::find(map->checkpointNames.begin(), map->checkpointNames.end(), "After_Intro");
-        if (cp == map->checkpointNames.end()) {
-            p.Problem(std::string(mapFile) + " has no After_Intro checkpoint in the level list");
-            continue;
-        }
-        tas::Macro m(60.f);
-        m.Describe(std::string("memenu self-test: route on ") + mapFile).Wait(5).Press(forward).Wait(100).Release(forward).Wait(20);
-        tas::Replay macro = m.Build();
-        macro.start = tas::StartKind::Checkpoint;
-        macro.map = map->label;
-        macro.checkpoint = map->checkpoints[static_cast<std::size_t>(cp - map->checkpointNames.begin())];
-        macro.syncValidUntil = 0;              // The first playback records the reference
-        macro.extensions["env.blockStreaming"] = "1";
-        tas::WithReplay([&](tas::Replay& r) { r = macro; });
-        routes::Forget(route->Id());           // No best and no ghost yet: the first run sets them
-        routes::Arm(route->Id());
-        WaitTicks(2);
-
-        // Plays it to the end; where the player was on some frames (to place routes)
-        const auto play = [&](std::vector<std::string>* where) {
-            tas::Play();
-            bool started = false;
-            tas::Status st{};
-            std::size_t sampled = 0;
-            const ULONGLONG deadline = GetTickCount64() + 90000;
-            while (GetTickCount64() < deadline && !g_aborted) {
-                st = tas::GetStatus();
-                if (st.mode == tas::Mode::Playing && !st.armed) started = true;
-                if (where && started && st.frame >= sampled) {
-                    const std::size_t frame = st.frame;
-                    OnGameThread([&] {
-                        if (auto* pawn = game::Pawn())
-                            where->push_back(fmt::format("f{}: [{:.0f}, {:.0f}, {:.0f}]", frame, pawn->Location.X, pawn->Location.Y, pawn->Location.Z));
-                    }, 0.5);
-                    sampled = frame + 20;
-                }
-                if (started && (st.mode != tas::Mode::Playing || st.paused || st.frame >= st.frames)) break;
-                Sleep(10);
-            }
-            // The end of the replay: its verdict comes with the pause there (PlaybackEnded)
-            WaitFor(5.0, [&] { st = tas::GetStatus(); return st.mode != tas::Mode::Playing || st.paused; });
-            tas::Stop();        // (Not a tick wait first: at its end the TAS holds the game paused)
-            WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
-            WaitTicks(3);
-            return std::make_pair(started, st);
-        };
-        std::vector<std::string> where;
-        const auto [ran, first] = play(&where);
-        const routes::State one = routes::Current();
-        std::string path;
-        for (const auto& w : where) path += w + " ";
-        s.notes.push_back(std::string(mapFile) + " path: " + path);
-        if (!ran) {
-            p.Problem(std::string(mapFile) + ": the macro didn't play: " + tas::GetStatus().message);
-            continue;
-        }
-        if (one.phase != routes::Phase::Finished) {
-            p.Problem(fmt::format("{}: the route didn't finish on the recording run (phase {}, {} split(s), {:.3f} s)", mapFile,
-                                  static_cast<int>(one.phase), one.splits.size(), one.time));
-            continue;
-        }
-        WaitTicks(5);
-        const std::string runFile = shared("run.file"), phase = shared("run.phase");
-        if (runFile.find("TT") == std::string::npos || phase != "finished")
-            p.Problem(fmt::format("{}: the speedrun timer didn't follow the route ({}, {})", mapFile, runFile, phase));
-
-        // The same again: verified against the recording, the same time to the tick
-        routes::Arm(route->Id());
-        WaitTicks(2);
-        const auto [ran2, second] = play(nullptr);
-        const routes::State two = routes::Current();
-        s.notes.push_back(fmt::format("{}: {} in {:.4f} s, then {:.4f} s; playback {} ({} frames checked){}", mapFile, route->name,
-                                      one.time, two.time, second.verified ? "verified" : "not verified", second.syncChecked,
-                                      two.ghost ? ", raced the ghost" : ""));
-        if (!ran2) p.Problem(std::string(mapFile) + ": the second playback didn't run");
-        else if (!second.verified || second.desyncFrame >= 0)
-            p.Problem(fmt::format("{}: the playback wasn't verified (desync on frame {}: {})", mapFile, second.desyncFrame,
-                                  second.desyncInfo));
-        if (two.phase != routes::Phase::Finished) p.Problem(std::string(mapFile) + ": the route didn't finish on the playback");
-        else if (two.time != one.time) p.Problem(fmt::format("{}: {:.6f} s on playback, {:.6f} s recorded", mapFile, two.time, one.time));
-        if (!two.ghost) p.Problem(std::string(mapFile) + ": no ghost of the first run to race");
-        if (two.best != one.time) p.Problem(fmt::format("{}: the best time is {:.6f}, not the first run's", mapFile, two.best));
-        else if (two.newBest) p.Problem(std::string(mapFile) + ": the same time again counted as a new best");
-        if (!one.newBest) p.Problem(std::string(mapFile) + ": the first run (no best before it) wasn't the best");
-    }
-
-    routes::Stop();
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
-    OnRenderThread([&] {
-        timer->SetEnabled(timerWas);
-        trials->SetEnabled(trialsWas);
-        gui::visible = true;
-    });
-    // Back to the test level
-    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
-        if (Lower(maps[static_cast<std::size_t>(i)].file) == Lower(g_options.map)) {
-            const int checkpoint = std::min(g_options.checkpoint, static_cast<int>(maps[static_cast<std::size_t>(i)].checkpoints.size()));
-            const int before = g_loadsFinished.load();
-            OnRenderThread([i, checkpoint] { levels::Load(i, checkpoint, levels::Method::Game, false); });
-            WaitFor(120.0, [&] { return g_loadsFinished.load() > before; });
-            WaitFor(60.0, [] { return game::GetStatus().hasPawn && !game::IsLoading(); });
-            WaitPlayerReady(30.0);
-            break;
-        }
-    End(s);
-}
-
-// The in-game Level Editor (step 13): in tests/mods/layer-test's layer for the Prologue, it places a pad of the mod's
-// own class where the camera looks (saved to levels/edge_p.toml, spawned from it), shows its gizmo, moves it live, and
-// an edit of its location, scale and a property is saved and spawned again with them. The Collision View (when
-// memenu-collision is loaded) draws the placed pad, a mod's class, as a live cylinder. The layer file is put back as it was.
-void TestLevelEditor()
-{
-    Step& s = Begin("Mirage level editor");
-    Probe p(s);
-    namespace layers = mirage::layers;
-    Module* editor = modules::Find("Level Editor");
-    Module* view = modules::Find("Collision View");
-    auto* inspect = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Inspect")) : nullptr;
-    auto* cylinders = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Cylinders")) : nullptr;
-    std::filesystem::path file;
-    for (const auto& m : mirage::mods::List())
-        if (m.id == "layer-test") file = m.dir / "levels" / "edge_p.toml";
-    if (!editor || file.empty()) {
-        p.Problem("the Level Editor or the layer-test mod is missing");
-        End(s);
-        return;
-    }
-    std::string original;
-    {
-        std::ifstream in(file, std::ios::binary);
-        original.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    }
-    // The Collision View (memenu-collision) is optional: switched off in the mod manager, its check is left out
-    const bool withView = view && inspect && cylinders;
-    if (!withView) s.notes.push_back("Collision View check left out: memenu-collision isn't loaded");
-    const bool editorWas = editor->Enabled();
-    const bool viewWas = withView && view->Enabled(), inspectWas = withView && inspect->Get();
-    const bool expandedWas = withView && view->expanded, cylindersWas = withView && cylinders->Get();
-    game::SetCameraTracking(true);
-    OnRenderThread([&] {
-        editor->SetEnabled(true);
-        gui::visible = true;
-    });
-    level_editor::Select("layer-test", "");
-    WaitTicks(5);
-
-    // 1. Placed where the camera looks: in the file, spawned from it
-    const std::string name = level_editor::PlaceWhereLooking("classes/LayerPad.uc");
-    Classes::AActor* placed = nullptr;
-    WaitFor(15.0, [&] { OnGameThread([&] { placed = layers::Find("layer-test", name); }); return placed != nullptr; });
-    std::vector<layers::EditActor> entries;
-    OnGameThread([&] { layers::Read("layer-test", entries); });
-    const auto entry = std::find_if(entries.begin(), entries.end(), [&](const layers::EditActor& a) { return a.name == name; });
-    s.notes.push_back(fmt::format("placed {} ({} entries in the layer now)", name, entries.size()));
-    if (name.empty() || entry == entries.end()) {
-        p.Problem("the placed actor isn't in levels/edge_p.toml");
-    } else if (!placed) {
-        p.Problem("the placed actor wasn't spawned from the layer");
-    } else {
-        // 2. Its gizmo, with it selected
-        level_editor::Select("layer-test", name);
-        const std::uint64_t gizmo = level_editor::GizmoFrames();
-        WaitFor(5.0, [&] { return level_editor::GizmoFrames() > gizmo + 3; });
-        float displayW = 0.f;
-        OnRenderThread([&] { displayW = ImGui::GetIO().DisplaySize.x; });
-        if (level_editor::GizmoFrames() <= gizmo + 3) {
-            if (displayW >= 200.f) p.Problem("the gizmo wasn't drawn on the selected actor");
-            else s.notes.push_back("gizmo not checked: the game is minimized (no screen to draw on)");
-        }
-
-        // 3. Moved live (the gizmo's drag): the same actor, somewhere else at once
-        layers::EditActor moved = *entry;
-        Classes::FVector player{};
-        OnGameThread([&] { if (auto* pawn = game::Pawn()) player = pawn->Location; });
-        moved.location[0] = player.X + 150.f;
-        moved.location[1] = player.Y;
-        moved.location[2] = player.Z;
-        float liveX = 0.f;
-        OnGameThread([&] {
-            layers::Place(placed, moved.location, moved.rotation, moved.scale);
-            liveX = placed->Location.X;
-        });
-        if (std::fabs(liveX - moved.location[0]) > 1.f) p.Problem(fmt::format("moving it live left it at X {}", liveX));
-
-        // 4. An edit saved: location, scale and a property, spawned again with them
-        moved.scale = 1.5f;
-        moved.properties = {{"Strength", "1234.0"}};
-        *std::find_if(entries.begin(), entries.end(), [&](const layers::EditActor& a) { return a.name == name; }) = moved;
-        std::string error;
-        bool written = false;
-        OnGameThread([&] { written = layers::Write("layer-test", entries, &error); });
-        if (!written) p.Problem("saving failed: " + error);
-        Classes::AActor* again = nullptr;
-        WaitFor(10.0, [&] {
-            OnGameThread([&] { again = layers::Find("layer-test", name); });
-            return again && again != placed;
-        });
-        float x = 0.f, scale = 0.f, strength = 0.f;
-        std::string objectName;
-        if (again)
-            OnGameThread([&] {
-                x = again->Location.X;
-                scale = again->DrawScale;
-                strength = mirage::reflect::GetFloat(mirage::reflect::Resolve(again->Class, again, "Strength"));
-                objectName = again->GetName();
-            });
-        s.notes.push_back(fmt::format("saved and spawned again: X {:.0f}, scale {:.2f}, Strength {:.0f}", x, scale, strength));
-        if (!again || again == placed) p.Problem("the saved layer wasn't spawned again");
-        else if (std::fabs(x - moved.location[0]) > 1.f || std::fabs(scale - 1.5f) > 1e-3f || strength != 1234.f)
-            p.Problem("the spawned actor doesn't have the saved location, scale and Strength");
-
-        // 5. The editor's tools: the class list, the class's properties, duplicate, undo / redo, drop to floor, snap
-        if (again) {
-            namespace le = level_editor;
-            const auto layerNow = [] { return le::Entries(); };
-            const auto entryOf = [&](const std::string& n) {
-                for (const auto& e : layerNow()) if (e.name == n) return e;
-                return layers::EditActor{};
-            };
-            const auto spawned = [](const std::string& n) {
-                Classes::AActor* a = nullptr;
-                OnGameThread([&] { a = layers::Find("layer-test", n); });
-                return a;
-            };
-            // Placeable classes: an engine trigger yes, the abstract Actor no
-            std::vector<std::string> classes;
-            OnGameThread([&] { classes = le::PlaceableClasses(); });
-            const bool hasTrigger = std::find(classes.begin(), classes.end(), "Engine.Trigger") != classes.end();
-            const bool hasActor = std::find(classes.begin(), classes.end(), "Engine.Actor") != classes.end();
-            if (!hasTrigger || hasActor)
-                p.Problem(fmt::format("the class list ({} classes) {} Engine.Trigger and {} Engine.Actor", classes.size(),
-                                      hasTrigger ? "has" : "lacks", hasActor ? "has" : "doesn't have"));
-            // Its class's editable properties, with the value the layer gave it
-            le::Select("layer-test", name);
-            WaitFor(5.0, [] { return le::Selected() >= 0; });
-            std::vector<le::Property> props;
-            OnGameThread([&] { props = le::PropertiesOf(name); });
-            const auto strengthProp = std::find_if(props.begin(), props.end(), [](const le::Property& x) { return x.name == "Strength"; });
-            if (strengthProp == props.end()) p.Problem(fmt::format("Strength isn't among its {} editable properties", props.size()));
-            else if (util::ParseFloatOr(strengthProp->value, 0.f) != 1234.f) p.Problem("its Strength reads " + strengthProp->value + ", the layer says 1234");
-
-            // Duplicate: a second entry, spawned; undo takes it away (and its actor), redo brings it back
-            const std::size_t before = layerNow().size();
-            const std::size_t undoBefore = le::UndoDepth();
-            le::Duplicate();
-            WaitFor(5.0, [&] { return layerNow().size() == before + 1; });
-            const auto after = layerNow();
-            const std::string copy = after.size() == before + 1 ? after.back().name : std::string();
-            WaitFor(10.0, [&] { return !copy.empty() && spawned(copy) != nullptr; });
-            if (copy.empty() || !spawned(copy)) p.Problem("Duplicate didn't add a spawned copy");
-            le::Undo();
-            WaitFor(10.0, [&] { return layerNow().size() == before && spawned(copy) == nullptr; });
-            if (layerNow().size() != before || spawned(copy)) p.Problem("Undo didn't take the copy away");
-            le::Redo();
-            WaitFor(10.0, [&] { return layerNow().size() == before + 1 && spawned(copy) != nullptr; });
-            if (layerNow().size() != before + 1) p.Problem("Redo didn't bring the copy back");
-            if (le::UndoDepth() <= undoBefore) p.Problem("the editor's history didn't grow");
-
-            // Drop to floor: down onto the floor (it starts at the player's height), and again: it stays
-            le::Select("layer-test", name);
-            WaitFor(5.0, [&] { const int i = le::Selected(); return i >= 0 && layerNow()[static_cast<std::size_t>(i)].name == name; });
-            const float z0 = entryOf(name).location[2];
-            le::DropToFloor();
-            WaitFor(5.0, [&] { return entryOf(name).location[2] != z0; });
-            const float z1 = entryOf(name).location[2];
-            WaitFor(10.0, [&] { return spawned(name) != nullptr; });
-            le::DropToFloor();
-            WaitTicks(10);
-            const float z2 = entryOf(name).location[2];
-            if (!(z1 < z0)) p.Problem(fmt::format("Drop to floor left it at Z {:.0f} (from {:.0f})", z1, z0));
-            else if (std::fabs(z2 - z1) > 2.f) p.Problem(fmt::format("dropped again it moved from Z {:.1f} to {:.1f}: not on the floor", z1, z2));
-
-            // Snap: onto a 64 grid
-            le::SetSnap(64.f, 45.f, 0.f);
-            le::SnapSelected();
-            WaitFor(5.0, [&] { const auto e = entryOf(name); return std::fmod(std::fabs(e.location[0]), 64.f) < 0.01f; });
-            const auto snapped = entryOf(name);
-            le::SetSnap(0.f, 0.f, 0.f);
-            bool onGrid = true;
-            for (float v : snapped.location) onGrid &= std::fabs(v - std::round(v / 64.f) * 64.f) < 0.01f;
-            if (!onGrid) p.Problem(fmt::format("Snap left it at [{:.1f}, {:.1f}, {:.1f}]", snapped.location[0], snapped.location[1], snapped.location[2]));
-            s.notes.push_back(fmt::format("{} placeable classes; {} editable properties (Strength {}); duplicate, undo, redo; "
-                                          "dropped to the floor {:.0f} -> {:.0f}; snapped to [{:.0f}, {:.0f}, {:.0f}]",
-                                          classes.size(), props.size(), strengthProp != props.end() ? strengthProp->value : "?", z0, z1,
-                                          snapped.location[0], snapped.location[1], snapped.location[2]));
-            // The pad as it is now, for the Collision View check below
-            WaitFor(10.0, [&] { again = spawned(name); return again != nullptr; });
-            if (again) OnGameThread([&] { objectName = again->GetName(); });
-        }
-
-        // 6. The Collision View draws it: among the volumes near the player
-        if (again && withView) {
-            OnRenderThread([&] {
-                view->expanded = true;
-                inspect->Set(true);
-                cylinders->Set(true);       // A mod's class is drawn as a live cylinder, found only with these on
-                if (!view->Enabled()) view->SetEnabled(true);
-            });
-            bool listed = false;
-            WaitFor(10.0, [&] {
-                const auto info = CollisionShared("inspect");
-                for (const auto& n : info.value("nearby", nlohmann::json::array()))
-                    listed |= n.value("name", std::string()).find(objectName) != std::string::npos;
-                for (const auto& n : info.value("live", nlohmann::json::array()))     // A mod's class: drawn live
-                    listed |= n.is_string() && n.get<std::string>() == objectName;
-                return listed;
-            });
-            if (!listed) p.Problem(objectName + " isn't drawn by the Collision View (nearby volumes or live cylinders)");
-            else s.notes.push_back("the Collision View lists " + objectName);
-        }
-    }
-
-    // The layer as it was
-    {
-        std::ofstream out(file, std::ios::binary | std::ios::trunc);
-        out << original;
-    }
-    OnRenderThread([&] {
-        if (withView) {
-            inspect->Set(inspectWas);
-            cylinders->Set(cylindersWas);
-            view->expanded = expandedWas;
-            view->SetEnabled(viewWas);
-        }
-        editor->SetEnabled(editorWas);
-    });
-    WaitFor(10.0, [&] {
-        Classes::AActor* left = nullptr;
-        OnGameThread([&] { left = layers::Find("layer-test", name); });
-        return left == nullptr;
-    });
     End(s);
 }
 
@@ -5645,259 +3521,52 @@ void TestChangeLog()
     End(s);
 }
 
-// The in-game editors (step 16): the World Explorer lists the player among the actors in play; selected, the Object
-// Inspector shows its live GroundSpeed, a Vector it opens into X/Y/Z, its Controller as an object to select; typed edits
-// of GroundSpeed and JumpZ change the pawn and Undo puts both back exactly; a Lua mod's transaction (tests/mods/
-// inspector-lua: JumpZ doubled) shows in the inspector and its revert too; a selected actor that is destroyed reads as
-// gone (never another object); both windows draw.
-void TestInspector()
-{
-    Step& s = Begin("Mirage inspector");
-    Probe p(s);
-    Module* explorer = modules::Find("World Explorer");
-    Module* inspector = modules::Find("Object Inspector");
-    Module* modTest = modules::Find("Inspector (Lua)");
-    if (!explorer || !inspector || !modTest) {
-        p.Problem("the World Explorer, the Object Inspector or the Inspector (Lua) test mod is missing");
-        End(s);
-        return;
-    }
-    const bool explorerWas = explorer->Enabled(), inspectorWas = inspector->Enabled();
-    OnRenderThread([&] {
-        explorer->SetEnabled(true);
-        inspector->SetEnabled(true);
-        modTest->SetEnabled(false);
-        gui::visible = true;
-    });
-    const auto rowOf = [](const std::vector<editor::Row>& rows, const std::string& path) {
-        const auto it = std::find_if(rows.begin(), rows.end(), [&](const editor::Row& r) { return r.path == path; });
-        return it == rows.end() ? editor::Row{} : *it;
-    };
-    const auto rows = [](const std::set<std::string>& open = {}) {
-        std::vector<editor::Row> out;
-        OnGameThread([&] { out = editor::Rows(editor::Selected(), "", open); });
-        return out;
-    };
-    const auto fmtFloat = [](float f) {
-        char b[48];
-        std::snprintf(b, sizeof b, "%.6g", f);
-        return std::string(b);
-    };
-
-    // 1. The explorer lists the player; selected from there
-    std::vector<editor::ActorRow> actors;
-    Classes::ATdPlayerPawn* pawn = nullptr;
-    OnGameThread([&] {
-        pawn = game::Pawn();
-        actors = editor::Actors();
-    });
-    const auto me = std::find_if(actors.begin(), actors.end(), [&](const editor::ActorRow& a) { return a.actor == pawn; });
-    if (!pawn || me == actors.end()) p.Problem(fmt::format("the explorer's {} actors don't include the player", actors.size()));
-    OnGameThread([&] { editor::Select(pawn); });
-    if (editor::SelectedLabel().find("TdPlayerPawn") == std::string::npos) p.Problem("selecting the player: " + editor::SelectedLabel());
-
-    // 2. Its properties, live
-    float ground = 0.f, jump = 0.f;
-    OnGameThread([&] { ground = pawn->GroundSpeed; jump = pawn->JumpZ; });
-    auto now = rows({"Location"});
-    const editor::Row speedRow = rowOf(now, "GroundSpeed");
-    if (speedRow.value != fmtFloat(ground) || !speedRow.editable)
-        p.Problem(fmt::format("GroundSpeed reads '{}' (editable {}), the pawn has {}", speedRow.value, speedRow.editable, ground));
-    if (rowOf(now, "Location").kind != "Vector" || rowOf(now, "Location.X").path.empty())
-        p.Problem("Location isn't a Vector row that opens into X, Y, Z");
-    const editor::Row controller = rowOf(now, "Controller");
-    void* pc = nullptr;
-    OnGameThread([&] { pc = game::Controller(); });
-    if (controller.ref != pc) p.Problem("the Controller row doesn't point to the player's controller");
-    s.notes.push_back(fmt::format("{} actors listed; the player has {} rows (Location opened), GroundSpeed {}", actors.size(), now.size(), speedRow.value));
-
-    // 3. Typed edits, and Undo
-    const std::size_t depthBefore = editor::UndoDepth();
-    std::string error;
-    bool okSpeed = false, okJump = false;
-    OnGameThread([&] {
-        okSpeed = editor::SetValue(editor::Selected(), "GroundSpeed", "1234", &error);
-        okJump = editor::SetValue(editor::Selected(), "JumpZ", "777", &error);
-    });
-    float speedSet = 0.f, jumpSet = 0.f;
-    OnGameThread([&] { speedSet = pawn->GroundSpeed; jumpSet = pawn->JumpZ; });
-    if (!okSpeed || !okJump || speedSet != 1234.f || jumpSet != 777.f)
-        p.Problem(fmt::format("the edits didn't land: GroundSpeed {}, JumpZ {} ({})", speedSet, jumpSet, error));
-    if (editor::UndoDepth() != depthBefore + 2) p.Problem("two edits didn't make two undo steps");
-    OnGameThread([&] { editor::Undo(); editor::Undo(); });
-    float speedBack = 0.f, jumpBack = 0.f;
-    OnGameThread([&] { speedBack = pawn->GroundSpeed; jumpBack = pawn->JumpZ; });
-    if (speedBack != ground || jumpBack != jump)
-        p.Problem(fmt::format("Undo left GroundSpeed {} (was {}), JumpZ {} (was {})", speedBack, ground, jumpBack, jump));
-
-    // 4. A mod's change shows in the inspector, and its revert too
-    OnRenderThread([&] { modTest->SetEnabled(true); });
-    WaitFor(5.0, [&] { return rowOf(rows(), "JumpZ").value == fmtFloat(jump * 2.f); });
-    const std::string modded = rowOf(rows(), "JumpZ").value;
-    OnRenderThread([&] { modTest->SetEnabled(false); });
-    WaitFor(5.0, [&] { return rowOf(rows(), "JumpZ").value == fmtFloat(jump); });
-    const std::string reverted = rowOf(rows(), "JumpZ").value;
-    if (modded != fmtFloat(jump * 2.f)) p.Problem("the inspector didn't show the mod's JumpZ (" + modded + ")");
-    if (reverted != fmtFloat(jump)) p.Problem("the inspector didn't show the mod's revert (" + reverted + ")");
-
-    // 5. A selected actor that is destroyed: gone, never another object
-    Classes::AActor* probe = nullptr;
-    OnGameThread([&] {
-        Classes::FVector at = pawn->Location;
-        at.X += 300.f;
-        probe = pawn->Spawn(Classes::ADynamicSMActor_Spawnable::StaticClass(), nullptr, Classes::FName{}, at, pawn->Rotation, nullptr, true);
-        editor::Select(probe);
-    });
-    Classes::UObject* selectedProbe = nullptr;
-    OnGameThread([&] { selectedProbe = editor::Selected(); if (probe) probe->Destroy(); });
-    Classes::UObject* afterDestroy = reinterpret_cast<Classes::UObject*>(1);
-    OnGameThread([&] { afterDestroy = editor::Selected(); });
-    if (!probe || selectedProbe != probe) p.Problem("selecting a spawned actor didn't hold it");
-    if (afterDestroy) p.Problem("the destroyed actor is still the selection");
-    if (!rows().empty()) p.Problem("the inspector still lists properties of the destroyed actor");
-
-    // The windows drew
-    const std::uint64_t e0 = editor::Frames(editor::Window::Explorer), i0 = editor::Frames(editor::Window::Inspector);
-    WaitFor(5.0, [&] { return editor::Frames(editor::Window::Explorer) > e0 + 3 && editor::Frames(editor::Window::Inspector) > i0 + 3; });
-    if (editor::Frames(editor::Window::Explorer) <= e0 + 3 || editor::Frames(editor::Window::Inspector) <= i0 + 3)
-        p.Problem("the World Explorer or the Object Inspector window wasn't drawn");
-
-    OnGameThread([] { editor::Select(nullptr); });
-    OnRenderThread([&] {
-        explorer->SetEnabled(explorerWas);
-        inspector->SetEnabled(inspectorWas);
-    });
-    End(s);
-}
-
-// The Mirage Showcase (mods/memenu-showcase), each of its parts doing what it says in the game: its window draws; it
-// reads the player live; its hook on TdPlayerPawn.Landed counts a jump's landing; its injection into
-// TdMove_Jump.StartMove makes a standing jump lower and its low gravity makes one higher (each measured against a jump
-// without it in the same run, then put back); a bounce pad of the class it describes in Lua launches the player; and
-// switching it off puts the gravity back and removes its pads. Its World section lists the actors around the player, and
-// watching actors, the dropped pad comes as actor_added.
-float ShowcaseShared(const char* key)
-{
-    char v[64]{};
-    mirage::mods::game_api::ShareGet("memenu-showcase", key, v, sizeof v);
-    return util::ParseFloatOr(v, -1.f);
-}
-
 float StandingJump();
 
-void TestShowcase()
+// The game's own clock (WorldInfo.TimeSeconds): what a wait in game time measures. -1 without a world.
+double GameSeconds()
 {
-    Step& s = Begin("Mirage showcase");
-    Probe p(s);
-    Module* m = modules::Find("Mirage Showcase");
-    const auto box = [&](const char* name) { return m ? dynamic_cast<ctl::Checkbox*>(m->FindSetting(name)) : nullptr; };
-    ctl::Checkbox *lowGravity = box("Low gravity"), *weighted = box("Weighted jumps"), *drop = box("Drop a pad"),
-                  *watch = box("Watch actors");
-    if (!m || !lowGravity || !weighted || !drop || !watch) {
-        p.Problem("the Mirage Showcase module or its settings are missing (mods/memenu-showcase)");
-        End(s);
-        return;
-    }
-    const bool wasOn = m->Enabled();
-    OnRenderThread([&] {
-        lowGravity->Set(false);
-        weighted->Set(false);
-        m->SetEnabled(true);
-        gui::visible = true;
-    });
-
-    // The window, and the player read live
-    WaitFor(10.0, [] { return ShowcaseShared("frames") > 3.f; });
-    if (ShowcaseShared("frames") <= 3.f) p.Problem("the showcase window wasn't drawn");
-    float z = 0.f;
-    OnGameThread([&] { if (auto* pawn = game::Pawn()) z = pawn->Location.Z; });
-    WaitTicks(3);
-    if (std::fabs(ShowcaseShared("pawn_z") - z) > 50.f)
-        p.Problem(fmt::format("it read the player at Z {:.0f}, the player is at {:.0f}", ShowcaseShared("pawn_z"), z));
-    // The world: the actors around the player (refreshed 4 times a second)
-    WaitFor(3.0, [] { return ShowcaseShared("nearby") > 0.f; });
-    if (ShowcaseShared("nearby") <= 0.f) p.Problem("its World section found no actors around the player");
-
-    // Hook: a jump's landing; a jump without anything, to compare with
-    const float landingsBefore = ShowcaseShared("landings");
-    const float plain = StandingJump();
-    WaitTicks(5);
-    const float landings = ShowcaseShared("landings") - landingsBefore;
-    if (plain <= 0.f) p.Problem("the plain standing jump didn't happen");
-    if (landings < 1.f) p.Problem("its Landed hook didn't see the jump's landing");
-
-    // Injection: weighted jumps are lower
-    OnRenderThread([&] { weighted->Set(true); });
-    WaitTicks(3);
-    const float heavy = StandingJump();
-    const float runs = ShowcaseShared("injected_runs");
-    OnRenderThread([&] { weighted->Set(false); });
-    WaitTicks(3);
-    if (runs < 1.f) p.Problem("its injection into TdMove_Jump.StartMove never ran");
-    else if (heavy >= plain - 20.f) p.Problem(fmt::format("a weighted jump went {:.0f} high, a plain one {:.0f}", heavy, plain));
-
-    // Writing: low gravity, higher jumps, the level's value back after
-    float gravityBefore = 0.f, gravityOn = 0.f, gravityAfter = 0.f;
-    OnGameThread([&] { if (auto* w = game::World()) gravityBefore = w->WorldGravityZ; });
-    OnRenderThread([&] { lowGravity->Set(true); });
-    WaitFor(5.0, [] { return ShowcaseShared("gravity") != 0.f; });
-    OnGameThread([&] { if (auto* w = game::World()) gravityOn = w->WorldGravityZ; });
-    const float floaty = StandingJump();
-    OnRenderThread([&] { lowGravity->Set(false); });
-    WaitFor(5.0, [] { return ShowcaseShared("gravity") == 0.f; });
-    WaitTicks(3);
-    OnGameThread([&] { if (auto* w = game::World()) gravityAfter = w->WorldGravityZ; });
-    if (std::fabs(gravityOn - gravityBefore * 0.35f) > 1.f)
-        p.Problem(fmt::format("low gravity set {:.0f}, not 0.35 of the level's {:.0f}", gravityOn, gravityBefore));
-    if (floaty <= plain + 20.f) p.Problem(fmt::format("a low-gravity jump went {:.0f} high, a plain one {:.0f}", floaty, plain));
-    if (gravityAfter != gravityBefore) p.Problem(fmt::format("the gravity is {:.0f} after, {:.0f} before", gravityAfter, gravityBefore));
-
-    // A class made in Lua: a pad dropped under the player launches it (the class compiles the first time: seconds)
-    WaitGrounded();
-    const float bouncesBefore = ShowcaseShared("bounces");
-    OnRenderThread([&] { watch->Set(true); });      // Watching actors: the pad comes as actor_added
-    WaitTicks(3);
-    const float addedBefore = ShowcaseShared("actors_added");
-    OnRenderThread([&] { drop->Set(true); });
-    WaitFor(60.0, [] { return ShowcaseShared("pads") >= 1.f; });
-    WaitFor(10.0, [&] { return ShowcaseShared("bounces") > bouncesBefore; });
-    const float bounced = ShowcaseShared("bounces") - bouncesBefore;
-    if (ShowcaseShared("pads") < 1.f) p.Problem("no pad was dropped (its class didn't compile? the log says)");
-    else if (bounced < 1.f) p.Problem("the pad didn't launch the player");
-    WaitFor(3.0, [&] { return ShowcaseShared("actors_added") > addedBefore; });
-    const float addedSeen = ShowcaseShared("actors_added") - addedBefore;
-    if (addedSeen < 1.f) p.Problem("watching actors, it didn't see the pad come (actor_added)");
-    OnRenderThread([&] { watch->Set(false); });
-
-    s.notes.push_back(fmt::format("standing jump {:.0f}, weighted {:.0f} (injection ran {:.0f} times), low gravity {:.0f} "
-                                  "(gravity {:.0f} -> {:.0f}); {:.0f} landing(s) hooked; pad bounces {:.0f}; {:.0f} event(s) logged; "
-                                  "{:.0f} actors within 30 m, {:.0f} added while watching",
-                                  plain, heavy, runs, floaty, gravityBefore, gravityOn, landings, bounced, ShowcaseShared("events"),
-                                  ShowcaseShared("nearby"), addedSeen));
-
-    // Off: its pads go (the player stops bouncing) and nothing of it stays
-    OnRenderThread([&] { m->SetEnabled(wasOn); });
-    if (!wasOn) {
-        int left = -1;
-        WaitFor(5.0, [&] {
-            OnGameThread([&] {
-                left = 0;
-                auto& objects = Classes::UObject::GetGlobalObjects();
-                for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
-                    if (auto* o = objects.GetByIndex(i); o && o->Class && o->Class->GetName() == "MirageShowcasePad" &&
-                                                         o->GetName().rfind("Default__", 0) != 0 &&
-                                                         !static_cast<Classes::AActor*>(o)->bDeleteMe)
-                        ++left;
-            });
-            return left == 0;
-        });
-        if (left != 0) p.Problem(fmt::format("{} pad(s) left after switching the showcase off", left));
-    }
-    WaitGrounded();
-    End(s);
+    double t = -1.0;
+    OnGameThread([&] {
+        if (auto* w = static_cast<Classes::AWorldInfo*>(game::World())) t = w->TimeSeconds;
+    }, 1.0);
+    return t;
 }
 
-// A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
+// A key pressed or let go as if on the keyboard, through the engine's input (the loader's input service): the player's
+// own bindings decide what it does. False if the engine's input isn't there.
+bool KeyEvent(const std::string& key, bool down)
+{
+    bool ok = false;
+    OnGameThread([&] {
+        const Classes::FName name(key.c_str());
+        tas::engine::RawInput in;
+        in.nameIndex = name.Index;
+        in.nameNumber = name.Number;
+        in.event = down ? 0 : 1;
+        in.value = 1.f;
+        ok = name.Index != 0 && tas::engine::Inject(in);
+    });
+    return ok;
+}
+
+// Holds `key` for `seconds` of game time (the self-test runs uncapped: a count of ticks is almost no game time),
+// calling `each` on the game thread every tick meanwhile. False if the key couldn't be pressed.
+bool HoldKey(const std::string& key, double seconds, const std::function<void()>& each)
+{
+    if (!KeyEvent(key, true)) return false;
+    const double start = GameSeconds();
+    while (!g_aborted) {
+        if (each) OnGameThread(each, 1.0);
+        const double now = GameSeconds();
+        if (now < 0.0 || now - start >= seconds) break;
+        WaitTicks(1);
+    }
+    KeyEvent(key, false);
+    return true;
+}
+
+// A standing jump: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
     std::string jumpKey;
@@ -5909,26 +3578,18 @@ float StandingJump()
         if (auto* pawn = game::Pawn()) startZ = topZ = pawn->Location.Z, ok = true;
     });
     if (!ok) return -1.f;
-    tas::Macro mac(60.f);
-    mac.Describe("memenu self-test: standing jump").Wait(5).Hold(jumpKey, 2).Wait(80);
-    tas::Replay saved;
-    tas::WithReplay([&](tas::Replay& r) { saved = r; r = mac.Build(); });
-    tas::Play();
-    bool started = false;
-    const ULONGLONG deadline = GetTickCount64() + 20000;
-    while (GetTickCount64() < deadline && !g_aborted) {
-        const tas::Status st = tas::GetStatus();
-        if (st.mode == tas::Mode::Playing) started = true;
-        if (started && (st.mode != tas::Mode::Playing || st.frame >= st.frames)) break;
-        OnGameThread([&] {
-            if (auto* pawn = game::Pawn()) topZ = std::max(topZ, pawn->Location.Z);
-        }, 0.5);
+    const auto sample = [&] {
+        if (auto* pawn = game::Pawn()) topZ = std::max(topZ, pawn->Location.Z);
+    };
+    // Pressed briefly (a tap), then watched for the rest of a jump's time in the air
+    if (!HoldKey(jumpKey, 0.05, sample)) return -1.f;
+    const double start = GameSeconds();
+    while (!g_aborted && GameSeconds() - start < 1.5) {
+        OnGameThread(sample, 1.0);
+        WaitTicks(1);
     }
-    tas::Stop();
-    WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
-    tas::WithReplay([&](tas::Replay& r) { r = saved; });
     WaitGrounded();
-    return started ? topZ - startZ : -1.f;
+    return topZ - startZ;
 }
 
 // Script injection (step 11), the milestone: two Lua mods (tests/mods/inject-a, inject-b) inject at one place in the
@@ -6375,7 +4036,6 @@ void TestMirageScriptPatch()
     p.Check(1, true);
     End(s);
 }
-#endif
 
 // Mirage step 5, with the self-test's own mods (tests/mods, put in selftest-mods by `memenu game-test`): load order and
 // what is left out, the world phase, a crashing mod caught and named while the rest go on (and left out next time),
@@ -6769,24 +4429,8 @@ const Named* FeatureList()
 {
 #if MEMENU_GAME
     static const Named tests[] = {
-#if MEMENU_FEATURE_TAS
-        {"TAS macro", &TestTasMacro, true},
-        {"TAS camera keys", &TestTasCamera, true},
-        {"TAS go to and step", &TestTasGoto, true},
-        {"TAS desync fixing", &TestTasDesync, true},
-        {"TAS snapshots", &TestTasSnapshots, true},
-        {"TAS workflow", &TestTasWorkflow, false},      // Records and loops in real time
-        {"TAS memory survey", &TestTasMemorySurvey, false, true},   // Measurements only: --only
-        {"Rendering thread off", &TestRenderingThreadOff, false, true},
-        {"Input overlay", &TestInputOverlay, true},
-#endif
-        {"Kickglitch helper", &TestKickglitchHelper, false},
-        {"Auto kickglitch", &TestAutoKickglitch, false},
-        {"Kill bots", &TestKillBots, false},
-        {"Keep key bindings", &TestKeepKeyBindings, false},
         {"Collision view inspect", &TestCollisionInspect, false},
         {"Collision view static geometry", &TestCollisionStatic, false},
-        {"Speedrun timer", &TestSpeedrunTimer, false},
         {"Engine state hook", &TestEngineStateHook, false},
         {"Mirage runtime", &TestMirageRuntime, false},
         {"Mirage layouts", &TestMirageLayouts, false},
@@ -6800,12 +4444,8 @@ const Named* FeatureList()
         {"Memory manager", &TestMemoryManager, false},
         {"Crash reporter", &TestCrashReporter, false},
         {"Mirage C# mods", &TestCSharpMods, false},
-#if MEMENU_FEATURE_SCRIPT_EDITOR
-        {"Mirage script editor", &TestScriptEditor, false},
-#endif
         {"Mirage content", &TestMirageContent, false},
         {"Mirage textures", &TestMirageTextures, false},
-#if MEMENU_FEATURE_TAS
         {"Mirage script patch", &TestMirageScriptPatch, true},
         {"Mirage script injection", &TestScriptInjection, false},
         {"Mirage script injection (Lua)", &TestScriptInjectionMods, true},
@@ -6816,17 +4456,11 @@ const Named* FeatureList()
         {"Mirage classes (C#)", &TestClassesCSharp, false},
         {"Mirage classes (example mod)", &TestClassesExample, false},
         {"Mirage level additions", &TestLevelLayers, false},
-        {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage change log", &TestChangeLog, false},
-        {"Mirage inspector", &TestInspector, false},
-        {"Mirage showcase", &TestShowcase, false},
-        {"Mirage time trials", &TestTimeTrials, false},
-#endif
         {"Engine script events", &TestEngineScriptEvents, false},
-        {"Frame rate limit", &TestFrameRate, false},
         {"Engine console", &TestEngineConsole, false},
         {"Engine death hook", &TestEngineDeath, false},     // Last: it restarts the checkpoint
         {nullptr, nullptr, false},
@@ -6895,50 +4529,6 @@ static void RunTests(bool fromMenu)
     if (!listening) game::OnLevelLoad(&OnLevelLoad);
     listening = true;
 #endif
-#if MEMENU_FEATURE_TAS
-    // Hang watchdog: no frame for 8 s, the game's threads' stacks go to the log (once a hang)
-    static std::atomic<bool> watching{true};
-    watching = true;                    // Again for every run
-    std::thread watchdog([] {
-        unsigned last = hooks::EndSceneCalls();
-        ULONGLONG since = GetTickCount64();
-        bool dumped = false;
-        while (watching) {
-            Sleep(250);
-            const unsigned now = hooks::EndSceneCalls();
-            static ULONGLONG loadingSince = 0;
-            if (game::IsLoading()) {
-                if (!loadingSince) loadingSince = GetTickCount64();
-            } else {
-                loadingSince = 0;
-            }
-            if (now != last && !(loadingSince && GetTickCount64() - loadingSince > 10000)) {
-                last = now;
-                since = GetTickCount64();
-                dumped = false;
-                continue;
-            }
-            if (dumped || (GetTickCount64() - since < 8000 && !loadingSince)) continue;
-            dumped = true;
-            spdlog::warn("Hang: no frame for 8 s, or loading for 10 s (step: {})", g_current);
-            for (int round = 0; round < 2; ++round) {
-                for (const auto& t : tas::memmap::Threads()) {
-                    if (t.startModule != "mirrorsedge.exe" && t.startModule.rfind("physx", 0) != 0) continue;
-                    std::string line;
-                    for (const auto& w : tas::memmap::StackSample(t.id, 32)) line += w + " ";
-                    spdlog::warn("Hang: thread {} ({}) state {} wait {}: {}", t.id, t.startModule, t.state, t.waitReason, line);
-                }
-                spdlog::default_logger()->flush();
-                Sleep(1000);
-            }
-        }
-    });
-    // Ends before the test does: the menu unloads after it
-    struct StopWatchdog {
-        std::thread& t;
-        ~StopWatchdog() { watching = false; if (t.joinable()) t.join(); }
-    } stopWatchdog{watchdog};
-#endif
     const auto saved = SaveAll();
     // The player moving as the game makes it: modules the player left on that change movement (the Level Editor's Fly
     // is No Clip) are off for the run, and back as they were after it (RestoreAll)
@@ -6962,9 +4552,6 @@ static void RunTests(bool fromMenu)
                 if (!g_options.only.empty() && !g_options.only.count(t->name)) continue;
                 if (t->optIn && !g_options.only.count(t->name)) continue;
                 if (g_options.skip.count(t->name)) continue;
-#if MEMENU_FEATURE_TAS
-                const ScopedTasSpeed speed(g_options.fast && t->fastTas);
-#endif
                 t->run();
             }
         }

@@ -120,14 +120,6 @@ memenu_add_build_info(${PROJECT_NAME})
 
 source_group(TREE ${PROJECT_SOURCE_DIR}/src FILES ${HEADER_FILES} ${SOURCE_FILES})
 
-# The example macros (examples/replays/) built into the DLL: the TAS writes them to replays/ on first start
-if("tas" IN_LIST MEMENU_ENABLED_FEATURES)
-  include(cmake/Examples.cmake)
-  memenu_embed_examples(_examples_cpp)
-  target_sources(${PROJECT_NAME} PRIVATE ${_examples_cpp})
-  source_group("Generated" FILES ${_examples_cpp})
-endif()
-
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_compile_definitions(${PROJECT_NAME} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
   MEMENU_GAME=$<BOOL:${MEMENU_GAME}>

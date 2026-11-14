@@ -44,8 +44,9 @@
 #include "runtime/crash_reporter.h"
 #include "runtime/hang.h"
 #endif
-#if MEMENU_FEATURE_TAS
-#include "tas/tas.h"
+#if MEMENU_FEATURE_INPUT
+#include "tas/engine.h"
+#include "tas/input_monitor.h"
 #endif
 #include "theme.h"
 
@@ -160,7 +161,7 @@ static void Run(HMODULE module)
             game::OnPlayerDeath([](bool after) { mirage::mods::DispatchDeath(after); });
             game::OnPlayerStateChange([] { return mirage::mods::DispatchPlayerState(); });
             modules::SetKeyListener([](int vk) { mirage::mods::DispatchKey(vk); });
-            // A TAS rewind: the game's memory went back (the mods' own didn't: tas/memory_map.h leaves memenu\ out)
+            // A memory snapshot put back (a tool rewinding the game): the mods' objects may be others now
             game::OnStateRestored([] { mirage::mods::DispatchStateRestored(); });
             STARTUP_STEP(levels::Init());
             // The memory manager (runtime/mem/manager.h): a cache scheduler job, after the object queries made theirs.
@@ -179,9 +180,10 @@ static void Run(HMODULE module)
             // Hot reload: mods whose files changed, checked twice a second (game thread, between the modules' ticks).
             // Normal priority: free unless the mods folders changed, and a save must not wait out a busy menu's deferrals
             sched::AddTask("Mirage mod reload", {0.5f, sched::Priority::Normal, {}, {}}, [] { mirage::mods::ReloadChanged(); });
-#if MEMENU_FEATURE_TAS
-            const bool tasReady = STARTUP_STEP(tas::Init());
-            if (!tasReady) spdlog::warn("TAS unavailable: its patterns were not found");
+#if MEMENU_FEATURE_INPUT
+            // The engine's input, seen (mods' input state) and injected (the self-test's key presses)
+            if (!STARTUP_STEP(tas::engine::Init()) || !tas::input::Install())
+                spdlog::warn("Input hooks unavailable: their patterns were not found");
 #endif
         }
         else
@@ -221,9 +223,6 @@ static void Run(HMODULE module)
         modules::DisableAll();  // Modules queue their cleanup on the game thread...
 #if MEMENU_GAME
         game::Shutdown();       // ...which we wait for before the hooks go away
-#endif
-#if MEMENU_FEATURE_TAS
-        tas::Shutdown();        // The snapshot workers
 #endif
         tasks::Stop();          // Background tasks: queued ones dropped, running ones asked to stop, workers joined
 #if MEMENU_GAME

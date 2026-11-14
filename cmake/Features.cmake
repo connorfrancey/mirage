@@ -142,34 +142,20 @@ endfunction()
 # Trainer
 
 # TAS / replay
-memenu_feature(tas               tas GAME STAGE 12 FILES tas/engine.cpp tas/replay.cpp tas/tas.cpp
-                  tas/timeline.cpp tas/history.cpp tas/input_monitor.cpp tas/splits.cpp tas/memory_map.cpp
-                  tas/snapshot.cpp tas/d3d_pins.cpp)
+memenu_feature(input             tas GAME STAGE 12 FILES tas/engine.cpp tas/input_monitor.cpp)
 
 # World
 
 # Visual
 
 # Debug
-memenu_feature(log_viewer        debug      STAGE 4  FILES features/debug/log_viewer.cpp)
-memenu_feature(performance       debug      STAGE 5  FILES features/debug/performance.cpp)
-memenu_feature(memory            debug GAME STAGE 5  FILES features/debug/memory.cpp)
 memenu_feature(crash_reporter    debug GAME STAGE 5  FILES features/debug/crash_reporter.cpp)
 memenu_feature(self_test         debug      STAGE 4  FILES features/debug/self_test.cpp)   # Shown in developer mode only
 
 # Levels
 
 # Misc
-memenu_feature(config_actions    misc      STAGE 4 FILES features/misc/config_actions.cpp)
-memenu_feature(game_status       misc GAME STAGE 6 FILES features/misc/game_status.cpp)
-memenu_feature(console           misc GAME STAGE 6 FILES features/misc/console.cpp)
-memenu_feature(hotkeys           misc      STAGE 4 FILES features/misc/hotkeys.cpp)
-memenu_feature(themes            misc      STAGE 4 FILES features/misc/themes.cpp)
 memenu_feature(mod_manager       misc GAME STAGE 9 FILES features/misc/mod_manager.cpp)
-memenu_feature(script_editor     misc GAME STAGE 9 FILES features/misc/script_editor.cpp)
-memenu_feature(time_trials       misc GAME STAGE 9 FILES features/misc/time_trials.cpp)
-memenu_feature(level_editor      misc GAME STAGE 9 FILES features/misc/level_editor.cpp)
-memenu_feature(object_editors    misc GAME STAGE 9 FILES features/editor/editor_core.cpp features/editor/world_explorer.cpp features/editor/object_inspector.cpp)
 
 # -------------------------------------------------------------------------------------------------
 # The game integration layer, only when something uses it

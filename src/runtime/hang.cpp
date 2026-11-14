@@ -6,9 +6,6 @@
 #include "runtime/crash_reporter.h"
 #include "runtime/mem/heap.h"
 
-#if MEMENU_FEATURE_TAS
-#include "tas/tas.h"
-#endif
 
 #include <spdlog/spdlog.h>
 
@@ -141,9 +138,6 @@ namespace mirage::hang
 		bool Suppressed(const Watched& w)
 		{
 			if (IsDebuggerPresent() || g_loading.load() || Minimized()) return true;
-#if MEMENU_FEATURE_TAS
-			if (tas::Available() && tas::GetStatus().mode != tas::Mode::Idle) return true;	// The TAS freezes threads itself
-#endif
 			if (&w == &g_render) {
 				// No frames while minimized or in the background is normal
 				HWND fg = GetForegroundWindow();

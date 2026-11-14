@@ -1,5 +1,4 @@
 #include "game/player_state.h"
-#include "game/flight.h"
 #include "runtime/mod_game.h"
 #include "game/game.h"
 #include "game/object_ref.h"
@@ -390,7 +389,7 @@ bool player_state::Load()
     }
 
     // Saved during Flight/No Clip (no physics): outside them that would leave the player hanging in the air
-    if (!flight::Active() && pawn->Physics == EPhysics::PHYS_None) pawn->Physics = EPhysics::PHYS_Falling;
+    if (pawn->Physics == EPhysics::PHYS_None) pawn->Physics = EPhysics::PHYS_Falling;
 
     ++g_loadCount;
     mirage::mods::Share("save_state.loads", std::to_string(g_loadCount));     // Mods' checkpoint timers restart on it
