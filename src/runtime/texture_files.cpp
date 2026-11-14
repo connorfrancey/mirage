@@ -24,6 +24,7 @@
 #include <functional>
 #include <map>
 #include <stdexcept>
+#include <thread>
 
 namespace mirage::textures
 {
@@ -177,21 +178,39 @@ namespace mirage::textures
 				const std::size_t blockBytes = format == PixelFormat::DXT1 ? 8 : 16;
 				const int bw = (w + 3) / 4, bh = (h + 3) / 4;
 				out.resize(static_cast<std::size_t>(bw) * bh * blockBytes);
-				std::uint8_t block[64];
-				auto* dst = reinterpret_cast<unsigned char*>(out.data());
-				for (int by = 0; by < bh; ++by)
-					for (int bx = 0; bx < bw; ++bx, dst += blockBytes) {
-						Block(rgba, w, h, bx * 4, by * 4, block);
-						if (format == PixelFormat::DXT1) {
-							stb_compress_dxt_block(dst, block, 0, STB_DXT_HIGHQUAL);
-						} else if (format == PixelFormat::DXT5) {
-							stb_compress_dxt_block(dst, block, 1, STB_DXT_HIGHQUAL);
-						} else {	// DXT3: 4-bit explicit alpha (two pixels a byte, low nibble first), then the colour block
-							for (int i = 0; i < 8; ++i)
-								dst[i] = static_cast<unsigned char>((block[(i * 2) * 4 + 3] >> 4) | (block[(i * 2 + 1) * 4 + 3] & 0xF0));
-							stb_compress_dxt_block(dst + 8, block, 0, STB_DXT_HIGHQUAL);
+				auto* const base = reinterpret_cast<unsigned char*>(out.data());
+				const auto rows = [&](int first, int last) {	// Block rows [first, last)
+					std::uint8_t block[64];
+					unsigned char* dst = base + static_cast<std::size_t>(first) * bw * blockBytes;
+					for (int by = first; by < last; ++by)
+						for (int bx = 0; bx < bw; ++bx, dst += blockBytes) {
+							Block(rgba, w, h, bx * 4, by * 4, block);
+							if (format == PixelFormat::DXT1) {
+								stb_compress_dxt_block(dst, block, 0, STB_DXT_HIGHQUAL);
+							} else if (format == PixelFormat::DXT5) {
+								stb_compress_dxt_block(dst, block, 1, STB_DXT_HIGHQUAL);
+							} else {	// DXT3: 4-bit explicit alpha (two pixels a byte, low nibble first), then the colour block
+								for (int i = 0; i < 8; ++i)
+									dst[i] = static_cast<unsigned char>((block[(i * 2) * 4 + 3] >> 4) | (block[(i * 2 + 1) * 4 + 3] & 0xF0));
+								stb_compress_dxt_block(dst + 8, block, 0, STB_DXT_HIGHQUAL);
+							}
 						}
-					}
+				};
+				// The blocks don't depend on each other (and stb_dxt keeps no state), so large surfaces are encoded in
+				// bands of rows on several threads: the same bytes, a fraction of the wait (the engine waits for the
+				// package while this runs). Small mips aren't worth a thread.
+				constexpr int kRowsPerThread = 16;
+				const int threads = std::clamp(std::min(static_cast<int>(std::thread::hardware_concurrency()), 8), 1,
+											   std::max(1, bh / kRowsPerThread));
+				if (threads == 1) {
+					rows(0, bh);
+				} else {
+					std::vector<std::thread> pool;
+					pool.reserve(static_cast<std::size_t>(threads - 1));
+					for (int t = 1; t < threads; ++t) pool.emplace_back(rows, bh * t / threads, bh * (t + 1) / threads);
+					rows(0, bh / threads);
+					for (std::thread& th : pool) th.join();
+				}
 				break;
 			}
 			case PixelFormat::A8R8G8B8:
@@ -230,15 +249,17 @@ namespace mirage::textures
 			if (w == 1 && h == 1) break;
 			const int nw = std::max(1, w / 2), nh = std::max(1, h / 2);
 			next.assign(static_cast<std::size_t>(nw) * nh * 4, 0);
-			for (int y = 0; y < nh; ++y)		// Box filter: the 2x2 (or 2x1 / 1x2) pixels each new one covers
-				for (int x = 0; x < nw; ++x)
-					for (int c = 0; c < 4; ++c) {
-						const int x0 = std::min(x * 2, w - 1), x1 = std::min(x * 2 + 1, w - 1);
-						const int y0 = std::min(y * 2, h - 1), y1 = std::min(y * 2 + 1, h - 1);
-						const auto at = [&](int px, int py) { return level[(static_cast<std::size_t>(py) * w + px) * 4 + c]; };
-						next[(static_cast<std::size_t>(y) * nw + x) * 4 + c] =
-							static_cast<std::uint8_t>((at(x0, y0) + at(x1, y0) + at(x0, y1) + at(x1, y1) + 2) / 4);
-					}
+			for (int y = 0; y < nh; ++y) {		// Box filter: the 2x2 (or 2x1 / 1x2) pixels each new one covers
+				const std::uint8_t* row0 = level.data() + static_cast<std::size_t>(std::min(y * 2, h - 1)) * w * 4;
+				const std::uint8_t* row1 = level.data() + static_cast<std::size_t>(std::min(y * 2 + 1, h - 1)) * w * 4;
+				std::uint8_t* out = next.data() + static_cast<std::size_t>(y) * nw * 4;
+				for (int x = 0; x < nw; ++x) {
+					const std::size_t x0 = static_cast<std::size_t>(std::min(x * 2, w - 1)) * 4;
+					const std::size_t x1 = static_cast<std::size_t>(std::min(x * 2 + 1, w - 1)) * 4;
+					for (int c = 0; c < 4; ++c)
+						out[x * 4 + c] = static_cast<std::uint8_t>((row0[x0 + c] + row0[x1 + c] + row1[x0 + c] + row1[x1 + c] + 2) / 4);
+				}
+			}
 			level.swap(next);
 			w = nw;
 			h = nh;

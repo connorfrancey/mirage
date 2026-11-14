@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <set>
 
@@ -87,6 +88,31 @@ TEST(Textures, EncodesEveryGameFormat)
 	EXPECT_EQ(static_cast<int>(g8[0]), (img.rgba[0] * 77 + img.rgba[1] * 150 + img.rgba[2] * 29) >> 8);
 
 	EXPECT_THROW((void)EncodeSurface(img.rgba.data(), 64, 32, PixelFormat::BC5), std::runtime_error);
+}
+
+// A large surface is encoded in bands of block rows on several threads: every block must come out exactly as it does
+// encoded on its own (a 4x4 surface is a single block, on one thread)
+TEST(Textures, ThreadedEncodeMatchesBlockByBlock)
+{
+	constexpr int kSize = 512;	// 128 block rows: several bands
+	Assets::Image img = TestImage(kSize, kSize);
+	for (const PixelFormat f : {PixelFormat::DXT1, PixelFormat::DXT3, PixelFormat::DXT5}) {
+		SCOPED_TRACE(std::string(Assets::to_string(f)));
+		const std::size_t blockBytes = f == PixelFormat::DXT1 ? 8 : 16;
+		const auto whole = EncodeSurface(img.rgba.data(), kSize, kSize, f);
+		ASSERT_EQ(whole.size(), blockBytes * (kSize / 4) * (kSize / 4));
+		std::uint8_t block[64];
+		int mismatched = 0;
+		for (int by = 0; by < kSize / 4; ++by)
+			for (int bx = 0; bx < kSize / 4; ++bx) {
+				for (int y = 0; y < 4; ++y)
+					std::memcpy(block + y * 16, img.at(static_cast<std::uint32_t>(bx * 4), static_cast<std::uint32_t>(by * 4 + y)), 16);
+				const auto one = EncodeSurface(block, 4, 4, f);
+				const std::size_t at = (static_cast<std::size_t>(by) * (kSize / 4) + bx) * blockBytes;
+				mismatched += std::memcmp(one.data(), whole.data() + at, blockBytes) != 0;
+			}
+		EXPECT_EQ(mismatched, 0);
+	}
 }
 
 TEST(Textures, BuildsAFullMipChain)

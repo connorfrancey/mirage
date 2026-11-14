@@ -16,3 +16,12 @@ set_target_properties(memenu_bench PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_B
 if(MSVC)
   target_compile_options(memenu_bench PRIVATE /W4 /permissive- /utf-8)
 endif()
+
+# Texture replacement's encoder needs UnrealLib (its package model): only when the build has it
+if(TARGET UnrealLib::UnrealLib)
+  target_sources(memenu_bench PRIVATE bench_textures.cpp
+          ${CMAKE_SOURCE_DIR}/src/runtime/texture_files.cpp
+          ${CMAKE_SOURCE_DIR}/src/runtime/stb_impl.cpp)
+  target_compile_definitions(memenu_bench PRIVATE _CRT_SECURE_NO_WARNINGS)
+  target_link_libraries(memenu_bench PRIVATE UnrealLib::UnrealLib stb_headers)
+endif()
