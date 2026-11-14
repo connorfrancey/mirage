@@ -1861,6 +1861,64 @@ Notes on the edges:
 Each arrow ends with its milestone passing in the game, so useful gameplay features ship every step: after 15 a mod can
 change anything and undo it; after 17 it tunes movement; after 18 it rewires Kismet; after 21 it builds with pieces.
 
+### The next ten steps (2026-11-14)
+
+The repository split changes what Mirage's steps deliver. The editors and workspaces (steps 16, 19, 25, 27) and the
+TAS's side of step 24 belong to Mirror's Edge Menu. Each Mirage step delivers the runtime, the API (C, Lua and C#
+together, so step 34 grows with every step), a test mod and an in-game self-test. Milestones that said "a TAS macro
+matches its recording" now use the input service (`KeyEvent` / `HoldKey`) and compare measured values. "Off" means the
+change log has nothing left of the mod. Two steps move up: engine hooks (32), because MirageHook has landed and steps
+17, 18 and 20 all need it, and tooling (35), because the loader is now the product and every later API should ship
+with a template and docs.
+
+| # | Step | Why now | Milestone |
+|---|------|---------|-----------|
+| 1 | **A green self-test** (stabilization; step 14's leftovers) | Every later milestone is a self-test. The full run fails today, the same way before and after MirageHook. | Five full `game-test` runs in a row pass, debug and release. |
+| 2 | **Engine hooks by symbol** (step 32, minimal form) | 17, 18 and 20 each need a native function; MirageHook gives scanning, mid-function hooks and transactions. | A mod hooks a native function by symbol name, and a crash inside a detour removes it and names the mod. |
+| 3 | **Tooling for mod authors** (step 35, moved up) | The loader is the product. Templates and reference docs make steps 4–10 usable as they land. | A new Lua, C# or native mod goes from `mirage new` to running in the game with only the docs. |
+| 4 | **The player and movement** (step 17, no workspace) | The first P0 gameplay API, built on the change log. | Scenario A: five constants tuned from `movement.toml`, effect measured, exact restore on disable. |
+| 5 | **Kismet runtime** (step 18) | How the levels' gameplay is wired. | Scenario C. |
+| 6 | **Physics and world queries** (step 20) | Props, forces and traces are what 7 and 8 build on. | Scenario E. |
+| 7 | **Triggers, volumes and pieces** (step 21) | Wires 5 and 6 together into level gameplay. | Scenario F. |
+| 8 | **Input actions and custom moves** (step 22) | New mechanics; the input service already exists. | A double jump from a mod, bound to its action and taken by the input service, gone when off. |
+| 9 | **Animation playback** (step 23, playback only) | Custom moves need animations; the browser and preview tools stay with the menu. | A mod's move plays a game animation and stops it cleanly. |
+| 10 | **Safe mode and conflicts** (step 37, first part) | Third-party mods make crashes at start-up and overlapping changes the main support cost. | A crash during start-up leads to a start with no mods; two overlapping test mods are reported before load. |
+
+1. **A green self-test.** The steps that fail in a full run but pass alone: "Mirage lifecycle" (the crasher mod's
+   deliberate crash reaches the log as a game crash), "Mirage hooks from mods" (a native hook adds ~11 µs a call
+   against a 5 µs budget in debug; measure in release before changing the budget or the code), "Mirage classes
+   (example mod)" (the bounce pad doesn't launch the player), the engine crash during "Mirage level additions" (state
+   left by an earlier step), and the hang in "Crash reporter" (a minidump written while another thread holds a lock
+   it needs; the restructure removed one such deadlock). Then step 14's leftovers: drive `level_streamed` in the
+   self-test, add a C# world-access test mod, measure an unchanged tick in release.
+2. **Engine hooks by symbol.** `game::FindPattern` becomes MirageHook's scanner (resolve steps, cache). The patterns
+   already in the code (ProcessEvent, ProcessInternal, death, the config lookup, input) become named entries in a
+   `symbols.toml` verified at start. Append to ABI v1: hook by symbol (before / after / replace, chained by priority
+   through `runtime/detours`) and mid-function hooks. Detours are SEH-wrapped and attributed. The rest of step 32 (a
+   symbol database from the Ghidra work, typed arguments) waits for its first user.
+3. **Tooling for mod authors.** `mirage new <id> --lang lua|cs|native` from templates; `mirage mod build`,
+   `package`, `install`; `mirage mod test` runs a mod's own in-game tests through the self-test harness. The API
+   reference is generated from `api.h`, plus a getting-started page. Docs grow with each later step.
+4. **The player and movement.** The survey of the 128 `TdMove_*` classes first (which constants are script
+   properties, which are bytecode literals, which are native and need step 2). Then `movement_get`,
+   `movement_override` through the change log, `movement.toml`, and the transition record from `PLAYER_STATE`.
+5. **Kismet runtime.** As step 18: read sequences, change them through the change log, nodes from mod classes
+   (step 12), and sequence events delivered to mods.
+6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with
+   native-only queries through step 2.
+7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.
+8. **Input actions and custom moves.** As step 22. The experiment between a new `TdMove` subclass, a reused move
+   slot and a "virtual move" comes first and decides the API. The replay part of step 24 stays with the menu. Mirage
+   keeps `STATE_RESTORED` and adds what the menu's TAS needs to rewind a mod's move.
+9. **Animation playback.** `PlayCustomAnim` and the custom animation node from mods, blended in and stopped on
+   disable, for step 8's moves.
+10. **Safe mode and conflicts.** A start after a start-up crash (or with Shift held) loads no mods and says why. Each
+    mod's touch set comes from `mod.toml`, its content folders and its script patches, and overlaps are shown in the
+    mod manager before load. Automatic bisection and permissions are the rest of step 37.
+
+After these, the order above resumes: 24's mod-side hooks as the menu needs them, then 26, 28–31 by demand, and the
+rest of phase 4 as its first user needs it.
+
 ## Testing strategy
 
 - **Unit tests** (`tests/`, `mirage test`): everything that runs without the game (parsers, layer and Kismet formats,
