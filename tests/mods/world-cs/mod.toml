@@ -1,0 +1,4 @@
+# Self-test (step 14): world access from C#: actor events, queries, handles, restarts (the Lua one is world-access)
+id = "world-cs"
+version = "1.0.0"
+mirage = "^0.1"

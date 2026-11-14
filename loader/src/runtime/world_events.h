@@ -28,6 +28,7 @@ namespace mirage::world_events
 		std::uint64_t compares = 0;			// Ticks the lists were compared (someone subscribed)
 		std::uint64_t changed = 0;			// ... of them with a change (sorted and diffed); the rest: one memory compare
 		double totalCompareMs = 0.0;		// All of them
+		double unchangedCompareMs = 0.0;	// The ones without a change (compares - changed of them): the steady cost
 		double lastCompareMs = 0.0;			// The last comparison's cost
 		double maxCompareMs = 0.0;
 	};

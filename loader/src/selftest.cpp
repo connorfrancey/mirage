@@ -3423,6 +3423,72 @@ std::string WorldShared(const char* key)
 }
 float WorldSharedNum(const char* key) { return util::ParseFloatOr(WorldShared(key), -1.f); }
 
+// Step 14 from C# (tests/mods/world-cs): the same probe as the Lua step (an actor tagged "WorldGravityZ" beside the player)
+// comes to the C# mod as ActorAdded with its class; Mod.Actors finds it by tag (alone), around the player (the player
+// first) and by class, a missing class matches nothing; destroyed, ActorRemoved's object equals the kept one and the kept
+// handle no longer resolves; a checkpoint restart comes as Restart. The mod reports in its module's settings.
+void TestWorldAccessCs()
+{
+    Step& s = Begin("Mirage world access (C#)");
+    Probe p(s);
+    Module* m = modules::Find("World access (C#)");
+    if (!m) {
+        p.Problem("the World access (C#) module is missing (tests/mods/world-cs: compiled in the game, its log says why)");
+        End(s);
+        return;
+    }
+    const auto num = [m](const char* name) {
+        auto* v = dynamic_cast<ctl::SliderInt*>(m->FindSetting(name));
+        return v ? v->Get() : -999;
+    };
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitTicks(5);
+
+    Classes::AActor* probe = nullptr;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        Classes::FVector at = pawn->Location;
+        at.X += 200.f;
+        probe = pawn->Spawn(Classes::ADynamicSMActor_Spawnable::StaticClass(), nullptr, Classes::FName{}, at, pawn->Rotation, nullptr, true);
+        if (probe) probe->Tag = Classes::FName("WorldGravityZ");
+    });
+    if (!probe) {
+        p.Problem("the probe actor didn't spawn");
+        End(s);
+        return;
+    }
+    if (!WaitFor(10.0, [&] { return num("Queried") == 1; })) p.Problem("the C# mod never queried (no ActorAdded with the probe)");
+    if (num("Probe class ok") != 1) p.Problem("ActorAdded didn't bring the probe with its class (DynamicSMActor_Spawnable)");
+    if (num("Query tag") != 1) p.Problem(fmt::format("Actors(tag:) didn't find the probe alone ({})", num("Query tag")));
+    if (num("Query near") != 1) p.Problem("Actors(near: player, radius:) didn't list the player first with the probe among them");
+    if (num("Query class") < 1) p.Problem("Actors(className: \"Engine.PlayerStart\") found none");
+    if (num("Query missing") != 0) p.Problem("a class that doesn't exist matched actors");
+
+    OnGameThread([&] { if (probe && !probe->bDeleteMe) probe->Destroy(); });
+    if (!WaitFor(5.0, [&] { return num("Probe removed") == 1; })) p.Problem("ActorRemoved didn't come equal to the probe the mod kept");
+    else if (num("Handle after") != 0) p.Problem("the kept probe's handle still resolved after it was destroyed");
+
+    const int restarts = num("Restarts");
+    const void* pawnBefore = nullptr;
+    OnGameThread([&] {
+        pawnBefore = game::Pawn();
+        levels::RestartFromLastCheckpoint();
+    });
+    WaitFor(30.0, [&] {
+        const void* now = nullptr;
+        OnGameThread([&] { now = game::Pawn(); }, 1.0);
+        return now && now != pawnBefore && !game::IsLoading();
+    });
+    if (!WaitFor(10.0, [&] { return num("Restarts") > restarts; })) p.Problem("no Restart event after the checkpoint restart");
+    WaitPlayerReady(10.0);
+    s.notes.push_back(fmt::format("{} actors added, {} removed, PlayerStarts {}, restarts {}", num("Added"), num("Removed"),
+                                  num("Query class"), num("Restarts")));
+    OnRenderThread([m] { m->SetEnabled(false); });
+    p.Check(1, true);
+    End(s);
+}
+
 void TestWorldAccess()
 {
     Step& s = Begin("Mirage world access");
@@ -3510,6 +3576,32 @@ void TestWorldAccess()
     MirageObject* oldBack = reinterpret_cast<MirageObject*>(1);
     OnGameThread([&] { oldBack = ga::HandleObject(&oldPawn); });
     if (WorldSharedNum("restarts") <= restartsBefore) p.Problem("no restart event after the checkpoint restart");
+    // level_streamed: layer-test's own sublevel (LayerTestArea) hidden, then shown again, through the engine's streaming
+    {
+        const float streamedBefore = WorldSharedNum("streamed");
+        const auto show = [](bool visible) {
+            bool found = false;
+            OnGameThread([&] {
+                auto* world = static_cast<Classes::AWorldInfo*>(game::World());
+                if (!world) return;
+                for (std::size_t i = 0; i < world->StreamingLevels.Num(); ++i)
+                    if (Classes::ULevelStreaming* l = world->StreamingLevels[i]; l && l->PackageName.GetName() == "LayerTestArea") {
+                        l->bShouldBeVisible = visible;
+                        found = true;
+                    }
+            });
+            return found;
+        };
+        if (!show(false)) p.Problem("LayerTestArea (layer-test's sublevel) isn't streamed in: level_streamed can't be checked");
+        else {
+            const bool out = WaitFor(10.0, [&] { return WorldShared("last_streamed") == "out LayerTestArea"; });
+            show(true);
+            const bool in = WaitFor(10.0, [&] { return WorldShared("last_streamed") == "in LayerTestArea"; });
+            if (!out) p.Problem("no level_streamed (hidden) when LayerTestArea was hidden");
+            else if (!in) p.Problem("no level_streamed (shown) when LayerTestArea was shown again");
+            else s.notes.push_back(fmt::format("level_streamed: LayerTestArea out and in ({} events)", WorldSharedNum("streamed") - streamedBefore));
+        }
+    }
 
     // The engine's player state hook: a new move (a fall from a little above the floor) comes to mods as player_state
     WaitPlayerReady(10.0);
@@ -3528,9 +3620,12 @@ void TestWorldAccess()
     if (oldBack) p.Problem("the old player's handle still gave an object after the restart");
 
     const auto st = mirage::world_events::GetStats();
+    const std::uint64_t unchanged = st.compares - st.changed;
     s.notes.push_back(fmt::format("{} actors in play; compared on {} ticks, {} with a change: {:.3f} ms a tick on average, "
-                                  "max {:.3f} (a restart's); seen: {:.0f} added, {:.0f} removed, {:.0f} restart(s), {:.0f} streamed",
+                                  "an unchanged tick {:.1f} us, max {:.3f} ms (a restart's); seen: {:.0f} added, {:.0f} removed, "
+                                  "{:.0f} restart(s), {:.0f} streamed",
                                   st.actors, st.compares, st.changed, st.compares ? st.totalCompareMs / st.compares : 0.0,
+                                  unchanged ? st.unchangedCompareMs * 1000.0 / static_cast<double>(unchanged) : 0.0,
                                   st.maxCompareMs, WorldSharedNum("added"), WorldSharedNum("removed"), WorldSharedNum("restarts"),
                                   WorldSharedNum("streamed")));
     OnRenderThread([m] { m->SetEnabled(false); });
@@ -4577,6 +4672,7 @@ const Named* FeatureList()
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
         {"Mirage world access", &TestWorldAccess, false},
+        {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Engine console", &TestEngineConsole, false},

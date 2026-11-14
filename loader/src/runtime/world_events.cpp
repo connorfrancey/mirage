@@ -78,6 +78,7 @@ namespace mirage::world_events
 			};
 			if (g_tracking && !g_newLevel && raw == g_raw) {
 				done();
+				g_stats.unchangedCompareMs += g_stats.lastCompareMs;
 				return;
 			}
 			++g_stats.changed;

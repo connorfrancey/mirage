@@ -804,11 +804,13 @@ crashes or returns a wrong object; the self-test proves each case.
   the old player's handle is invalid. Measured (debug, 4,449 actors in the Prologue): 2.4-2.7 ms a tick on average over
   the test's ticks, where most ticks had a change (spawns, a restart); a restart's diff, with ~700 Lua events, 73-86 ms.
 
-Left: `level_streamed` and a TAS rewind aren't driven by the self-test yet (the streaming code is exercised by every
-level load); the cost of an unchanged tick isn't measured on its own, nor in release; the garbage-collection event
-was dropped (handles already cover what it was for); relationships (`Owner`, `Base`, `Outer`) are reached by path as
-before. The C# part of the milestone has its API (`Mod.Actors`, `GameObject.HandleOf` / `Resolve`, the events) but no
-C# test mod yet.
+**Update (2026-11-14): the three parts are done.** `level_streamed` is driven by the self-test (layer-test's sublevel
+LayerTestArea hidden and shown again: an "out" and an "in" event). The C# side has its test mod (`tests/mods/world-cs`,
+self-test "Mirage world access (C#)": ActorAdded with the class, `Mod.Actors` by tag, around the player and by class,
+ActorRemoved equal to the kept probe whose handle no longer resolves, Restart). An unchanged tick is measured on its
+own: 8.1 µs in release, 148 µs in debug, for 4,605 actors in the Prologue; a restart's diff at most 3.5 ms in release.
+A TAS rewind is the menu's now (the TAS stayed in Mirror's Edge Menu); the garbage-collection event was dropped (handles
+already cover what it was for); relationships (`Owner`, `Base`, `Outer`) are reached by path as before.
 
 ### 15. Reversible changes: the change log (P0, infrastructure)
 
