@@ -510,6 +510,14 @@ states are patched and injected through steps 8 and 11), replication (single pla
 **Milestone:** a mod adds a new time-trial route to an existing map and a new small map built with the 2008 editor;
 both appear in level select, play, restart from checkpoints, and a TAS of each records and plays back verified.
 
+**Status (2026-11-13): additions, sublevels, mod maps, routes and the editor done; the 2008-editor map is left.**
+Layers (`levels/<map>.toml`, `runtime/layers`), streamed sublevels, maps in level select (`maps/<Name>.me1`) and
+time-trial routes (`routes/<map>.toml`) each have a self-test. The Level Editor (`features/misc/level_editor`) places
+an actor of any class where the camera looks, moves it live with a gizmo, edits its location, rotation, scale and
+properties, and saves the layer, which is spawned again from the file; the Collision View draws a mod's class as a
+live cylinder (self-test "Mirage level editor"). Layers and routes are read again when they change, without reloading
+the mod. A new map made with the 2008 editor is the author's to make (the test map is a renamed `edge_p`).
+
 ### 14. Mods for mods: services, events and versioned interfaces
 
 `share_set` / `share_get` (step 9) pass values; this lets mods build on each other's code.

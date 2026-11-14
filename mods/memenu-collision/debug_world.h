@@ -106,4 +106,7 @@ namespace debugworld {
     void CancelBake();
 
     Info GetInfo();                                 // Any thread
+    // The actors drawn as live cylinders (pawns, and actors of classes the view doesn't place, like a mod's: drawn where
+    // they are every tick), by name, at most `max`. Game thread.
+    std::vector<std::string> LiveOwners(std::size_t max);
 }

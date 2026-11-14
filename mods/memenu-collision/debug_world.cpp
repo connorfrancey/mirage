@@ -1396,6 +1396,19 @@ namespace debugworld
         return category >= 0 && category < kCategoryCount ? names[category] : "?";
     }
 
+    std::vector<std::string> LiveOwners(std::size_t max)
+    {
+        std::vector<std::string> out;
+        const auto& objects = Classes::UObject::GetGlobalObjects();
+        for (const LiveCylinder& c : g_cylinders) {
+            if (out.size() >= max) break;
+            if (c.index >= objects.Num() || objects.GetByIndex(c.index) != c.component) continue;   // Gone since the walk
+            auto* pc = static_cast<Classes::UPrimitiveComponent*>(c.component);
+            if (pc->Owner && !pc->Owner->bDeleteMe) out.push_back(pc->Owner->GetName());
+        }
+        return out;
+    }
+
     Info GetInfo()
     {
         std::lock_guard lock(g_infoMutex);

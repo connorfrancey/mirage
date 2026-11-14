@@ -224,8 +224,14 @@ namespace mirage::routes
 		{
 			const std::vector<mods::Info> list = mods::List();
 			std::string signature;
-			for (const mods::Info& m : list)
-				if (m.loaded) signature += m.id + ":" + std::to_string(m.reloads) + ";";
+			for (const mods::Info& m : list) {
+				if (!m.loaded) continue;
+				signature += m.id + ":" + std::to_string(m.reloads) + ";";
+				// Route files changed (they're not part of a mod's hot reload: read again here)
+				std::error_code ec;
+				for (const auto& e : fs::directory_iterator(m.dir / "routes", ec))
+					signature += std::to_string(e.last_write_time(ec).time_since_epoch().count()) + ",";
+			}
 			if (signature == g_signature) return;
 			g_signature = signature;
 			std::vector<Route> routes = ReadAll(list);

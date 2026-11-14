@@ -1013,6 +1013,9 @@ namespace mirage::mods
 				const auto& p = it->path();
 				if (it->is_directory()) {
 					if (p.filename() == ".mirage") it.disable_recursion_pending();	// Its hot reload copies
+					// Level layers and routes (step 13): data the runtime reads again by itself when it changes (the
+					// in-game editor saves layers while playing): no reload of the whole mod for them
+					if (p.parent_path() == dir && (p.filename() == "levels" || p.filename() == "routes")) it.disable_recursion_pending();
 					continue;
 				}
 				if (p.filename() == "config.toml") continue;	// Written by the mod itself

@@ -33,6 +33,7 @@
 #include "runtime/layers.h"
 #include "runtime/maps.h"
 #include "runtime/routes.h"
+#include <imgui.h>
 #include "runtime/inject.h"
 #include "runtime/natives.h"
 #include "runtime/script_patch.h"
@@ -52,6 +53,7 @@
 #include "runtime/packages.h"
 #if MEMENU_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
+#include "features/misc/level_editor.h"
 #endif
 #if MEMENU_FEATURE_SCRIPT_EDITOR
 #include "features/misc/script_editor.h"
@@ -5043,6 +5045,155 @@ void TestTimeTrials()
     End(s);
 }
 
+// The in-game Level Editor (step 13): in tests/mods/layer-test's layer for the Prologue, it places a pad of the mod's
+// own class where the camera looks (saved to levels/edge_p.toml, spawned from it), shows its gizmo, moves it live, and
+// an edit of its location, scale and a property is saved and spawned again with them. The Collision View (when
+// memenu-collision is loaded) draws the placed pad, a mod's class, as a live cylinder. The layer file is put back as it was.
+void TestLevelEditor()
+{
+    Step& s = Begin("Mirage level editor");
+    Probe p(s);
+    namespace layers = mirage::layers;
+    Module* editor = modules::Find("Level Editor");
+    Module* view = modules::Find("Collision View");
+    auto* inspect = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Inspect")) : nullptr;
+    auto* cylinders = view ? dynamic_cast<ctl::Checkbox*>(view->FindSetting("Cylinders")) : nullptr;
+    std::filesystem::path file;
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "layer-test") file = m.dir / "levels" / "edge_p.toml";
+    if (!editor || file.empty()) {
+        p.Problem("the Level Editor or the layer-test mod is missing");
+        End(s);
+        return;
+    }
+    std::string original;
+    {
+        std::ifstream in(file, std::ios::binary);
+        original.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    // The Collision View (memenu-collision) is optional: switched off in the mod manager, its check is left out
+    const bool withView = view && inspect && cylinders;
+    if (!withView) s.notes.push_back("Collision View check left out: memenu-collision isn't loaded");
+    const bool editorWas = editor->Enabled();
+    const bool viewWas = withView && view->Enabled(), inspectWas = withView && inspect->Get();
+    const bool expandedWas = withView && view->expanded, cylindersWas = withView && cylinders->Get();
+    game::SetCameraTracking(true);
+    OnRenderThread([&] {
+        editor->SetEnabled(true);
+        gui::visible = true;
+    });
+    level_editor::Select("layer-test", "");
+    WaitTicks(5);
+
+    // 1. Placed where the camera looks: in the file, spawned from it
+    const std::string name = level_editor::PlaceWhereLooking("classes/LayerPad.uc");
+    Classes::AActor* placed = nullptr;
+    WaitFor(15.0, [&] { OnGameThread([&] { placed = layers::Find("layer-test", name); }); return placed != nullptr; });
+    std::vector<layers::EditActor> entries;
+    OnGameThread([&] { layers::Read("layer-test", entries); });
+    const auto entry = std::find_if(entries.begin(), entries.end(), [&](const layers::EditActor& a) { return a.name == name; });
+    s.notes.push_back(fmt::format("placed {} ({} entries in the layer now)", name, entries.size()));
+    if (name.empty() || entry == entries.end()) {
+        p.Problem("the placed actor isn't in levels/edge_p.toml");
+    } else if (!placed) {
+        p.Problem("the placed actor wasn't spawned from the layer");
+    } else {
+        // 2. Its gizmo, with it selected
+        level_editor::Select("layer-test", name);
+        const std::uint64_t gizmo = level_editor::GizmoFrames();
+        WaitFor(5.0, [&] { return level_editor::GizmoFrames() > gizmo + 3; });
+        float displayW = 0.f;
+        OnRenderThread([&] { displayW = ImGui::GetIO().DisplaySize.x; });
+        if (level_editor::GizmoFrames() <= gizmo + 3) {
+            if (displayW >= 200.f) p.Problem("the gizmo wasn't drawn on the selected actor");
+            else s.notes.push_back("gizmo not checked: the game is minimized (no screen to draw on)");
+        }
+
+        // 3. Moved live (the gizmo's drag): the same actor, somewhere else at once
+        layers::EditActor moved = *entry;
+        Classes::FVector player{};
+        OnGameThread([&] { if (auto* pawn = game::Pawn()) player = pawn->Location; });
+        moved.location[0] = player.X + 150.f;
+        moved.location[1] = player.Y;
+        moved.location[2] = player.Z;
+        float liveX = 0.f;
+        OnGameThread([&] {
+            layers::Place(placed, moved.location, moved.rotation, moved.scale);
+            liveX = placed->Location.X;
+        });
+        if (std::fabs(liveX - moved.location[0]) > 1.f) p.Problem(fmt::format("moving it live left it at X {}", liveX));
+
+        // 4. An edit saved: location, scale and a property, spawned again with them
+        moved.scale = 1.5f;
+        moved.properties = {{"Strength", "1234.0"}};
+        *std::find_if(entries.begin(), entries.end(), [&](const layers::EditActor& a) { return a.name == name; }) = moved;
+        std::string error;
+        bool written = false;
+        OnGameThread([&] { written = layers::Write("layer-test", entries, &error); });
+        if (!written) p.Problem("saving failed: " + error);
+        Classes::AActor* again = nullptr;
+        WaitFor(10.0, [&] {
+            OnGameThread([&] { again = layers::Find("layer-test", name); });
+            return again && again != placed;
+        });
+        float x = 0.f, scale = 0.f, strength = 0.f;
+        std::string objectName;
+        if (again)
+            OnGameThread([&] {
+                x = again->Location.X;
+                scale = again->DrawScale;
+                strength = mirage::reflect::GetFloat(mirage::reflect::Resolve(again->Class, again, "Strength"));
+                objectName = again->GetName();
+            });
+        s.notes.push_back(fmt::format("saved and spawned again: X {:.0f}, scale {:.2f}, Strength {:.0f}", x, scale, strength));
+        if (!again || again == placed) p.Problem("the saved layer wasn't spawned again");
+        else if (std::fabs(x - moved.location[0]) > 1.f || std::fabs(scale - 1.5f) > 1e-3f || strength != 1234.f)
+            p.Problem("the spawned actor doesn't have the saved location, scale and Strength");
+
+        // 5. The Collision View draws it: among the volumes near the player
+        if (again && withView) {
+            OnRenderThread([&] {
+                view->expanded = true;
+                inspect->Set(true);
+                cylinders->Set(true);       // A mod's class is drawn as a live cylinder, found only with these on
+                if (!view->Enabled()) view->SetEnabled(true);
+            });
+            bool listed = false;
+            WaitFor(10.0, [&] {
+                const auto info = CollisionShared("inspect");
+                for (const auto& n : info.value("nearby", nlohmann::json::array()))
+                    listed |= n.value("name", std::string()).find(objectName) != std::string::npos;
+                for (const auto& n : info.value("live", nlohmann::json::array()))     // A mod's class: drawn live
+                    listed |= n.is_string() && n.get<std::string>() == objectName;
+                return listed;
+            });
+            if (!listed) p.Problem(objectName + " isn't drawn by the Collision View (nearby volumes or live cylinders)");
+            else s.notes.push_back("the Collision View lists " + objectName);
+        }
+    }
+
+    // The layer as it was
+    {
+        std::ofstream out(file, std::ios::binary | std::ios::trunc);
+        out << original;
+    }
+    OnRenderThread([&] {
+        if (withView) {
+            inspect->Set(inspectWas);
+            cylinders->Set(cylindersWas);
+            view->expanded = expandedWas;
+            view->SetEnabled(viewWas);
+        }
+        editor->SetEnabled(editorWas);
+    });
+    WaitFor(10.0, [&] {
+        Classes::AActor* left = nullptr;
+        OnGameThread([&] { left = layers::Find("layer-test", name); });
+        return left == nullptr;
+    });
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -5962,6 +6113,7 @@ const Named* FeatureList()
         {"Mirage classes (C#)", &TestClassesCSharp, false},
         {"Mirage classes (example mod)", &TestClassesExample, false},
         {"Mirage level additions", &TestLevelLayers, false},
+        {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage maps", &TestModMaps, false},
         {"Mirage time trials", &TestTimeTrials, false},
 #endif

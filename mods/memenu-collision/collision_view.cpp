@@ -270,7 +270,9 @@ private:
         for (const auto& n : info.nearby) near.push_back({{"name", n.name}, {"distance", n.distance}, {"x", n.x}, {"y", n.y}, {"z", n.z}});
         json behind = json::array();
         for (const auto& [name, at] : info.look.behind) behind.push_back({{"name", name}, {"at", at}});
-        const json inspect = {{"nearby", near},
+        json live = json::array();
+        for (const auto& name : debugworld::LiveOwners(64)) live.push_back(name);
+        const json inspect = {{"nearby", near}, {"live", live},
                               {"look", {{"valid", info.look.valid}, {"name", info.look.name}, {"distance", info.look.distance},
                                         {"behind", behind}}}};
         mirage::Api().share_set(mirage::Mod(), "inspect", inspect.dump().c_str());

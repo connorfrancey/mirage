@@ -22,6 +22,7 @@
 #include <future>
 #include <fstream>
 #include <map>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -39,6 +40,7 @@ namespace mirage::layers
 			int reloads = -1;			// The mod's reload count when spawned (a hot reload spawns again)
 			std::vector<Spawned> actors;
 			bool waiting = false;		// A class of it is being compiled (on a worker): spawned when it is done
+			fs::file_time_type stamp{};	// Its file's when spawned (the in-game editor saves it: spawned again)
 		};
 
 		// .uc classes compiled off the game thread (the first build reads the game's packages: seconds): by file
@@ -69,6 +71,7 @@ namespace mirage::layers
 		bool g_levelChanged = true;					// A level finished loading since (MapName is read then only)
 		void* g_pawn = nullptr;						// The player's pawn then (a new one: a checkpoint restart)
 		int g_generation = 0;
+		bool g_check = false;						// Look at the mods' layers on the next tick (the editor saved one)
 		unsigned g_ticks = 0;
 
 		std::string Lower(std::string s)
@@ -387,12 +390,21 @@ namespace mirage::layers
 			return true;
 		}
 
+		// DrawScale the way the engine sets it (the components follow)
+		void SetScale(Classes::AActor* a, float scale)
+		{
+			call::Params p(a, "SetDrawScale");
+			if (p.Valid() && p.Set("NewScale", scale) && call::Call(a, p)) return;
+			a->DrawScale = scale;
+		}
+
 		void SpawnLayer(const mods::Info& mod, ModLayer& layer)
 		{
 			layer.reloads = mod.reloads;
 			layer.waiting = false;
 			const fs::path file = mod.dir / "levels" / (Lower(g_map) + ".toml");
 			std::error_code ec;
+			layer.stamp = fs::last_write_time(file, ec);
 			if (!fs::is_regular_file(file, ec)) {
 				UnloadStreams(mod.id);		// It had one before a hot reload
 				return;
@@ -453,6 +465,11 @@ namespace mirage::layers
 				}
 				if (s.info.actor) {
 					s.objectIndex = SlotOf(s.info.actor);
+					if (entry.contains("scale")) {
+						const toml::value& v = toml::find(entry, "scale");
+						if (v.is_floating() || v.is_integer()) SetScale(s.info.actor, Number(v));
+						else s.info.problem = "scale needs a number";
+					}
 					if (entry.contains("properties"))
 						for (const auto& [key, value] : toml::find<toml::table>(entry, "properties")) {
 							std::string bad;
@@ -510,7 +527,7 @@ namespace mirage::layers
 
 		// Mods: loaded (a layer to spawn), reloaded (again), unloaded (gone). Checked on a level change or restart and
 		// about every second (hot reloads, mods loading in the world phase)
-		if (g_ticks++ % 60 != 0) return;
+		if (g_ticks++ % 60 != 0 && !std::exchange(g_check, false)) return;
 		g_mods = mods::List();
 		const std::vector<mods::Info>& list = g_mods;
 
@@ -527,7 +544,9 @@ namespace mirage::layers
 		for (const mods::Info& m : list) {
 			if (!m.loaded) continue;
 			auto it = g_layers.find(m.id);
-			if (it != g_layers.end() && it->second.reloads == m.reloads) continue;
+			std::error_code ec;
+			const auto stamp = fs::last_write_time(m.dir / "levels" / (Lower(g_map) + ".toml"), ec);
+			if (it != g_layers.end() && it->second.reloads == m.reloads && it->second.stamp == stamp) continue;
 			if (it != g_layers.end()) Destroy(it->second);
 			const auto start = std::chrono::steady_clock::now();
 			SpawnLayer(m, g_layers[m.id]);
@@ -574,5 +593,134 @@ namespace mirage::layers
 				out.push_back(std::move(i));
 			}
 		return out;
+	}
+
+	// ---- The in-game editor -------------------------------------------------------------------------------------------
+	namespace
+	{
+		fs::path LayerFile(const std::string& modId)
+		{
+			for (const mods::Info& m : mods::List())
+				if (m.id == modId) return m.dir / "levels" / (Lower(g_map) + ".toml");
+			return {};
+		}
+
+		// A value as the editor shows it, and back (text that isn't TOML is a string)
+		std::string ValueText(const toml::value& v)
+		{
+			std::string text = toml::format(v);
+			while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) text.pop_back();
+			return text;
+		}
+		toml::value TextValue(const std::string& text)
+		{
+			const auto parsed = toml::try_parse_str("v = " + text);
+			if (parsed.is_ok() && parsed.unwrap().contains("v")) return parsed.unwrap().at("v");
+			return toml::value(text);
+		}
+	}
+
+	std::string CurrentMap() { return Lower(g_map); }
+
+	bool Read(const std::string& modId, std::vector<EditActor>& out, std::string* error)
+	{
+		out.clear();
+		const fs::path file = LayerFile(modId);
+		std::error_code ec;
+		if (file.empty() || !fs::is_regular_file(file, ec)) return true;
+		try {
+			const toml::value root = toml::parse(file);
+			if (!root.contains("actor")) return true;
+			for (const toml::value& entry : toml::find<toml::array>(root, "actor")) {
+				EditActor a;
+				a.name = toml::find_or<std::string>(entry, "name", "");
+				a.cls = toml::find_or<std::string>(entry, "class", "");
+				if (entry.contains("location")) {
+					const auto& v = toml::find<toml::array>(entry, "location");
+					for (std::size_t i = 0; i < 3 && i < v.size(); ++i) a.location[i] = Number(v[i]);
+				}
+				if (entry.contains("rotation")) {
+					const auto& v = toml::find<toml::array>(entry, "rotation");
+					for (std::size_t i = 0; i < 3 && i < v.size(); ++i) a.rotation[i] = static_cast<int>(Number(v[i]));
+				}
+				if (entry.contains("scale")) a.scale = Number(toml::find(entry, "scale"));
+				if (entry.contains("properties"))
+					for (const auto& [key, value] : toml::find<toml::table>(entry, "properties")) a.properties.emplace_back(key, ValueText(value));
+				out.push_back(std::move(a));
+			}
+		} catch (const std::exception& e) {
+			if (error) *error = e.what();
+			return false;
+		}
+		return true;
+	}
+
+	bool Write(const std::string& modId, const std::vector<EditActor>& actors, std::string* error)
+	{
+		const fs::path file = LayerFile(modId);
+		if (file.empty() || g_map.empty()) {
+			if (error) *error = file.empty() ? "no mod " + modId : "no level";
+			return false;
+		}
+		std::error_code ec;
+		toml::value root = toml::table{};
+		if (fs::is_regular_file(file, ec)) {
+			try {
+				root = toml::parse(file);
+			} catch (const std::exception& e) {
+				if (error) *error = std::string("the layer doesn't parse: ") + e.what();
+				return false;
+			}
+		}
+		toml::array list;
+		for (const EditActor& a : actors) {
+			toml::value entry = toml::table{};
+			if (!a.name.empty()) entry["name"] = a.name;
+			entry["class"] = a.cls;
+			entry["location"] = toml::array{a.location[0], a.location[1], a.location[2]};
+			if (a.rotation[0] || a.rotation[1] || a.rotation[2])
+				entry["rotation"] = toml::array{a.rotation[0], a.rotation[1], a.rotation[2]};
+			if (a.scale != 1.f) entry["scale"] = a.scale;
+			if (!a.properties.empty()) {
+				toml::value props = toml::table{};
+				for (const auto& [key, text] : a.properties) props[key] = TextValue(text);
+				entry["properties"] = props;
+			}
+			list.push_back(std::move(entry));
+		}
+		root["actor"] = toml::value(std::move(list));
+		root["actor"].as_array_fmt().fmt = toml::array_format::array_of_tables;
+		fs::create_directories(file.parent_path(), ec);
+		std::ofstream out(file, std::ios::binary | std::ios::trunc);
+		out << "# A level layer (Mirage step 13): written by the in-game Level Editor\n" << toml::format(root);
+		if (!out) {
+			if (error) *error = "couldn't write " + file.string();
+			return false;
+		}
+		out.close();
+		g_check = true;
+		spdlog::info("[mod {}] levels/{}.toml saved: {} actor(s)", modId, Lower(g_map), actors.size());
+		return true;
+	}
+
+	void Place(Classes::AActor* actor, const float location[3], const int rotation[3], float scale)
+	{
+		if (!actor) return;
+		call::Params at(actor, "SetLocation");
+		const Classes::FVector v{location[0], location[1], location[2]};
+		if (!(at.Valid() && at.SetRaw("NewLocation", &v, sizeof v) && call::Call(actor, at))) actor->Location = v;
+		call::Params turn(actor, "SetRotation");
+		const Classes::FRotator r{rotation[0], rotation[1], rotation[2]};
+		if (!(turn.Valid() && turn.SetRaw("NewRotation", &r, sizeof r) && call::Call(actor, turn))) actor->Rotation = r;
+		if (actor->DrawScale != scale) SetScale(actor, scale);
+	}
+
+	Classes::AActor* Find(const std::string& modId, const std::string& name)
+	{
+		const auto it = g_layers.find(modId);
+		if (it == g_layers.end() || name.empty()) return nullptr;
+		for (const Spawned& s : it->second.actors)
+			if (s.info.name == name && Alive(s)) return s.info.actor;
+		return nullptr;
 	}
 }

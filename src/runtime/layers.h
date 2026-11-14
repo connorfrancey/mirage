@@ -60,6 +60,30 @@ namespace mirage::layers
 	};
 	// The current level's mod sublevels. Game thread.
 	std::vector<SublevelInfo> Sublevels();
+
+	// ---- The in-game editor (features/misc/level_editor.cpp) -------------------------------------------------------
+	// A layer entry as the editor shows it. `scale` is the actor's DrawScale (`scale = 1.5` in the file, default 1).
+	struct EditActor
+	{
+		std::string name, cls;
+		float location[3]{};
+		int rotation[3]{};
+		float scale = 1.f;
+		std::vector<std::pair<std::string, std::string>> properties;	// Path, the value as TOML text ("1800.0", "\"Name\"")
+	};
+	// The level the layers are for ("edge_p"; empty before one loaded). Game thread, like the rest of this.
+	std::string CurrentMap();
+	// The actor entries of `modId`'s layer for the current level (none if it has no file yet). False and `error` if the
+	// file doesn't parse.
+	bool Read(const std::string& modId, std::vector<EditActor>& out, std::string* error = nullptr);
+	// Written as the mod's levels/<map>.toml (its other entries, like [[sublevel]], kept), spawned again on the next
+	// tick.
+	bool Write(const std::string& modId, const std::vector<EditActor>& actors, std::string* error = nullptr);
+	// Moves a spawned actor now (the editor's gizmo), the way the engine moves actors (collision follows). Not saved.
+	// Game thread.
+	void Place(Classes::AActor* actor, const float location[3], const int rotation[3], float scale);
+	// The live actor of entry `name` of `modId`'s layer (nullptr: none). Game thread.
+	Classes::AActor* Find(const std::string& modId, const std::string& name);
 	// How many times the layers were (re)spawned since the menu started: level loads and restarts
 	int Generation();
 }
