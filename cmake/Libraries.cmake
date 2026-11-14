@@ -98,6 +98,24 @@ if(zstd_ADDED)
 endif()
 endif()
 
+
+# MirageHook: Mirage's own x86 hooking library (inline, mid-function, vtable, IAT hooks, transactions, SIMD signature
+# scanning), meant to replace MinHook. Added after fmt/spdlog so it builds on the same copies; its other pins (magic_enum,
+# fast_float, unordered_dense) match Versions.cmake, and CPM keeps one copy of each. A local checkout can stand in with
+# -D CPM_MirageHook_SOURCE=<path>.
+if(MIRAGE_GAME)
+CPMAddPackage(
+        NAME MirageHook
+        GITHUB_REPOSITORY connorfrancey/miragehook
+        GIT_TAG ${MIRAGEHOOK_GIT_COMMIT}
+        OPTIONS
+            "MIRAGEHOOK_BUILD_TESTS OFF"
+            "MIRAGEHOOK_BUILD_EXAMPLES OFF"
+            "MIRAGEHOOK_BUILD_BENCHMARKS OFF"
+            "MIRAGEHOOK_BUILD_DOCS OFF"
+)
+endif()
+
 if(_need_themes)
 
 # nlohmann/json: config file + theme parsing (release tarball is much smaller than cloning the repo)
@@ -177,7 +195,7 @@ CPMAddPackage(
         GIT_TAG ${UNORDERED_DENSE_VERSION}
         DOWNLOAD_ONLY YES
 )
-if(unordered_dense_ADDED AND NOT TARGET unordered_dense::unordered_dense)
+if(NOT TARGET unordered_dense::unordered_dense)   # MirageHook may have fetched it first (then _ADDED is off)
     add_library(unordered_dense INTERFACE)
     target_include_directories(unordered_dense SYSTEM INTERFACE ${unordered_dense_SOURCE_DIR}/include)
     add_library(unordered_dense::unordered_dense ALIAS unordered_dense)
@@ -372,7 +390,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE
         imgui imjson minhook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads)
 if(MIRAGE_GAME)
-  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler lua::lua toml11::toml11 stb_headers)
+  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler MirageHook::MirageHook lua::lua toml11::toml11 stb_headers)
   target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/loader/include)   # mirage/api.h: the mod ABI
 endif()
 
