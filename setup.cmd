@@ -21,15 +21,15 @@ rem  labels, goto or call :label: cmd finds labels unreliably in LF files.
 rem ---------------------------------------------------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Mirror's Edge Menu setup
+title Mirage setup
 
 rem Without options (how a double-click starts it): wait for a key at the end, so the window doesn't just close.
 set "PAUSE_AT_END="
 if "%~1"=="" set "PAUSE_AT_END=1"
 
 echo.
-echo   Mirror's Edge Menu
-echo   https://github.com/connorfrancey/memenu
+echo   Mirage
+echo   https://github.com/connorfrancey/mirage
 echo.
 
 set "ACTION=%~1"
@@ -73,7 +73,7 @@ if [ -z "${BASH_VERSION:-}" ]; then exec bash "$0" "$@"; fi
 set -euo pipefail
 cd "$(dirname "$0")"
 
-case "${MEMENU_TEST_OS:-$(uname -s)}" in
+case "${MIRAGE_TEST_OS:-$(uname -s)}" in
     # Git Bash on Windows: the cmd part does it there. .\ because cmd may not search the current folder
     # (NoDefaultCurrentDirectoryInExePath).
     MINGW*|MSYS*|CYGWIN*) exec cmd.exe //c '.\setup.cmd' "$@" ;;
@@ -97,7 +97,7 @@ if [ -t 1 ]; then BOLD=$'\e[1m'; DIM=$'\e[2m'; RESET=$'\e[0m'; else BOLD=""; DIM
 action="${1:-}"
 [ $# -gt 0 ] && shift
 if [ -z "$action" ]; then
-    printf '\n  %sMirror'\''s Edge Menu%s\n  %shttps://github.com/connorfrancey/memenu%s\n\n' "$BOLD" "$RESET" "$DIM" "$RESET"
+    printf '\n  %sMirror'\''s Edge Menu%s\n  %shttps://github.com/connorfrancey/mirage%s\n\n' "$BOLD" "$RESET" "$DIM" "$RESET"
     echo "  What do you want to do?"
     echo
     echo "    1  Install the menu into Mirror's Edge (or update it)"

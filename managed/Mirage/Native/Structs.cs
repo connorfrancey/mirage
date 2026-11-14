@@ -1,4 +1,4 @@
-// The plain structs of api/mirage/api.h that cross the boundary, by hand (the function tables are generated: Api.g.cs).
+// The plain structs of loader/include/mirage/api.h that cross the boundary, by hand (the function tables are generated: Api.g.cs).
 // Layouts are checked against the C sizes when the host starts (Bridge.Initialize).
 using System.Runtime.InteropServices;
 

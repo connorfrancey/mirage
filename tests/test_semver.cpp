@@ -1,4 +1,4 @@
-// Versions and ranges for mod manifests (src/runtime/semver.h)
+// Versions and ranges for mod manifests (loader/src/runtime/semver.h)
 #include "runtime/semver.h"
 
 #include <gtest/gtest.h>

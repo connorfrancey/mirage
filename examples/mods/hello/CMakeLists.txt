@@ -1,6 +1,6 @@
 # Hello, a native Mirage mod: its own CMake project, built against the mod API headers only (MIRAGE_API_DIR), so any
 # compiler that targets 32-bit Windows works (MSVC, clang-cl). The built mod (mod.toml + hello.dll) goes to
-# <build>/mod/hello: copy that folder into the menu's mods folder (Binaries\memenu\mods).
+# <build>/mod/hello: copy that folder into the menu's mods folder (Binaries\mirage\mods).
 #
 #   cmake -S examples/mods/hello -B build/hello -G Ninja -DCMAKE_BUILD_TYPE=Release   (from an x86 environment)
 #   cmake --build build/hello
@@ -11,7 +11,7 @@ if(NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
   message(FATAL_ERROR "Mirror's Edge is 32-bit: build the mod for x86 (an x86 environment, or clang-cl -m32)")
 endif()
 
-set(MIRAGE_API_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../api" CACHE PATH "Folder holding mirage/api.h")
+set(MIRAGE_API_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../loader/include" CACHE PATH "Folder holding mirage/api.h")
 
 add_library(hello SHARED hello.cpp)
 target_include_directories(hello PRIVATE ${MIRAGE_API_DIR})

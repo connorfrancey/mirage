@@ -3,21 +3,21 @@
 # the 32-bit Windows DLL is cross-compiled with clang-cl / lld-link against Microsoft's CRT and Windows SDK (downloaded
 # by xwin), the unit tests run under Wine, and the in-game test runs the game through Steam's Proton.
 #
-#     tools/linux/setup.sh                      everything in ~/.local/share/memenu-toolchain, no root needed
+#     tools/linux/setup.sh                      everything in ~/.local/share/mirage-toolchain, no root needed
 #     tools/linux/setup.sh --system             LLVM and Wine from apt instead (asks for sudo)
 #     tools/linux/setup.sh --accept-msvc-license   don't ask about Microsoft's license (xwin's download needs it)
 #     tools/linux/setup.sh --check              only report what is installed
 #
-# Afterwards: `source ~/.local/share/memenu-toolchain/env.sh` (the script offers to add it to ~/.bashrc), then
-# `uv run memenu build`, `uv run memenu test` and `uv run memenu game-test` work as on Windows. See
-# doc/linux-development.md.
+# Afterwards: `source ~/.local/share/mirage-toolchain/env.sh` (the script offers to add it to ~/.bashrc), then
+# `uv run mirage build`, `uv run mirage test` and `uv run mirage game-test` work as on Windows. See
+# docs/linux-development.md.
 
 set -euo pipefail
 
 LLVM_VERSION=21.1.8
 XWIN_VERSION=0.10.0
 WINE_VERSION=11.20            # Kron4ek/Wine-Builds, the "wow64" build: runs 32-bit programs without i386 packages
-PREFIX="${MEMENU_TOOLCHAIN:-$HOME/.local/share/memenu-toolchain}"
+PREFIX="${MIRAGE_TOOLCHAIN:-$HOME/.local/share/mirage-toolchain}"
 
 SYSTEM=0
 ACCEPT_LICENSE=0
@@ -60,7 +60,7 @@ report() {
     for tool in uv cmake ninja clang-cl lld-link llvm-rc wine; do
         if command -v "$tool" >/dev/null; then ok "$tool: $(command -v "$tool")"; else warn "$tool: missing"; missing=1; fi
     done
-    if [ -f "${MEMENU_XWIN_DIR:-$PREFIX/xwin}/crt/lib/x86/libcmt.lib" ]; then ok "MSVC CRT and Windows SDK (x86): ${MEMENU_XWIN_DIR:-$PREFIX/xwin}"
+    if [ -f "${MIRAGE_XWIN_DIR:-$PREFIX/xwin}/crt/lib/x86/libcmt.lib" ]; then ok "MSVC CRT and Windows SDK (x86): ${MIRAGE_XWIN_DIR:-$PREFIX/xwin}"
     else warn "MSVC CRT and Windows SDK (x86): missing"; missing=1; fi
     return $missing
 }
@@ -145,12 +145,12 @@ ok "$("$WINE_DIR/bin/wine" --version)"
 
 # ---- env.sh ---------------------------------------------------------------------------------------------------------
 cat > "$PREFIX/env.sh" <<EOF
-# Mirror's Edge Menu toolchain (tools/linux/setup.sh). Source it: . "$PREFIX/env.sh"
-export MEMENU_TOOLCHAIN="$PREFIX"
-export MEMENU_LLVM_DIR="$LLVM_DIR"
-export MEMENU_XWIN_DIR="$XWIN_DIR"
-export MEMENU_WINE_DIR="$WINE_DIR"
-export WINEPREFIX="\${MEMENU_WINEPREFIX:-$PREFIX/wineprefix}"
+# Mirage toolchain (tools/linux/setup.sh). Source it: . "$PREFIX/env.sh"
+export MIRAGE_TOOLCHAIN="$PREFIX"
+export MIRAGE_LLVM_DIR="$LLVM_DIR"
+export MIRAGE_XWIN_DIR="$XWIN_DIR"
+export MIRAGE_WINE_DIR="$WINE_DIR"
+export WINEPREFIX="\${MIRAGE_WINEPREFIX:-$PREFIX/wineprefix}"
 export WINEDEBUG="\${WINEDEBUG:--all}"
 case ":\$PATH:" in *":$PREFIX/bin:"*) ;; *) export PATH="$PREFIX/bin:$LLVM_DIR/bin:$WINE_DIR/bin:\$HOME/.local/bin:\$PATH" ;; esac
 EOF
@@ -170,6 +170,6 @@ if ! grep -qF "$line" "$HOME/.bashrc" 2>/dev/null; then
 fi
 echo
 echo "${GREEN}Done.${RESET} In a new shell (or after: $line):"
-echo "    uv run memenu build          # cmake-build-linux-x86-debug/medge_menu.dll"
-echo "    uv run memenu test           # unit tests, under Wine"
-echo "    uv run memenu game-test      # the in-game self-test, through Steam / Proton"
+echo "    uv run mirage build          # cmake-build-linux-x86-debug/Mirage.dll"
+echo "    uv run mirage test           # unit tests, under Wine"
+echo "    uv run mirage game-test      # the in-game self-test, through Steam / Proton"

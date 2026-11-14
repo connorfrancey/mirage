@@ -1,4 +1,4 @@
-// The caches in src/core: TTL map, LRU, memory cache, signature cache, address cache.
+// The caches in loader/src/core: TTL map, LRU, memory cache, signature cache, address cache.
 #include "core/address_cache.h"
 #include "core/cache.h"
 #include "core/clock.h"
@@ -191,7 +191,7 @@ protected:
         const std::uint8_t code[] = {0x8B, 0x0D, 0x44, 0x33, 0x22, 0x11, 0x8B, 0x84};
         std::memcpy(&image.bytes[0x300], code, sizeof code);
         file = std::filesystem::temp_directory_path() /
-               ("memenu_sigtest_" + std::to_string(GetCurrentProcessId()) + "_" +
+               ("mirage_sigtest_" + std::to_string(GetCurrentProcessId()) + "_" +
                 ::testing::UnitTest::GetInstance()->current_test_info()->name() + ".json");
         std::filesystem::remove(file);
     }

@@ -51,7 +51,7 @@
       "inherits": "x86-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "MEMENU_MINIMAL": "ON"
+        "MIRAGE_MINIMAL": "ON"
       }
     },
     {
@@ -60,7 +60,7 @@
       "inherits": "x86-base",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "MEMENU_MINIMAL": "ON"
+        "MIRAGE_MINIMAL": "ON"
       }
     },
     {

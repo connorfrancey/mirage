@@ -1,17 +1,17 @@
 <#
 .SYNOPSIS
-    Installs (or updates, or removes) Mirror's Edge Menu with one command.
+    Installs (or updates, or removes) Mirage with one command.
 
 .DESCRIPTION
-    Downloads the latest memenu_installer.exe from the GitHub releases, checks its SHA-256 against the release's
+    Downloads the latest mirage_installer.exe from the GitHub releases, checks its SHA-256 against the release's
     SHA256SUMS.txt and runs it (one administrator prompt). The menu then loads the next time Mirror's Edge starts.
 
     Install or update:
-        irm https://raw.githubusercontent.com/connorfrancey/memenu/master/install.ps1 | iex
+        irm https://raw.githubusercontent.com/connorfrancey/mirage/main/install.ps1 | iex
 
     With options (uninstall, a specific version, a game folder that isn't found automatically):
-        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/connorfrancey/memenu/master/install.ps1))) -Uninstall
-        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/connorfrancey/memenu/master/install.ps1))) -GameDir "D:\Games\Mirror's Edge"
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/connorfrancey/mirage/main/install.ps1))) -Uninstall
+        & ([scriptblock]::Create((irm https://raw.githubusercontent.com/connorfrancey/mirage/main/install.ps1))) -GameDir "D:\Games\Mirror's Edge"
 
 .PARAMETER Uninstall
     Remove the menu (your settings are kept unless -RemoveSettings is given).
@@ -35,8 +35,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'    # Invoke-WebRequest is many times slower with the progress bar on 5.1
 
-$Repo = 'connorfrancey/memenu'
-$Asset = 'memenu_installer.exe'
+$Repo = 'connorfrancey/mirage'
+$Asset = 'mirage_installer.exe'
 
 function Write-Step([string] $Text) { Write-Host "  > $Text" -ForegroundColor Cyan }
 function Fail([string] $Text) {
@@ -48,11 +48,11 @@ function Fail([string] $Text) {
 }
 
 Write-Host ""
-Write-Host "  Mirror's Edge Menu" -ForegroundColor White
+Write-Host "  Mirage" -ForegroundColor White
 Write-Host "  https://github.com/$Repo" -ForegroundColor DarkGray
 Write-Host ""
 
-if ($env:OS -ne 'Windows_NT') { Fail "Mirror's Edge Menu is for Windows." }
+if ($env:OS -ne 'Windows_NT') { Fail "Mirage is for Windows." }
 
 # Windows PowerShell 5.1 may default to TLS 1.0, which GitHub refuses.
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -64,7 +64,7 @@ if (Get-Process -Name MirrorsEdge -ErrorAction SilentlyContinue) {
 # ---- Download ---------------------------------------------------------------------------------------------------
 $base = if ($Version) { "https://github.com/$Repo/releases/download/v$($Version.TrimStart('v'))" }
         else { "https://github.com/$Repo/releases/latest/download" }
-$work = Join-Path ([IO.Path]::GetTempPath()) ("memenu-" + [guid]::NewGuid().ToString('N'))
+$work = Join-Path ([IO.Path]::GetTempPath()) ("mirage-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
 $exe = Join-Path $work $Asset
 
@@ -108,7 +108,7 @@ try {
         0 {
             Write-Host ""
             if ($Gui) { Write-Host "  Installer closed." -ForegroundColor Green }
-            elseif ($Uninstall) { Write-Host "  Mirror's Edge Menu was removed." -ForegroundColor Green }
+            elseif ($Uninstall) { Write-Host "  Mirage was removed." -ForegroundColor Green }
             else {
                 Write-Host "  Installed! Start Mirror's Edge the way you always do." -ForegroundColor Green
                 Write-Host "  In the game: INSERT opens the menu, END unloads it." -ForegroundColor Green

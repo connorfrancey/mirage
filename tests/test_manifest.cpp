@@ -1,4 +1,4 @@
-// mod.toml (src/runtime/manifest.h)
+// mod.toml (loader/src/runtime/manifest.h)
 #include "runtime/manifest.h"
 
 #include <gtest/gtest.h>
@@ -116,7 +116,7 @@ TEST(Manifest, WarnsAboutUnknownKeys)
 TEST(Manifest, LoadChecksTheFolder)
 {
 	namespace fs = std::filesystem;
-	const fs::path root = fs::temp_directory_path() / "memenu_test_manifest";
+	const fs::path root = fs::temp_directory_path() / "mirage_test_manifest";
 	fs::remove_all(root);
 	const fs::path dir = root / "hello";
 	fs::create_directories(dir);
@@ -245,7 +245,7 @@ TEST(Manifest, ReportsSettingMistakes)
 // The mod manager's off list: written and read back; an empty folder has none; garbage reads as none
 TEST(Manifest, DisabledListRoundTrip)
 {
-	const auto dir = std::filesystem::temp_directory_path() / "memenu_test_disabled";
+	const auto dir = std::filesystem::temp_directory_path() / "mirage_test_disabled";
 	std::filesystem::create_directories(dir);
 	std::filesystem::remove(dir / "disabled.toml");
 	EXPECT_TRUE(ReadDisabled(dir).empty());

@@ -1,4 +1,4 @@
-// The menu console's line handling (src/core/shell.h): parsing, highlighting, completion, suggestions.
+// The menu console's line handling (loader/src/core/shell.h): parsing, highlighting, completion, suggestions.
 #include "core/shell.h"
 
 #include <gtest/gtest.h>

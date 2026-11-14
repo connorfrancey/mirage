@@ -1,6 +1,6 @@
 # mirage_sdkgen: writes the Mirage SDK (C++ headers, LuaLS stubs, decompiled script) from the game's packages and the
-# engine-only layouts the in-game self-test saved (Mirage, step 3). Built with -DMEMENU_BUILD_SDKGEN=ON; run with
-# `memenu sdk` or `mirage_sdkgen --config tools/sdkgen/sdkgen.toml`.
+# engine-only layouts the in-game self-test saved (Mirage, step 3). Built with -DMIRAGE_BUILD_SDKGEN=ON; run with
+# `mirage sdk` or `mirage_sdkgen --config tools/sdkgen/sdkgen.toml`.
 
 add_executable(mirage_sdkgen
         main.cpp
@@ -11,10 +11,10 @@ add_executable(mirage_sdkgen
         emit_script.cpp
         compare.cpp
         # The layout code the self-test proves against the engine: the generator uses the same, not a copy
-        ${CMAKE_SOURCE_DIR}/src/runtime/computed_layout.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/layout_json.cpp)
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/computed_layout.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/layout_json.cpp)
 
-target_include_directories(mirage_sdkgen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(mirage_sdkgen PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/loader/src)
 target_link_libraries(mirage_sdkgen PRIVATE
         UnrealLib::Linker UnrealLib::Decompiler fmt::fmt nlohmann_json::nlohmann_json toml11::toml11)
 target_compile_features(mirage_sdkgen PRIVATE cxx_std_20)

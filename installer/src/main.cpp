@@ -1,5 +1,5 @@
-// memenu_installer: one window, one click. Finds Mirror's Edge, puts the loader (dinput8.dll) and the menu into its
-// Binaries folder, and takes them out again. From a script: memenu_installer --install|--uninstall [game folder] [--quiet]
+// mirage_installer: one window, one click. Finds Mirror's Edge, puts the loader (dinput8.dll) and the menu into its
+// Binaries folder, and takes them out again. From a script: mirage_installer --install|--uninstall [game folder] [--quiet]
 #include "install.h"
 #include "resource.h"
 
@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 
 namespace
 {
-    constexpr wchar_t kTitle[] = L"Mirror's Edge Menu Installer";
+    constexpr wchar_t kTitle[] = L"Mirage Installer";
 
     enum : int { kIdPath = 1001, kIdBrowse, kIdInstall, kIdUninstall, kIdClose, kIdStatus };
 
@@ -105,10 +105,10 @@ namespace
     {
         removeSettings = false;
         if (!install::Inspect(dir).hasSettings)
-            return MessageBoxW(owner, (L"Remove Mirror's Edge Menu from " + dir.wstring() + L"?").c_str(), kTitle,
+            return MessageBoxW(owner, (L"Remove Mirage from " + dir.wstring() + L"?").c_str(), kTitle,
                                MB_OKCANCEL | MB_ICONQUESTION) == IDOK;
         const int answer = MessageBoxW(owner,
-            (L"Remove Mirror's Edge Menu from " + dir.wstring() + L"?\n\n"
+            (L"Remove Mirage from " + dir.wstring() + L"?\n\n"
              L"Your menu settings (config, themes, saved macros, logs) are in its folder:\n\n"
              L"Yes: remove it and delete the settings.\nNo: remove it, keep the settings for next time.").c_str(),
             kTitle, MB_YESNOCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2);
@@ -150,7 +150,7 @@ namespace
     {
         const std::wstring version = L"Version " + Widen(install::Version()) +
                                      L"  •  goes in the game folder; uninstall any time from Settings > Apps";
-        Control(L"STATIC", L"Mirror's Edge Menu", 0, 16, 12, 488, 28, 0, g_titleFont);
+        Control(L"STATIC", L"Mirage", 0, 16, 12, 488, 28, 0, g_titleFont);
         Control(L"STATIC", version.c_str(), 0, 16, 42, 488, 18, 0, g_font);
 
         Control(L"STATIC", L"Game folder:", 0, 16, 74, 488, 18, 0, g_font);
@@ -223,7 +223,7 @@ namespace
         wc.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
         wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(IDI_APP));
         if (!wc.hIcon) wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-        wc.lpszClassName = L"MemenuInstaller";
+        wc.lpszClassName = L"MirageInstaller";
         RegisterClassExW(&wc);
 
         constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
@@ -244,7 +244,7 @@ namespace
         return 0;
     }
 
-    // memenu_installer --install|--uninstall [dir] [--quiet] [--remove-settings]
+    // mirage_installer --install|--uninstall [dir] [--quiet] [--remove-settings]
     // Exit codes: 0 done, 1 failed, 2 game not found, 3 game is running (install.ps1 tells the player what to do).
     int RunCli(int argc, wchar_t** argv)
     {

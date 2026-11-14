@@ -22,10 +22,10 @@ namespace install
     {
         constexpr const wchar_t* kGameExe = L"MirrorsEdge.exe";
         constexpr const wchar_t* kLoader = L"dinput8.dll";
-        constexpr const wchar_t* kBackup = L"dinput8.dll.memenu-backup";
-        constexpr const wchar_t* kMenuDir = L"memenu";
-        constexpr const wchar_t* kMenuDll = L"medge_menu.dll";
-        constexpr char kMarker[] = "memenu-loader:";
+        constexpr const wchar_t* kBackup = L"dinput8.dll.mirage-backup";
+        constexpr const wchar_t* kMenuDir = L"mirage";
+        constexpr const wchar_t* kMenuDll = L"Mirage.dll";
+        constexpr char kMarker[] = "mirage-loader:";
         constexpr const wchar_t* kUninstaller = L"uninstall.exe";
         bool g_registerApp = true;      // SetAppRegistration
         constexpr const wchar_t* kAppKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\MirrorsEdgeMenu";
@@ -140,7 +140,7 @@ namespace install
             return ec ? 0 : n;
         }
 
-        // Windows' list of installed apps (Settings > Apps, Programs and Features): "Mirror's Edge Menu", with
+        // Windows' list of installed apps (Settings > Apps, Programs and Features): "Mirage", with
         // uninstall.exe (a copy of this installer) as its uninstaller.
         bool RegisterApp(const fs::path& gameDir, std::wstring& error)
         {
@@ -155,7 +155,7 @@ namespace install
             HKEY key = nullptr;
             if (RegCreateKeyExW(HKEY_LOCAL_MACHINE, kAppKey, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr) !=
                 ERROR_SUCCESS) {
-                error = L"cannot add Mirror's Edge Menu to the installed apps (registry)";
+                error = L"cannot add Mirage to the installed apps (registry)";
                 return false;
             }
             const std::wstring quoted = L"\"" + uninstaller.wstring() + L"\"";
@@ -168,7 +168,7 @@ namespace install
             const auto kb = static_cast<DWORD>((FileSize(menuDir / kMenuDll) + FileSize(gameDir / kLoader) +
                                                 FileSize(uninstaller)) / 1024);
 
-            SetString(key, L"DisplayName", L"Mirror's Edge Menu");
+            SetString(key, L"DisplayName", L"Mirage");
             SetString(key, L"DisplayVersion", Widen(Version()));
             SetString(key, L"Publisher", L"medge-menu");
             SetString(key, L"DisplayIcon", (gameDir / kGameExe).wstring() + L",0");
@@ -176,7 +176,7 @@ namespace install
             SetString(key, L"InstallDate", date);
             SetString(key, L"UninstallString", quoted + L" --uninstall" + dir);
             SetString(key, L"QuietUninstallString", quoted + L" --uninstall" + dir + L" --quiet");
-            SetString(key, L"URLInfoAbout", L"https://github.com/connorfrancey/memenu");
+            SetString(key, L"URLInfoAbout", L"https://github.com/connorfrancey/mirage");
             SetString(key, L"Comments", L"Trainer, TAS and tools menu for Mirror's Edge. Installed in " + gameDir.wstring());
             SetDword(key, L"EstimatedSize", kb);
             SetDword(key, L"NoModify", 1);
@@ -203,7 +203,7 @@ namespace install
         }
     }
 
-    const char* Version() { return MEMENU_VERSION; }
+    const char* Version() { return MIRAGE_VERSION; }
 
     void SetAppRegistration(bool on) { g_registerApp = on; }
 
@@ -276,10 +276,10 @@ namespace install
         if (g_registerApp && !RegisterApp(gameDir, error))
             appNote = L"\n\n(" + error + L". Uninstall by running this installer again.)";
 
-        message = std::wstring(s.installed ? L"Updated" : L"Installed") + L" Mirror's Edge Menu " + Widen(Version()) +
+        message = std::wstring(s.installed ? L"Updated" : L"Installed") + L" Mirage " + Widen(Version()) +
                   L".\n\nStart Mirror's Edge the way you always do (Steam, EA app, shortcut). The menu loads with the "
                   L"game: press INSERT to open it, END to unload it.\n\nTo uninstall: Windows Settings > Apps > "
-                  L"Mirror's Edge Menu, or run this installer again." + note + appNote;
+                  L"Mirage, or run this installer again." + note + appNote;
         return true;
     }
 
@@ -334,8 +334,8 @@ namespace install
             return false;
         }
 
-        message = removeSettings ? L"Mirror's Edge Menu was removed, with its settings."
-                                 : L"Mirror's Edge Menu was removed. Your settings were kept in " + menuDir.wstring() + L".";
+        message = removeSettings ? L"Mirage was removed, with its settings."
+                                 : L"Mirage was removed. Your settings were kept in " + menuDir.wstring() + L".";
         return true;
     }
 }

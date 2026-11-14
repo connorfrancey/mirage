@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Installs (or updates, or removes) Mirror's Edge Menu on Linux, the Steam Deck and macOS, where Mirror's Edge runs
+# Installs (or updates, or removes) Mirage on Linux, the Steam Deck and macOS, where Mirror's Edge runs
 # through Proton (Steam), Wine, Lutris, CrossOver or Whisky. On Windows it hands over to install.ps1.
 #
 # Install or update:
-#     curl -fsSL https://raw.githubusercontent.com/connorfrancey/memenu/master/install.sh | bash
+#     curl -fsSL https://raw.githubusercontent.com/connorfrancey/mirage/main/install.sh | bash
 #
 # With options:
-#     curl -fsSL https://raw.githubusercontent.com/connorfrancey/memenu/master/install.sh | bash -s -- --uninstall
-#     curl -fsSL https://raw.githubusercontent.com/connorfrancey/memenu/master/install.sh | bash -s -- --game-dir "/path/to/mirrors edge"
+#     curl -fsSL https://raw.githubusercontent.com/connorfrancey/mirage/main/install.sh | bash -s -- --uninstall
+#     curl -fsSL https://raw.githubusercontent.com/connorfrancey/mirage/main/install.sh | bash -s -- --game-dir "/path/to/mirrors edge"
 #
 # Options:
 #     --uninstall          remove the menu (your settings are kept)
@@ -16,20 +16,20 @@
 #     --version X.Y.Z      a release version instead of the latest one
 #     -h, --help           show this
 #
-# What it does (the same as memenu_installer.exe on Windows):
+# What it does (the same as mirage_installer.exe on Windows):
 #     <game>/Binaries/dinput8.dll              the loader, which loads the menu with the game
-#     <game>/Binaries/memenu/medge_menu.dll    the menu (its settings and logs go in this folder too)
-# A dinput8.dll from another mod is kept as dinput8.dll.memenu-backup and put back on uninstall.
+#     <game>/Binaries/mirage/Mirage.dll    the menu (its settings and logs go in this folder too)
+# A dinput8.dll from another mod is kept as dinput8.dll.mirage-backup and put back on uninstall.
 #
 # Wine and Proton use their own dinput8.dll unless told otherwise, so the game needs the override
 # dinput8=n,b. For Steam this script tells you the launch option to add; for other Wine prefixes it sets it.
 
 set -euo pipefail
 
-REPO="connorfrancey/memenu"
-ASSET="memenu-files.zip"
-MARKER="memenu-loader:"
-BACKUP="dinput8.dll.memenu-backup"
+REPO="connorfrancey/mirage"
+ASSET="mirage-files.zip"
+MARKER="mirage-loader:"
+BACKUP="dinput8.dll.mirage-backup"
 LAUNCH_OPTION='WINEDLLOVERRIDES="dinput8=n,b" %command%'
 
 # ---- Output ------------------------------------------------------------------------------------------------------
@@ -52,7 +52,7 @@ Usage: install.sh [--uninstall [--remove-settings]] [--game-dir DIR] [--version 
   --game-dir DIR       the game folder (or MirrorsEdge.exe), when it isn't found automatically
   --version X.Y.Z      a release version instead of the latest one
 
-Through curl:  curl -fsSL https://raw.githubusercontent.com/connorfrancey/memenu/master/install.sh | bash -s -- --uninstall
+Through curl:  curl -fsSL https://raw.githubusercontent.com/connorfrancey/mirage/main/install.sh | bash -s -- --uninstall
 EOF
 }
 
@@ -75,7 +75,7 @@ done
 printf '\n  %sMirror'\''s Edge Menu%s\n  %shttps://github.com/%s%s\n\n' "$BOLD" "$RESET" "$DIM" "$REPO" "$RESET"
 
 # ---- Windows: install.ps1 does it there --------------------------------------------------------------------------
-case "${MEMENU_TEST_OS:-$(uname -s)}" in     # MEMENU_TEST_OS=Linux: test the Linux path anywhere
+case "${MIRAGE_TEST_OS:-$(uname -s)}" in     # MIRAGE_TEST_OS=Linux: test the Linux path anywhere
     MINGW*|MSYS*|CYGWIN*)
         step "This is Windows: running install.ps1 instead"
         ps_args=""
@@ -222,18 +222,18 @@ set_wine_override() {   # add (1) or remove (0)
 
 # ---- Uninstall ---------------------------------------------------------------------------------------------------
 if [ "$UNINSTALL" = 1 ]; then
-    step "Removing Mirror's Edge Menu"
+    step "Removing Mirage"
     is_our_loader "$BIN/dinput8.dll" && rm -f "$BIN/dinput8.dll"
     if [ -f "$BIN/$BACKUP" ] && [ ! -e "$BIN/dinput8.dll" ]; then
         mv "$BIN/$BACKUP" "$BIN/dinput8.dll"
         note "Put back the other mod's dinput8.dll."
     fi
     if [ "$REMOVE_SETTINGS" = 1 ]; then
-        rm -rf "$BIN/memenu"
+        rm -rf "$BIN/mirage"
         printf '\n  %sMirror'\''s Edge Menu was removed, with its settings.%s\n' "$GREEN" "$RESET"
     else
-        rm -f "$BIN/memenu/medge_menu.dll"
-        printf '\n  %sMirror'\''s Edge Menu was removed.%s Your settings were kept in %s/memenu.\n' \
+        rm -f "$BIN/mirage/Mirage.dll"
+        printf '\n  %sMirror'\''s Edge Menu was removed.%s Your settings were kept in %s/mirage.\n' \
             "$GREEN" "$RESET" "$BIN"
     fi
     if [ ! -e "$BIN/dinput8.dll" ]; then
@@ -248,14 +248,14 @@ if [ "$UNINSTALL" = 1 ]; then
 fi
 
 # ---- Download ----------------------------------------------------------------------------------------------------
-if [ -n "${MEMENU_RELEASE_URL:-}" ]; then BASE="$MEMENU_RELEASE_URL"     # Testing: a folder with the release files
+if [ -n "${MIRAGE_RELEASE_URL:-}" ]; then BASE="$MIRAGE_RELEASE_URL"     # Testing: a folder with the release files
 elif [ -n "$VERSION" ]; then BASE="https://github.com/$REPO/releases/download/v$VERSION"
 else BASE="https://github.com/$REPO/releases/latest/download"; fi
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/memenu.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/mirage.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
-step "Downloading Mirror's Edge Menu${VERSION:+ (version $VERSION)}"
+step "Downloading Mirage${VERSION:+ (version $VERSION)}"
 download "$BASE/$ASSET" "$WORK/$ASSET" && download "$BASE/SHA256SUMS.txt" "$WORK/SHA256SUMS.txt" ||
     fail "Download failed. Check your internet connection${VERSION:+ and that version $VERSION exists}.
   (Version 2.0.0 and older have no $ASSET: use 2.0.1-dev or newer.)"
@@ -268,19 +268,19 @@ expected="$(tr -d '\r' < "$WORK/SHA256SUMS.txt" | awk -v f="$ASSET" '$2 == f || 
 
 mkdir "$WORK/files"
 unpack "$WORK/$ASSET" "$WORK/files"
-[ -f "$WORK/files/dinput8.dll" ] && [ -f "$WORK/files/memenu/medge_menu.dll" ] ||
+[ -f "$WORK/files/dinput8.dll" ] && [ -f "$WORK/files/mirage/Mirage.dll" ] ||
     fail "The download doesn't have the expected files. Nothing was installed."
 
 # ---- Install -----------------------------------------------------------------------------------------------------
 step "Installing into the game folder"
 updating=0
-is_our_loader "$BIN/dinput8.dll" && [ -f "$BIN/memenu/medge_menu.dll" ] && updating=1
+is_our_loader "$BIN/dinput8.dll" && [ -f "$BIN/mirage/Mirage.dll" ] && updating=1
 if [ -e "$BIN/dinput8.dll" ] && ! is_our_loader "$BIN/dinput8.dll"; then
     if [ ! -e "$BIN/$BACKUP" ]; then mv "$BIN/dinput8.dll" "$BIN/$BACKUP"; fi
     note "Another mod's dinput8.dll was saved as $BACKUP and is put back when you uninstall."
 fi
-mkdir -p "$BIN/memenu"
-cp -f "$WORK/files/memenu/medge_menu.dll" "$BIN/memenu/medge_menu.dll"
+mkdir -p "$BIN/mirage"
+cp -f "$WORK/files/mirage/Mirage.dll" "$BIN/mirage/Mirage.dll"
 cp -f "$WORK/files/dinput8.dll" "$BIN/dinput8.dll"
 
 echo
@@ -317,6 +317,6 @@ cat <<EOF
   Then start Mirror's Edge the way you always do.
   In the game: ${BOLD}INSERT${RESET} opens the menu, ${BOLD}END${RESET} unloads it.
   ${DIM}Run this command again any time to update. Running the game through Wine/Proton is less tested than Windows:
-  if the menu doesn't show up, look at $BIN/memenu/loader.log and logs/memenu.log there.${RESET}
+  if the menu doesn't show up, look at $BIN/mirage/loader.log and logs/mirage.log there.${RESET}
 
 EOF

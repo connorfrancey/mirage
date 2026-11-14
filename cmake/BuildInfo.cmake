@@ -1,11 +1,11 @@
-# Build identity stamped into the DLL and written at the top of every log (see the log format in src/log.cpp), so a
+# Build identity stamped into the DLL and written at the top of every log (see the log format in loader/src/log.cpp), so a
 # log can be matched to the exact build that wrote it.
 #
-# Included from CMakeLists.txt: memenu_add_build_info(<target>) adds a generated build_info.cpp to <target> and
+# Included from CMakeLists.txt: mirage_add_build_info(<target>) adds a generated build_info.cpp to <target> and
 # regenerates it on every build. Run as a script (cmake -P) by that custom command.
 #
 #   build number  increases by one on every build (counter in <repo>/build/.build-number, shared by all build folders;
-#                 CI sets MEMENU_BUILD_NUMBER, e.g. to the workflow run number)
+#                 CI sets MIRAGE_BUILD_NUMBER, e.g. to the workflow run number)
 #   id            random UUID, new on every build
 #   magic         64-bit hash (first 16 hex digits of SHA-256) of the build's details: version, commit, config,
 #                 compiler, options and features. Same magic = same code built the same way; the details themselves
@@ -17,8 +17,8 @@ if(CMAKE_SCRIPT_MODE_FILE)
   string(UUID _id NAMESPACE "6ba7b810-9dad-11d1-80b4-00c04fd430c8" NAME "${_salt}${_now}" TYPE SHA1)
 
   # Build number
-  if(DEFINED ENV{MEMENU_BUILD_NUMBER} AND NOT "$ENV{MEMENU_BUILD_NUMBER}" STREQUAL "")
-    set(_number "$ENV{MEMENU_BUILD_NUMBER}")
+  if(DEFINED ENV{MIRAGE_BUILD_NUMBER} AND NOT "$ENV{MIRAGE_BUILD_NUMBER}" STREQUAL "")
+    set(_number "$ENV{MIRAGE_BUILD_NUMBER}")
   else()
     set(_number 0)
     if(EXISTS "${NUMBER_FILE}")
@@ -80,16 +80,16 @@ const char* const build_info::kDetails          = \"${_details_c}\";
   return()
 endif()
 
-function(memenu_add_build_info target)
+function(mirage_add_build_info target)
   set(_out "${CMAKE_BINARY_DIR}/generated/build_info.cpp")
-  string(JOIN "," _features ${MEMENU_ENABLED_FEATURES})
-  set(_options "game=$<BOOL:${MEMENU_GAME}>,optimizations=$<BOOL:${MEMENU_OPTIMIZATIONS}>,minimal=$<BOOL:${MEMENU_BARE}>")
-  if(MEMENU_MINIMAL)
-    string(APPEND _options ",stage=${MEMENU_STAGE}")
+  string(JOIN "," _features ${MIRAGE_ENABLED_FEATURES})
+  set(_options "game=$<BOOL:${MIRAGE_GAME}>,optimizations=$<BOOL:${MIRAGE_OPTIMIZATIONS}>,minimal=$<BOOL:${MIRAGE_BARE}>")
+  if(MIRAGE_MINIMAL)
+    string(APPEND _options ",stage=${MIRAGE_STAGE}")
   endif()
   add_custom_target(${target}_build_info ALL
     COMMAND ${CMAKE_COMMAND}
-            -DOUTPUT=${_out} -DVERSION=${MEMENU_VERSION} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+            -DOUTPUT=${_out} -DVERSION=${MIRAGE_VERSION} -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
             -DNUMBER_FILE=${PROJECT_SOURCE_DIR}/build/.build-number -DCONFIG=$<CONFIG>
             "-DCOMPILER=${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}"
             -DFEATURES=${_features} -DOPTIONS=${_options}

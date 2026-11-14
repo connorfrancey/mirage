@@ -18,7 +18,7 @@ namespace inject
     std::vector<DWORD> FindProcesses(const std::wstring& exeName);
     std::optional<DWORD> FindProcess(const std::wstring& exeName);
 
-    // Is a module with this file name (e.g. L"medge_menu.dll") already loaded in the process?
+    // Is a module with this file name (e.g. L"Mirage.dll") already loaded in the process?
     bool IsModuleLoaded(DWORD pid, const std::wstring& moduleName);
 
     // IMAGE_FILE_HEADER.Machine of a PE file (0x14C = x86), or nothing if it isn't a PE file.

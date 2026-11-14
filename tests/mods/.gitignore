@@ -1,4 +1,4 @@
-# Game packages copied from the game install at game-test time (tools/memenu_tools/example_mods.py GAME_PACKAGES)
+# Game packages copied from the game install at game-test time (tools/mirage_tools/example_mods.py GAME_PACKAGES)
 *.me1
 *.upk
 # Made here with the game's editor (tests/maps-src/MirageEditorRoom), no game content: kept

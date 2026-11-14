@@ -6,7 +6,7 @@ a map made with that editor, and the self-test step "Mirage editor map" plays it
 (two brushes, a player start, a point light) and the engine's default classes: no game content.
 
 How it was built, all through the editor's command box (`editor_commands.ps1` types commands into it and closes the
-startup dialogs; the menu was switched off for the editor with `memenu\disabled`):
+startup dialogs; the menu was switched off for the editor with `mirage\disabled`):
 
 1. `python brushes.py` writes `outer.t3d` and `inner.t3d`: cubes in the format and vertex order the editor's own cube
    builder exports (`BRUSH EXPORT`), sized for a 2048 x 2048 room, 800 high, with its floor 96 units below the origin.

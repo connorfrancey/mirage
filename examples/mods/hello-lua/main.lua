@@ -1,5 +1,5 @@
 -- Hello (Lua): the native Hello example as a Lua mod. Copy this folder into the menu's mods folder
--- (Binaries\memenu\mods\hello-lua) and it shows up in the Mods column, no build needed.
+-- (Binaries\mirage\mods\hello-lua) and it shows up in the Mods column, no build needed.
 
 local greet = require("greeting")    -- greeting.lua, next to this file
 

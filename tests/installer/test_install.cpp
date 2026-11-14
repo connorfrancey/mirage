@@ -32,13 +32,13 @@ void Write(const fs::path& p, const std::string& text)
     std::ofstream(p, std::ios::binary) << text;
 }
 
-// <temp>/memenu-installer-test-<n>/ with a game root and Binaries\MirrorsEdge.exe, removed afterwards.
+// <temp>/mirage-installer-test-<n>/ with a game root and Binaries\MirrorsEdge.exe, removed afterwards.
 class FakeGame : public ::testing::Test {
 protected:
     void SetUp() override
     {
         install::SetAppRegistration(false);
-        root_ = fs::temp_directory_path() / ("memenu-installer-test-" + std::to_string(GetCurrentProcessId()) + "-" +
+        root_ = fs::temp_directory_path() / ("mirage-installer-test-" + std::to_string(GetCurrentProcessId()) + "-" +
                                              ::testing::UnitTest::GetInstance()->current_test_info()->name());
         fs::remove_all(root_);
         bin_ = root_ / "Binaries";
@@ -74,9 +74,9 @@ TEST_F(FakeGame, InstallsInspectsAndUninstalls)
     std::wstring message;
     ASSERT_TRUE(install::Install(bin_, message)) << std::string(message.begin(), message.end());
     EXPECT_NE(message.find(L"Installed"), std::wstring::npos);
-    EXPECT_EQ(Read(bin_ / "dinput8.dll"), Read(MEMENU_TEST_DATA "/fake_loader.bin"));
-    EXPECT_EQ(Read(bin_ / "memenu" / "medge_menu.dll"), Read(MEMENU_TEST_DATA "/fake_menu.bin"));
-    EXPECT_FALSE(fs::exists(bin_ / "memenu" / "uninstall.exe"));               // Not registered: no uninstaller copy
+    EXPECT_EQ(Read(bin_ / "dinput8.dll"), Read(MIRAGE_TEST_DATA "/fake_loader.bin"));
+    EXPECT_EQ(Read(bin_ / "mirage" / "Mirage.dll"), Read(MIRAGE_TEST_DATA "/fake_menu.bin"));
+    EXPECT_FALSE(fs::exists(bin_ / "mirage" / "uninstall.exe"));               // Not registered: no uninstaller copy
     for (const auto& e : fs::directory_iterator(bin_))                          // No half-written leftovers
         EXPECT_NE(e.path().extension(), ".new") << e.path();
 
@@ -91,7 +91,7 @@ TEST_F(FakeGame, InstallsInspectsAndUninstalls)
 
     ASSERT_TRUE(install::Uninstall(bin_, true, message));
     EXPECT_FALSE(fs::exists(bin_ / "dinput8.dll"));
-    EXPECT_FALSE(fs::exists(bin_ / "memenu"));
+    EXPECT_FALSE(fs::exists(bin_ / "mirage"));
     EXPECT_TRUE(fs::exists(bin_ / "MirrorsEdge.exe"));                          // The game is left alone
     EXPECT_FALSE(install::Inspect(bin_).installed);
 }
@@ -101,15 +101,15 @@ TEST_F(FakeGame, KeepsSettingsWhenAsked)
     if (GameRunning()) GTEST_SKIP() << "Mirror's Edge is running: the installer refuses then";
     std::wstring message;
     ASSERT_TRUE(install::Install(bin_, message));
-    Write(bin_ / "memenu" / "MedgeMenu.json", "{\"theme\": \"mine\"}");
-    Write(bin_ / "memenu" / "replays" / "run.merp", "a run");
+    Write(bin_ / "mirage" / "Mirage.json", "{\"theme\": \"mine\"}");
+    Write(bin_ / "mirage" / "replays" / "run.merp", "a run");
     EXPECT_TRUE(install::Inspect(bin_).hasSettings);
 
     ASSERT_TRUE(install::Uninstall(bin_, false, message));
     EXPECT_FALSE(fs::exists(bin_ / "dinput8.dll"));
-    EXPECT_FALSE(fs::exists(bin_ / "memenu" / "medge_menu.dll"));
-    EXPECT_EQ(Read(bin_ / "memenu" / "MedgeMenu.json"), "{\"theme\": \"mine\"}");
-    EXPECT_TRUE(fs::exists(bin_ / "memenu" / "replays" / "run.merp"));
+    EXPECT_FALSE(fs::exists(bin_ / "mirage" / "Mirage.dll"));
+    EXPECT_EQ(Read(bin_ / "mirage" / "Mirage.json"), "{\"theme\": \"mine\"}");
+    EXPECT_TRUE(fs::exists(bin_ / "mirage" / "replays" / "run.merp"));
 }
 
 TEST_F(FakeGame, PutsAnotherModsLoaderBack)
@@ -121,12 +121,12 @@ TEST_F(FakeGame, PutsAnotherModsLoaderBack)
     std::wstring message;
     ASSERT_TRUE(install::Install(bin_, message));
     EXPECT_NE(message.find(L"another mod"), std::wstring::npos);
-    EXPECT_EQ(Read(bin_ / "dinput8.dll.memenu-backup"), "someone else's mod");
+    EXPECT_EQ(Read(bin_ / "dinput8.dll.mirage-backup"), "someone else's mod");
     EXPECT_TRUE(install::Inspect(bin_).installed);
 
     ASSERT_TRUE(install::Uninstall(bin_, true, message));
     EXPECT_EQ(Read(bin_ / "dinput8.dll"), "someone else's mod");                // Back where it was
-    EXPECT_FALSE(fs::exists(bin_ / "dinput8.dll.memenu-backup"));
+    EXPECT_FALSE(fs::exists(bin_ / "dinput8.dll.mirage-backup"));
 }
 
 TEST_F(FakeGame, RefusesWithoutAGame)

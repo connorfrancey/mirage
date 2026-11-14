@@ -5,7 +5,7 @@
 #include <utility>
 
 // Benchmarks are Google Benchmark functions named "Group/what it measures": bench_main.cpp picks groups by the start of
-// that name (memenu_bench Replay Mesh), the rest of Google Benchmark's flags (--benchmark_*) pass through.
+// that name (mirage_bench Replay Mesh), the rest of Google Benchmark's flags (--benchmark_*) pass through.
 //
 //     BENCHMARK(InputHash)->Name("Replay/InputHash (10 min)");
 namespace bench {

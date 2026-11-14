@@ -1,4 +1,4 @@
-// The Mirage mod ABI (api/mirage/api.h) is frozen: these are the sizes and offsets of ABI v1 on the game's 32-bit
+// The Mirage mod ABI (loader/include/mirage/api.h) is frozen: these are the sizes and offsets of ABI v1 on the game's 32-bit
 // target. A failure here means a change that breaks mods already built: append to MirageApi instead (and add the new
 // fields' offsets below), never insert, remove, reorder or retype.
 #include "mirage/api.h"

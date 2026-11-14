@@ -5,7 +5,7 @@ file(GLOB_RECURSE files RELATIVE "${ROOT}" "${ROOT}/*")
 list(SORT files)
 
 # First-party mods use the public API only (Mirage plan, step 9): Lua reaches the game through mirage.* alone, and a
-# native part may include "mirage/..." (api/) and its own files, never the menu's headers (no runtime include paths).
+# native part may include "mirage/..." (loader/include/) and its own files, never the menu's headers (no runtime include paths).
 foreach(f IN LISTS files)
     if(NOT f MATCHES "\\.(c|cc|cpp|cxx|h|hh|hpp|hxx|inl)$")
         continue()

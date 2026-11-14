@@ -1,20 +1,20 @@
-# MEMENU_CCACHE: compile C and C++ through ccache (option in CMakeLists.txt). Included before any target exists, since
+# MIRAGE_CCACHE: compile C and C++ through ccache (option in CMakeLists.txt). Included before any target exists, since
 # CMAKE_<LANG>_COMPILER_LAUNCHER and CMAKE_MSVC_DEBUG_INFORMATION_FORMAT only apply to targets created after them.
 
-if(NOT MEMENU_CCACHE)
+if(NOT MIRAGE_CCACHE)
     return()
 endif()
 
-find_program(CCACHE_PROGRAM ccache DOC "ccache executable (MEMENU_CCACHE)")
+find_program(CCACHE_PROGRAM ccache DOC "ccache executable (MIRAGE_CCACHE)")
 if(NOT CCACHE_PROGRAM)
-    message(WARNING "MEMENU_CCACHE is on but ccache was not found: building without it. Install ccache "
+    message(WARNING "MIRAGE_CCACHE is on but ccache was not found: building without it. Install ccache "
             "(scoop install ccache / winget install ccache.ccache) or set CCACHE_PROGRAM to its path.")
     return()
 endif()
 
 if(CMAKE_GENERATOR MATCHES "Visual Studio")
     # The VS generator ignores compiler launchers
-    message(WARNING "MEMENU_CCACHE: the Visual Studio generator can't use ccache; use Ninja (the presets do).")
+    message(WARNING "MIRAGE_CCACHE: the Visual Studio generator can't use ccache; use Ninja (the presets do).")
     return()
 endif()
 

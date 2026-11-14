@@ -5,7 +5,7 @@
 -- must no longer be valid. What it saw is shared for the self-test (mirage.share).
 local m = mirage.module { name = "World access (Lua)", tab = "Mods", description = "Self-test: world access (step 14)" }
 
-local added, removed, restarts, streamed = 0, 0, 0, 0
+local added, removed, restarts, streamed, states = 0, 0, 0, 0, 0
 local probe = nil               -- The probe, kept from its actor_added event
 local queried = false
 
@@ -39,6 +39,11 @@ local function subscribe()
             mirage.share("kept_z_after", tostring(probe.Location))     -- A gone object reads as nothing (nil), never another's
         end
         share()
+    end)
+
+    subs[#subs + 1] = mirage.on("player_state", function()     -- The engine's state handler hook
+        states = states + 1
+        mirage.share("player_states", states)
     end)
 
     subs[#subs + 1] = mirage.on("restart", function()

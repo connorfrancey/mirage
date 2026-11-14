@@ -2,7 +2,7 @@ id = "higher-jumps"
 name = "Higher Jumps"
 version = "1.0.0"
 description = "A script patch example: TdMove_Jump.StartMove's bytecode multiplies the jump's speed. No native code"
-authors = ["Mirror's Edge Menu"]
+authors = ["Mirage"]
 mirage = "^0.1"
 
 [settings.multiplier]

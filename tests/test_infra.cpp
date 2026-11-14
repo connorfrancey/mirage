@@ -21,7 +21,7 @@ struct Other { std::string s; };
 
 fs::path TempDir(const char* name)
 {
-    const fs::path d = fs::temp_directory_path() / ("memenu-tests-" + std::to_string(GetCurrentProcessId())) / name;
+    const fs::path d = fs::temp_directory_path() / ("mirage-tests-" + std::to_string(GetCurrentProcessId())) / name;
     fs::create_directories(d);
     return d;
 }

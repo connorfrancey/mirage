@@ -1,4 +1,4 @@
-// Texture replacement, the file side (src/runtime/texture_files.cpp): encoding a mod's image into the game's formats,
+// Texture replacement, the file side (loader/src/runtime/texture_files.cpp): encoding a mod's image into the game's formats,
 // and rewriting a real map package with a replaced texture. The package tests use the game's files (like
 // test_unreallib.cpp) and are skipped without them.
 
@@ -187,7 +187,7 @@ TEST(Textures, RewritesAMapPackage)
 	EXPECT_EQ(scanned.size(), full.size());
 
 	// Replace it with a 64x32 picture
-	const fs::path png = fs::temp_directory_path() / "memenu_test_replacement.png";
+	const fs::path png = fs::temp_directory_path() / "mirage_test_replacement.png";
 	const Assets::Image img = TestImage(64, 32);
 	img.save_png(png);
 	const Overlay overlay = BuildOverlay(file, {{target, png}});

@@ -1,8 +1,8 @@
 @echo off
 rem ---------------------------------------------------------------------------
-rem  build.bat - shortcut for `memenu.py build` (see memenu.py --help)
+rem  build.bat - shortcut for `mirage.py build` (see mirage.py --help)
 rem
-rem  Usage:  build.bat [debug|release] [clean] [other memenu build options]
+rem  Usage:  build.bat [debug|release] [clean] [other mirage build options]
 rem    debug    (default) debug build
 rem    release  release build
 rem    clean    delete the build folder first (full rebuild)
@@ -14,7 +14,7 @@ rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
 
 rem Capture before parsing: shift also moves %0, which would change %~dp0
-set "MEMENU=%~dp0memenu.py"
+set "MIRAGE=%~dp0mirage.py"
 set "CONFIG=debug"
 set "EXTRA="
 
@@ -31,13 +31,13 @@ goto parse_args
 
 where uv >nul 2>nul
 if not errorlevel 1 (
-    uv run "%MEMENU%" build -c %CONFIG%%EXTRA%
+    uv run "%MIRAGE%" build -c %CONFIG%%EXTRA%
     goto done
 )
 
 where python >nul 2>nul
 if not errorlevel 1 (
-    python "%MEMENU%" build -c %CONFIG%%EXTRA%
+    python "%MIRAGE%" build -c %CONFIG%%EXTRA%
     goto done
 )
 

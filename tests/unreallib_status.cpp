@@ -1,4 +1,4 @@
-// UnrealLib status check (`memenu unreallib`): runs one check per UnrealLib module against the game's own packages
+// UnrealLib status check (`mirage unreallib`): runs one check per UnrealLib module against the game's own packages
 // and logs what each one found, so it is easy to see that the library really works here (and how fast it is).
 //
 //   unreallib_status [CookedPC folder]

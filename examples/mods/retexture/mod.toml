@@ -2,6 +2,6 @@ id = "retexture"
 name = "Retexture"
 version = "1.0.0"
 description = "A content example: the Prologue's rooftops get an orange and charcoal striped texture. No code, just an image"
-authors = ["Mirror's Edge Menu"]
+authors = ["Mirage"]
 mirage = "^0.1"
 content = ["content"]

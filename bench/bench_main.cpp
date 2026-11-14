@@ -1,10 +1,10 @@
-// memenu_bench: runs every benchmark, or the groups named on the command line (Google Benchmark).
+// mirage_bench: runs every benchmark, or the groups named on the command line (Google Benchmark).
 //
-//     memenu_bench                    all of them
-//     memenu_bench Replay Mesh        only these groups (case-insensitive substring of the group name)
-//     memenu_bench --list             the benchmarks
-//     memenu_bench --csv              results as CSV (stdout), instead of the table
-//     memenu_bench --benchmark_...    any of Google Benchmark's own flags (--benchmark_repetitions=5, ...)
+//     mirage_bench                    all of them
+//     mirage_bench Replay Mesh        only these groups (case-insensitive substring of the group name)
+//     mirage_bench --list             the benchmarks
+//     mirage_bench --csv              results as CSV (stdout), instead of the table
+//     mirage_bench --benchmark_...    any of Google Benchmark's own flags (--benchmark_repetitions=5, ...)
 #include "bench.h"
 
 #include <cctype>
@@ -44,7 +44,7 @@ int main(int argc, char** argv)
         if (!std::strcmp(argv[i], "--list")) args.emplace_back("--benchmark_list_tests=true");
         else if (!std::strcmp(argv[i], "--csv")) args.emplace_back("--benchmark_format=csv");
         else if (!std::strcmp(argv[i], "-h") || !std::strcmp(argv[i], "--help")) {
-            std::puts("usage: memenu_bench [--list] [--csv] [--benchmark_...] [group...]");
+            std::puts("usage: mirage_bench [--list] [--csv] [--benchmark_...] [group...]");
             return 0;
         } else if (!std::strncmp(argv[i], "--", 2)) args.emplace_back(argv[i]);
         else groups.emplace_back(argv[i]);

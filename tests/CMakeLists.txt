@@ -1,7 +1,7 @@
 # Unit tests (GoogleTest) for the code that runs without the game: math, mesh building, TAS replays and macros, ...
-# Run with `uv run memenu test` or `ctest --test-dir cmake-build-x86-debug --output-on-failure`.
+# Run with `uv run mirage test` or `ctest --test-dir cmake-build-x86-debug --output-on-failure`.
 
-add_executable(memenu_tests
+add_executable(mirage_tests
         test_math.cpp
         test_float_util.cpp
         test_cache_system.cpp
@@ -20,60 +20,60 @@ add_executable(memenu_tests
         test_detours.cpp
         test_memory.cpp
         # The memory manager's parts without the game (runtime/mem): the test exe keeps the CRT's own operator new
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/analysis.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/pool.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/arena.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/heap.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/sampler.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/process.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/mem/allocators.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/analysis.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/pool.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/arena.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/heap.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/sampler.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/process.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/allocators.cpp
         test_caches_more.cpp
         test_infra.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/events.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/tasks.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/resource_cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/config_cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/detours.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/resolve.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/semver.cpp
-        ${CMAKE_SOURCE_DIR}/src/runtime/manifest.cpp
-        ${CMAKE_SOURCE_DIR}/src/render/mesh.cpp
-        ${CMAKE_SOURCE_DIR}/mods/memenu-collision/render/static_scene.cpp   # A native first-party mod's pure part
+        ${CMAKE_SOURCE_DIR}/loader/src/core/events.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/tasks.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/resource_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/config_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/detours.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/resolve.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/semver.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/manifest.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/render/mesh.cpp
+        ${CMAKE_SOURCE_DIR}/mods/mirage-collision/render/static_scene.cpp   # A native first-party mod's pure part
         # The settings framework and what it needs (test_settings.cpp): no game, no window
-        ${CMAKE_SOURCE_DIR}/src/core/setting.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/module.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/notify.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/keybinds.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/bindings.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/keys.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/scheduler.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/clock.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/cache_evict.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/cache_sched.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/memory_cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/signature_cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/address_cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/string_cache.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/hardware.cpp
-        ${CMAKE_SOURCE_DIR}/src/core/shell.cpp)
-target_include_directories(memenu_tests PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/api ${CMAKE_SOURCE_DIR}/mods)
-target_compile_definitions(memenu_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
-        MEMENU_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(memenu_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 minhook magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
+        ${CMAKE_SOURCE_DIR}/loader/src/core/setting.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/module.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/notify.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/keybinds.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/bindings.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/keys.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/scheduler.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/clock.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/cache_evict.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/cache_sched.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/memory_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/signature_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/address_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/string_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/hardware.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/shell.cpp)
+target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src ${CMAKE_SOURCE_DIR}/loader/include ${CMAKE_SOURCE_DIR}/mods)
+target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
+        MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
+target_link_libraries(mirage_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 minhook magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
 if(MSVC)
-  target_compile_options(memenu_tests PRIVATE /W4 /permissive- /utf-8)
+  target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
 
 # One CTest test per TEST(); listed when ctest runs (not at build time, so a build never runs the exe)
 include(GoogleTest)
-gtest_discover_tests(memenu_tests DISCOVERY_MODE PRE_TEST)
+gtest_discover_tests(mirage_tests DISCOVERY_MODE PRE_TEST)
 
 # The installer's work on a game folder, on a fake one (tests/installer/test_install.cpp): stand-in DLLs embedded the
 # way the real installer embeds the built ones, as RCDATA resources (written with absolute paths for the resource
 # compiler).
-set(MEMENU_TEST_PAYLOAD_RC ${CMAKE_CURRENT_BINARY_DIR}/installer_payload.rc)
-file(WRITE ${MEMENU_TEST_PAYLOAD_RC}
+set(MIRAGE_TEST_PAYLOAD_RC ${CMAKE_CURRENT_BINARY_DIR}/installer_payload.rc)
+file(WRITE ${MIRAGE_TEST_PAYLOAD_RC}
 "#include \"${CMAKE_SOURCE_DIR}/installer/src/resource.h\"
 IDR_LOADER_DLL RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/installer/fake_loader.bin\"
 IDR_MENU_DLL   RCDATA \"${CMAKE_CURRENT_SOURCE_DIR}/installer/fake_menu.bin\"
@@ -82,26 +82,26 @@ add_executable(installer_tests
         installer/test_install.cpp
         ${CMAKE_SOURCE_DIR}/installer/src/install.cpp
         ${CMAKE_SOURCE_DIR}/launcher/src/detect.cpp
-        ${MEMENU_TEST_PAYLOAD_RC})
+        ${MIRAGE_TEST_PAYLOAD_RC})
 target_include_directories(installer_tests PRIVATE ${CMAKE_SOURCE_DIR}/installer/src ${CMAKE_SOURCE_DIR}/launcher/src)
-target_compile_definitions(installer_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE MEMENU_VERSION="test"
-        MEMENU_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/installer")
+target_compile_definitions(installer_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE MIRAGE_VERSION="test"
+        MIRAGE_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/installer")
 target_link_libraries(installer_tests PRIVATE GTest::gtest_main shell32 advapi32)
 if(MSVC)
   target_compile_options(installer_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
 gtest_discover_tests(installer_tests DISCOVERY_MODE PRE_TEST)
 
-# UnrealLib (cmake/Libraries.cmake): its own exe because the library is C++20 and memenu_tests builds as C++17.
+# UnrealLib (cmake/Libraries.cmake): its own exe because the library is C++20 and mirage_tests builds as C++17.
 # Reading the game's packages uses the launcher's install detection (or UNREALLIB_MIRRORSEDGE_DIR); skipped without it.
-if(MEMENU_UNREALLIB)
+if(MIRAGE_UNREALLIB)
   add_executable(unreallib_tests
           test_unreallib.cpp
           test_textures.cpp
-          ${CMAKE_SOURCE_DIR}/src/runtime/texture_files.cpp
-          ${CMAKE_SOURCE_DIR}/src/runtime/stb_impl.cpp
+          ${CMAKE_SOURCE_DIR}/loader/src/runtime/texture_files.cpp
+          ${CMAKE_SOURCE_DIR}/loader/src/runtime/stb_impl.cpp
           ${CMAKE_SOURCE_DIR}/launcher/src/detect.cpp)
-  target_include_directories(unreallib_tests PRIVATE ${CMAKE_SOURCE_DIR}/launcher/src ${CMAKE_SOURCE_DIR}/src)
+  target_include_directories(unreallib_tests PRIVATE ${CMAKE_SOURCE_DIR}/launcher/src ${CMAKE_SOURCE_DIR}/loader/src)
   target_compile_definitions(unreallib_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
   target_link_libraries(unreallib_tests PRIVATE GTest::gtest_main UnrealLib::UnrealLib stb_headers shell32 advapi32)
   if(MSVC)
@@ -109,14 +109,14 @@ if(MEMENU_UNREALLIB)
   endif()
   gtest_discover_tests(unreallib_tests DISCOVERY_MODE PRE_TEST)
 
-  # Status check (`memenu unreallib`): one check per module against the game's packages, logged with spdlog
+  # Status check (`mirage unreallib`): one check per module against the game's packages, logged with spdlog
   add_executable(unreallib_status
           unreallib_status.cpp
           ${CMAKE_SOURCE_DIR}/launcher/src/detect.cpp)
   target_include_directories(unreallib_status PRIVATE ${CMAKE_SOURCE_DIR}/launcher/src)
   target_compile_definitions(unreallib_status PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE _CRT_SECURE_NO_WARNINGS)
   target_link_libraries(unreallib_status PRIVATE UnrealLib::UnrealLib spdlog::spdlog shell32 advapi32)
-  set_target_properties(unreallib_status PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})   # Where memenu looks
+  set_target_properties(unreallib_status PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})   # Where mirage looks
   if(MSVC)
     target_compile_options(unreallib_status PRIVATE /W4 /permissive- /utf-8)
   endif()

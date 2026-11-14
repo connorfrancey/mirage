@@ -1,4 +1,4 @@
-// Managed native detours (src/runtime/detours.h): several detours on one function, in priority order, relinked as
+// Managed native detours (loader/src/runtime/detours.h): several detours on one function, in priority order, relinked as
 // they come and go. On real code in this test executable, through MinHook like in the game.
 #include "runtime/detours.h"
 

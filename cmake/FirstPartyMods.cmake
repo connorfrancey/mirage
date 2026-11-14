@@ -5,12 +5,12 @@
 #   mods/<id>/CMakeLists.txt:   mirage_native_mod(<id> SOURCES a.cpp b.cpp [LIBS nlohmann_json::nlohmann_json])
 #   mods/<id>/mod.toml:         entry = "<id>.dll"
 #
-# What a native mod may use: api/ (mirage/api.h, mirage/mirage.hpp), its own files and the header-only libraries listed
+# What a native mod may use: loader/include/ (mirage/api.h, mirage/mirage.hpp), its own files and the header-only libraries listed
 # in MIRAGE_MOD_ALLOWED_LIBS. Never the menu's sources or include paths: what a mod needs from the menu goes into the
 # API (cmake/EmbedMods.cmake also refuses a quoted #include of anything else).
 
-# The SDK is public (sdk/, api/mirage/sdk.hpp). imgui (+ imgui_filebrowser): only with MirageApi imgui_context, which
-# refuses a mod built with another ImGui version (api/mirage/imgui.hpp).
+# The SDK is public (sdk/, loader/include/mirage/sdk.hpp). imgui (+ imgui_filebrowser): only with MirageApi imgui_context, which
+# refuses a mod built with another ImGui version (loader/include/mirage/imgui.hpp).
 set(MIRAGE_MOD_ALLOWED_LIBS nlohmann_json::nlohmann_json mirage::sdk fmt::fmt unordered_dense magic_enum::magic_enum
     imgui imgui_filebrowser)
 
@@ -23,7 +23,7 @@ function(mirage_native_mod id)
   endforeach()
   set(target mirage_mod_${id})
   add_library(${target} SHARED ${M_SOURCES})
-  target_include_directories(${target} PRIVATE ${CMAKE_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR})
+  target_include_directories(${target} PRIVATE ${CMAKE_SOURCE_DIR}/loader/include ${CMAKE_CURRENT_SOURCE_DIR})
   target_compile_features(${target} PRIVATE cxx_std_20)
   target_compile_definitions(${target} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
   target_link_libraries(${target} PRIVATE ${M_LIBS})

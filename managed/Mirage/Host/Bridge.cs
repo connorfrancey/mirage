@@ -11,7 +11,7 @@ using Mirage.Native;
 namespace Mirage
 {
     /// <summary>
-    /// What the menu's runtime calls (src/runtime/mod_dotnet.cpp). Not for mods. Every entry point catches everything:
+    /// What the menu's runtime calls (loader/src/runtime/mod_dotnet.cpp). Not for mods. Every entry point catches everything:
     /// an exception may never cross into native code.
     /// </summary>
     public static unsafe class Bridge

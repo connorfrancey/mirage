@@ -17,10 +17,10 @@ set(TOML_VERSION v4.4.0)
 
 # UnrealLib - https://github.com/connorfrancey/UnrealLib
 set(UNREALLIB_GIT_TAG 0ed8ae933e11924b6e60108931d4ef6879b44cdb)   # branch bytecode-encoder: encode_script, assemble_script (step 8)
-set(LUA_VERSION v5.4.8)   # Mod scripting (src/runtime/lua_vm.cpp): built from source, as C++
+set(LUA_VERSION v5.4.8)   # Mod scripting (loader/src/runtime/lua_vm.cpp): built from source, as C++
 
 # Tracy profiler client - https://github.com/wolfpld/tracy
-# (MEMENU_TRACY). The Tracy profiler (the viewer) must be this same version.
+# (MIRAGE_TRACY). The Tracy profiler (the viewer) must be this same version.
 set(TRACY_VERSION v0.14.1)   # Matches the installed Tracy profiler (0.14.1): the protocol versions must match
 
 # Format.cmake - https://github.com/TheLartians/Format.cmake

@@ -6,12 +6,12 @@
 // Installs the menu into a Mirror's Edge Binaries folder (the one with MirrorsEdge.exe):
 //
 //   Binaries\dinput8.dll              the loader (loads the menu with the game)
-//   Binaries\memenu\medge_menu.dll    the menu
-//   Binaries\memenu\...               its config, themes, cache and logs (created by the menu)
-//   Binaries\memenu\uninstall.exe     a copy of the installer, for uninstalling from Windows' Settings > Apps, where
-//                                     the install is listed as "Mirror's Edge Menu"
+//   Binaries\mirage\Mirage.dll    the menu
+//   Binaries\mirage\...               its config, themes, cache and logs (created by the menu)
+//   Binaries\mirage\uninstall.exe     a copy of the installer, for uninstalling from Windows' Settings > Apps, where
+//                                     the install is listed as "Mirage"
 //
-// Both DLLs are embedded in the installer. A dinput8.dll from another mod is kept as dinput8.dll.memenu-backup and put
+// Both DLLs are embedded in the installer. A dinput8.dll from another mod is kept as dinput8.dll.mirage-backup and put
 // back on uninstall.
 namespace install
 {
@@ -22,7 +22,7 @@ namespace install
         bool installed = false;                     // Our loader and the menu are there
         std::string installedVersion;               // Of the loader that is there, "" if none
         bool foreignLoader = false;                 // A dinput8.dll that isn't ours
-        bool hasSettings = false;                   // memenu\ has files besides the menu DLL
+        bool hasSettings = false;                   // mirage\ has files besides the menu DLL
     };
 
     const char* Version();                          // Of the files embedded in this installer
@@ -39,8 +39,8 @@ namespace install
     bool Install(const std::filesystem::path& gameDir, std::wstring& message);
     bool Uninstall(const std::filesystem::path& gameDir, bool removeSettings, std::wstring& message);
 
-    // Whether Install / Uninstall add and remove the "Mirror's Edge Menu" entry in Windows' installed apps (and
-    // memenu\uninstall.exe). On by default; the unit tests switch it off so they never touch a real install's entry.
+    // Whether Install / Uninstall add and remove the "Mirage" entry in Windows' installed apps (and
+    // mirage\uninstall.exe). On by default; the unit tests switch it off so they never touch a real install's entry.
     void SetAppRegistration(bool on);
 
     // Starts the game the way the player would (through Steam for a Steam copy), as the user and not as the elevated

@@ -1,6 +1,6 @@
 -- Self-test mod (step 12, the milestone): MirageBouncePadLua, the bounce pad of the self-test's .uc class described
 -- from Lua instead of written in UnrealScript: the same variables and defaults, its Touch event and a new function
--- written in Lua. The runtime writes the UnrealScript (memenu\classes\generated\class-lua\), compiles and loads it, and
+-- written in Lua. The runtime writes the UnrealScript (mirage\classes\generated\class-lua\), compiles and loads it, and
 -- runs these functions from inside the class's bytecode (script injection). Defined on the first tick with the module on.
 local m = mirage.module {
     name = "Class (Lua)", tab = "Mods", description = "Self-test: a bounce pad class defined from Lua",

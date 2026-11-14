@@ -1,18 +1,18 @@
-// memenu_testhost: loads medge_menu.dll into a small D3D9 program and drives it the way the game would, so a build can
-// be tested without Mirror's Edge (`memenu verbose-build` runs it for every stage of the staged build).
+// mirage_testhost: loads Mirage.dll into a small D3D9 program and drives it the way the game would, so a build can
+// be tested without Mirror's Edge (`mirage verbose-build` runs it for every stage of the staged build).
 //
-//   memenu_testhost --dll <medge_menu.dll> --report <report.json> [--dumps <folder>] [--seconds <per phase>]
+//   mirage_testhost --dll <Mirage.dll> --report <report.json> [--dumps <folder>] [--seconds <per phase>]
 //
 // Phases, in order (each is timed; a phase that runs too long counts as a hang):
 //   window, device      a hidden window and a windowed D3D9 device (the game draws with D3D9 too)
 //   baseline            frames before the menu is there (frame time to compare with)
-//   load                LoadLibrary, in test mode (MEMENU_TEST_MODE=1: failed debug checks break instead of a dialog)
+//   load                LoadLibrary, in test mode (MIRAGE_TEST_MODE=1: failed debug checks break instead of a dialog)
 //   hook                frames until the menu has hooked EndScene (its first bytes change to a jump)
 //   menu-closed         frames with the menu closed
 //   menu-open           INSERT, then frames with the menu open and the mouse moving over it (every tab draws)
 //   reset               IDirect3DDevice9::Reset to another size and back (the menu must survive a device reset)
 //   menu-close          INSERT again, frames
-//   unload              the unload event (Local\memenu-unload-<pid>), frames until the DLL is gone
+//   unload              the unload event (Local\mirage-unload-<pid>), frames until the DLL is gone
 //   after-unload        EndScene must be unhooked; frames (a hook left behind would crash here)
 // The report (JSON) is rewritten after every phase, so it is there even when the process dies. Crashes and hangs
 // write a minidump to --dumps and end the process (exit 3 = crash, 4 = hang). Exit 0 = every phase passed,
@@ -307,7 +307,7 @@ namespace {
             else if (a == L"--seconds" && (v = next())) g_seconds = _wtof(v);
             else { std::fwprintf(stderr, L"unknown or incomplete option: %ls\n", a.c_str()); return false; }
         }
-        if (g_dll.empty()) { std::fwprintf(stderr, L"usage: memenu_testhost --dll <path> [--report <json>] [--dumps <dir>] [--seconds <n>]\n"); return false; }
+        if (g_dll.empty()) { std::fwprintf(stderr, L"usage: mirage_testhost --dll <path> [--report <json>] [--dumps <dir>] [--seconds <n>]\n"); return false; }
         if (g_seconds <= 0) g_seconds = 2.0;
         return true;
     }
@@ -328,9 +328,9 @@ int wmain(int argc, wchar_t** argv)
     WNDCLASSEXW wc{sizeof wc};
     wc.lpfnWndProc = DefWindowProcW;
     wc.hInstance = GetModuleHandleW(nullptr);
-    wc.lpszClassName = L"MemenuTestHost";
+    wc.lpszClassName = L"MirageTestHost";
     RegisterClassExW(&wc);
-    g_wnd = CreateWindowExW(0, wc.lpszClassName, L"memenu test host", WS_OVERLAPPEDWINDOW, 0, 0, 800, 600, nullptr,
+    g_wnd = CreateWindowExW(0, wc.lpszClassName, L"mirage test host", WS_OVERLAPPEDWINDOW, 0, 0, 800, 600, nullptr,
                             nullptr, wc.hInstance, nullptr);   // Never shown: nothing pops up while testing
     if (!End(g_wnd != nullptr, g_wnd ? "" : Fmt("CreateWindowExW failed (error %lu)", GetLastError()))) return 2;
 
@@ -354,9 +354,9 @@ int wmain(int argc, wchar_t** argv)
     const Usage before = Measure();
 
     // ---- load -----------------------------------------------------------------------------------------------------
-    SetEnvironmentVariableW(L"MEMENU_TEST_MODE", L"1");
+    SetEnvironmentVariableW(L"MIRAGE_TEST_MODE", L"1");
     wchar_t eventName[64];
-    std::swprintf(eventName, 64, L"Local\\memenu-unload-%lu", GetCurrentProcessId());
+    std::swprintf(eventName, 64, L"Local\\mirage-unload-%lu", GetCurrentProcessId());
     HANDLE unloadEvent = CreateEventW(nullptr, TRUE, FALSE, eventName);
     void* endScene = EndSceneAddress();
     const unsigned char original = FirstByte(endScene);

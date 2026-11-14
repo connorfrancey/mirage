@@ -1,4 +1,4 @@
-// The caches in src/core, part 2: function (memo), negative, string interning, hardware.
+// The caches in loader/src/core, part 2: function (memo), negative, string interning, hardware.
 #include "core/cache.h"
 #include "core/clock.h"
 #include "core/function_cache.h"

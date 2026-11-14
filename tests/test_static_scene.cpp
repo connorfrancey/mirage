@@ -1,5 +1,5 @@
-// Static world geometry (mods/memenu-collision/render/static_scene.h): the grid, and what Build() draws for the camera.
-#include "memenu-collision/render/static_scene.h"
+// Static world geometry (mods/mirage-collision/render/static_scene.h): the grid, and what Build() draws for the camera.
+#include "mirage-collision/render/static_scene.h"
 
 #include <gtest/gtest.h>
 

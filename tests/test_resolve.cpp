@@ -1,4 +1,4 @@
-// Which mods load and in what order (src/runtime/resolve.h), on synthetic manifests
+// Which mods load and in what order (loader/src/runtime/resolve.h), on synthetic manifests
 #include "runtime/resolve.h"
 
 #include <gtest/gtest.h>

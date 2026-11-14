@@ -5,6 +5,6 @@ id = "bounce-pad"
 name = "Bounce Pad (UnrealScript)"
 version = "1.0.0"
 description = "A new placeable actor class in UnrealScript: step on it and it launches you"
-authors = ["Mirror's Edge Menu"]
+authors = ["Mirage"]
 mirage = "^0.1"
 hot_reload = true

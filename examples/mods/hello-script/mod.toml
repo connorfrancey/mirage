@@ -4,6 +4,6 @@ id = "hello-script"
 name = "Hello (C# script)"
 version = "1.0.0"
 description = "The C# script example: compiled in the game, no SDK needed"
-authors = ["Mirror's Edge Menu"]
+authors = ["Mirage"]
 mirage = "^0.1"
 hot_reload = true

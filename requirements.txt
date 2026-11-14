@@ -1,6 +1,6 @@
-# Python packages for the project tool (memenu.py / build.bat), for use without uv:
+# Python packages for the project tool (mirage.py / build.bat), for use without uv:
 #   python -m pip install -r requirements.txt
-# Keep in sync with pyproject.toml [project.dependencies] and the header of memenu.py.
+# Keep in sync with pyproject.toml [project.dependencies] and the header of mirage.py.
 click>=8.1
 questionary>=2.1.1
 rich>=13.7

@@ -3,6 +3,6 @@ id = "hello-cs"
 name = "Hello (C#)"
 version = "1.0.0"
 description = "The C# example: a module that follows the player, one that fails on purpose"
-authors = ["Mirror's Edge Menu"]
+authors = ["Mirage"]
 mirage = "^0.1"
 dotnet = "HelloCs.dll"

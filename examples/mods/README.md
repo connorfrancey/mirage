@@ -1,6 +1,6 @@
 # Example Mirage mods
 
-A mod is a folder in the menu's `mods` folder (`<game>\Binaries\memenu\mods\<id>`), named after its id, with a
+A mod is a folder in the menu's `mods` folder (`<game>\Binaries\mirage\mods\<id>`), named after its id, with a
 `mod.toml` and its code. Both examples add one module, "Hello", to the menu's **Mods** column. While it is on it draws
 a greeting, counts the game's ticks, and counts how many times it was switched on in its own `config.toml`.
 
@@ -42,11 +42,11 @@ Declared settings go into the mod's first module, or into the module named by `m
 key: `mirage::Get<std::string>("greeting")` in C++, `mirage.setting("greeting"):get()` in Lua. A module can also make
 its own settings in code (`mirage::Slider` members, `module:slider(...)`), which are listed after the declared ones.
 
-The full list of keys is in `src/runtime/manifest.h`. Unknown keys are reported in the menu's log.
+The full list of keys is in `loader/src/runtime/manifest.h`. Unknown keys are reported in the menu's log.
 
 ## Native mods
 
-Include `api/mirage/mirage.hpp`, which is a header-only C++ wrapper over the C ABI in `api/mirage/api.h`. Write
+Include `loader/include/mirage/mirage.hpp`, which is a header-only C++ wrapper over the C ABI in `loader/include/mirage/api.h`. Write
 modules the way the menu's own are written, then add `MIRAGE_MOD()` once:
 
 ```cpp
@@ -166,6 +166,6 @@ named after it that turns them on and off.
 A replacement texture is named by the texture's full path (outer packages and groups, dots between them). PNG, TGA, BMP
 and JPG images are encoded to the original's format with a full mip chain; a DDS (DXT1/3/5, 32-bit ARGB or 8-bit
 luminance) is used as stored. Sides must be powers of two. The game's files are never written: the packages holding the
-texture are opened as rewritten copies kept in `memenu\cache\textures`. A change shows on the next load of a level not
+texture are opened as rewritten copies kept in `mirage\cache\textures`. A change shows on the next load of a level not
 loaded yet this session, and everywhere after a restart.
 

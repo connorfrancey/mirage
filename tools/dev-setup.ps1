@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Sets this folder up to build Mirror's Edge Menu on Windows. `setup.cmd dev` runs it.
+    Sets this folder up to build Mirage on Windows. `setup.cmd dev` runs it.
 
 .DESCRIPTION
     Checks for, and installs with winget when missing: uv (runs the project tool), CMake 4.2+, Ninja and the
-    Visual Studio C++ Build Tools. Then runs `uv sync` and `uv run memenu info`, and offers to build.
+    Visual Studio C++ Build Tools. Then runs `uv sync` and `uv run mirage info`, and offers to build.
     Run it again any time: it skips what is already there.
 #>
 $ErrorActionPreference = 'Stop'
@@ -67,7 +67,7 @@ else {
     if (-not (Have ninja)) { Stop-Setup "Ninja was not installed. Get ninja.exe from https://github.com/ninja-build/ninja/releases and put it on PATH." }
 }
 
-# ---- Visual Studio with the x86 C++ tools (what tools/memenu_tools/toolchain.py looks for) -----------------------
+# ---- Visual Studio with the x86 C++ tools (what tools/mirage_tools/toolchain.py looks for) -----------------------
 $installerDir = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer'
 $vswhere = Join-Path $installerDir 'vswhere.exe'
 function Find-VS([switch] $WithCpp) {
@@ -93,26 +93,26 @@ else {
 }
 
 # ---- The project tool --------------------------------------------------------------------------------------------
-# uv sync replaces .venv\Scripts\memenu.exe, which Windows refuses while it runs.
-if (Get-Process -Name memenu -ErrorAction SilentlyContinue) {
-    Stop-Setup "The project tool (memenu) is running in another window. Close it first."
+# uv sync replaces .venv\Scripts\mirage.exe, which Windows refuses while it runs.
+if (Get-Process -Name mirage -ErrorAction SilentlyContinue) {
+    Stop-Setup "The project tool (mirage) is running in another window. Close it first."
 }
 Step "Setting up the project tool (uv sync)"
 uv sync
 if ($LASTEXITCODE) { Stop-Setup "uv sync failed (see above)." }
 Write-Host ""
 Step "Checking the toolchain"
-uv run memenu info
+uv run mirage info
 if ($LASTEXITCODE) { Stop-Setup "The toolchain check failed (see above)." }
 
 Write-Host ""
 Write-Host "  Ready. Next:" -ForegroundColor Green
-Write-Host "    uv run memenu              menu with everything the tool does"
-Write-Host "    uv run memenu build        build the menu (build.bat does the same)"
-Write-Host "    uv run memenu install-game build and install it into the game"
+Write-Host "    uv run mirage              menu with everything the tool does"
+Write-Host "    uv run mirage build        build the menu (build.bat does the same)"
+Write-Host "    uv run mirage install-game build and install it into the game"
 Write-Host "  Open a new terminal first if `"uv`" isn't found there."
 Write-Host ""
 choice.exe /c YN /n /m "  Build it now? (Y/N): "
 if ($LASTEXITCODE -ne 1) { exit 0 }
-uv run memenu build
+uv run mirage build
 exit $LASTEXITCODE

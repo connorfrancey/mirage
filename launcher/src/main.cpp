@@ -1,10 +1,10 @@
-// medge_launcher: start (or wait for) Mirror's Edge, then load medge_menu.dll into it.
+// mirage_launcher: start (or wait for) Mirror's Edge, then load Mirage.dll into it.
 //
-//  medge_launcher                      Inject into the running game, or find the install and start it
-//  medge_launcher --no-start           Only wait for MirrorsEdge.exe (start the game yourself)
-//  medge_launcher --game "D:\...\MirrorsEdge.exe"
-//  medge_launcher --steam              Start it through Steam (app id 17410) and wait
-//  medge_launcher --pid 1234           Inject into a specific process right now
+//  mirage_launcher                      Inject into the running game, or find the install and start it
+//  mirage_launcher --no-start           Only wait for MirrorsEdge.exe (start the game yourself)
+//  mirage_launcher --game "D:\...\MirrorsEdge.exe"
+//  mirage_launcher --steam              Start it through Steam (app id 17410) and wait
+//  mirage_launcher --pid 1234           Inject into a specific process right now
 // See --help for everything. Defaults can be stored in launcher.json next to the launcher.
 
 #include "detect.h"
@@ -32,7 +32,7 @@ namespace
     struct Options
     {
         std::wstring process = L"MirrorsEdge.exe";
-        fs::path dll;                               // default: medge_menu.dll next to the launcher
+        fs::path dll;                               // default: Mirage.dll next to the launcher
         fs::path game;                              // Executable to start (optional)
         std::optional<unsigned> steamAppId;         // Start through Steam instead (optional)
         DWORD pid = 0;                              // Inject into this process, skip launching/waiting
@@ -75,7 +75,7 @@ namespace
     }
 
     // ---- launcher.json ---------------------------------------------------------------
-    // { "process": "MirrorsEdge.exe", "dll": "medge_menu.dll", "game": "D:/.../MirrorsEdge.exe",
+    // { "process": "MirrorsEdge.exe", "dll": "Mirage.dll", "game": "D:/.../MirrorsEdge.exe",
     //   "steam_app_id": 17410, "delay_ms": 2000, "timeout_s": 120, "auto_start": true }   (all keys optional)
     void LoadConfig(Options& o, const fs::path& file, const fs::path& base)
     {
@@ -128,13 +128,13 @@ namespace
     void PrintUsage()
     {
         std::wprintf(
-            L"medge_launcher - load medge_menu.dll into Mirror's Edge\n\n"
+            L"mirage_launcher - load Mirage.dll into Mirror's Edge\n\n"
             L"  --game <exe>      start this executable (working directory = its folder)\n"
             L"  --steam [appid]   start through Steam (default app id %u) and wait for the process\n"
             L"  --pid <n>         inject into this process id right away\n"
             L"  --no-start        don't start the game, only wait for it\n"
             L"  --list            show the Mirror's Edge installs that were found and exit\n"
-            L"  --dll <path>      DLL to inject (default: medge_menu.dll next to the launcher)\n"
+            L"  --dll <path>      DLL to inject (default: Mirage.dll next to the launcher)\n"
             L"  --process <name>  process to wait for (default: MirrorsEdge.exe)\n"
             L"  --delay <ms>      extra wait after the game window appears (default 2000)\n"
             L"  --timeout <s>     how long to wait for the game (default 120)\n"
@@ -341,7 +341,7 @@ int wmain(int argc, wchar_t** argv)
     const fs::path dir = ExeDir();
     LoadConfig(opt, dir / L"launcher.json", dir);
     if (const int rc = ParseArgs(argc, argv, opt); rc >= 0) return rc;
-    if (opt.dll.empty()) opt.dll = dir / L"medge_menu.dll";
+    if (opt.dll.empty()) opt.dll = dir / L"Mirage.dll";
 
     if (opt.save) {
         if (SaveConfig(opt, dir / L"launcher.json")) Info(L"Saved %ls", (dir / L"launcher.json").c_str());
