@@ -77,6 +77,7 @@
 #include <Windows.h>
 #include <nlohmann/json.hpp>
 #include "game/object_ref.h"
+#include "util/float_util.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -5359,6 +5360,119 @@ void TestLevelEditor()
     End(s);
 }
 
+// The Mirage Showcase (mods/memenu-showcase), each of its parts doing what it says in the game: its window draws; it
+// reads the player live; its hook on TdPlayerPawn.Landed counts a jump's landing; its injection into
+// TdMove_Jump.StartMove makes a standing jump lower and its low gravity makes one higher (each measured against a jump
+// without it in the same run, then put back); a bounce pad of the class it describes in Lua launches the player; and
+// switching it off puts the gravity back and removes its pads.
+float ShowcaseShared(const char* key)
+{
+    char v[64]{};
+    mirage::mods::game_api::ShareGet("memenu-showcase", key, v, sizeof v);
+    return util::ParseFloatOr(v, -1.f);
+}
+
+float StandingJump();
+
+void TestShowcase()
+{
+    Step& s = Begin("Mirage showcase");
+    Probe p(s);
+    Module* m = modules::Find("Mirage Showcase");
+    const auto box = [&](const char* name) { return m ? dynamic_cast<ctl::Checkbox*>(m->FindSetting(name)) : nullptr; };
+    ctl::Checkbox *lowGravity = box("Low gravity"), *weighted = box("Weighted jumps"), *drop = box("Drop a pad");
+    if (!m || !lowGravity || !weighted || !drop) {
+        p.Problem("the Mirage Showcase module or its settings are missing (mods/memenu-showcase)");
+        End(s);
+        return;
+    }
+    const bool wasOn = m->Enabled();
+    OnRenderThread([&] {
+        lowGravity->Set(false);
+        weighted->Set(false);
+        m->SetEnabled(true);
+        gui::visible = true;
+    });
+
+    // The window, and the player read live
+    WaitFor(10.0, [] { return ShowcaseShared("frames") > 3.f; });
+    if (ShowcaseShared("frames") <= 3.f) p.Problem("the showcase window wasn't drawn");
+    float z = 0.f;
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) z = pawn->Location.Z; });
+    WaitTicks(3);
+    if (std::fabs(ShowcaseShared("pawn_z") - z) > 50.f)
+        p.Problem(fmt::format("it read the player at Z {:.0f}, the player is at {:.0f}", ShowcaseShared("pawn_z"), z));
+
+    // Hook: a jump's landing; a jump without anything, to compare with
+    const float landingsBefore = ShowcaseShared("landings");
+    const float plain = StandingJump();
+    WaitTicks(5);
+    const float landings = ShowcaseShared("landings") - landingsBefore;
+    if (plain <= 0.f) p.Problem("the plain standing jump didn't happen");
+    if (landings < 1.f) p.Problem("its Landed hook didn't see the jump's landing");
+
+    // Injection: weighted jumps are lower
+    OnRenderThread([&] { weighted->Set(true); });
+    WaitTicks(3);
+    const float heavy = StandingJump();
+    const float runs = ShowcaseShared("injected_runs");
+    OnRenderThread([&] { weighted->Set(false); });
+    WaitTicks(3);
+    if (runs < 1.f) p.Problem("its injection into TdMove_Jump.StartMove never ran");
+    else if (heavy >= plain - 20.f) p.Problem(fmt::format("a weighted jump went {:.0f} high, a plain one {:.0f}", heavy, plain));
+
+    // Writing: low gravity, higher jumps, the level's value back after
+    float gravityBefore = 0.f, gravityOn = 0.f, gravityAfter = 0.f;
+    OnGameThread([&] { if (auto* w = game::World()) gravityBefore = w->WorldGravityZ; });
+    OnRenderThread([&] { lowGravity->Set(true); });
+    WaitFor(5.0, [] { return ShowcaseShared("gravity") != 0.f; });
+    OnGameThread([&] { if (auto* w = game::World()) gravityOn = w->WorldGravityZ; });
+    const float floaty = StandingJump();
+    OnRenderThread([&] { lowGravity->Set(false); });
+    WaitFor(5.0, [] { return ShowcaseShared("gravity") == 0.f; });
+    WaitTicks(3);
+    OnGameThread([&] { if (auto* w = game::World()) gravityAfter = w->WorldGravityZ; });
+    if (std::fabs(gravityOn - gravityBefore * 0.35f) > 1.f)
+        p.Problem(fmt::format("low gravity set {:.0f}, not 0.35 of the level's {:.0f}", gravityOn, gravityBefore));
+    if (floaty <= plain + 20.f) p.Problem(fmt::format("a low-gravity jump went {:.0f} high, a plain one {:.0f}", floaty, plain));
+    if (gravityAfter != gravityBefore) p.Problem(fmt::format("the gravity is {:.0f} after, {:.0f} before", gravityAfter, gravityBefore));
+
+    // A class made in Lua: a pad dropped under the player launches it (the class compiles the first time: seconds)
+    WaitGrounded();
+    const float bouncesBefore = ShowcaseShared("bounces");
+    OnRenderThread([&] { drop->Set(true); });
+    WaitFor(60.0, [] { return ShowcaseShared("pads") >= 1.f; });
+    WaitFor(10.0, [&] { return ShowcaseShared("bounces") > bouncesBefore; });
+    const float bounced = ShowcaseShared("bounces") - bouncesBefore;
+    if (ShowcaseShared("pads") < 1.f) p.Problem("no pad was dropped (its class didn't compile? the log says)");
+    else if (bounced < 1.f) p.Problem("the pad didn't launch the player");
+
+    s.notes.push_back(fmt::format("standing jump {:.0f}, weighted {:.0f} (injection ran {:.0f} times), low gravity {:.0f} "
+                                  "(gravity {:.0f} -> {:.0f}); {:.0f} landing(s) hooked; pad bounces {:.0f}; {:.0f} event(s) logged",
+                                  plain, heavy, runs, floaty, gravityBefore, gravityOn, landings, bounced, ShowcaseShared("events")));
+
+    // Off: its pads go (the player stops bouncing) and nothing of it stays
+    OnRenderThread([&] { m->SetEnabled(wasOn); });
+    if (!wasOn) {
+        int left = -1;
+        WaitFor(5.0, [&] {
+            OnGameThread([&] {
+                left = 0;
+                auto& objects = Classes::UObject::GetGlobalObjects();
+                for (int i = 0; i < static_cast<int>(objects.Num()); ++i)
+                    if (auto* o = objects.GetByIndex(i); o && o->Class && o->Class->GetName() == "MirageShowcasePad" &&
+                                                         o->GetName().rfind("Default__", 0) != 0 &&
+                                                         !static_cast<Classes::AActor*>(o)->bDeleteMe)
+                        ++left;
+            });
+            return left == 0;
+        });
+        if (left != 0) p.Problem(fmt::format("{} pad(s) left after switching the showcase off", left));
+    }
+    WaitGrounded();
+    End(s);
+}
+
 // A standing jump, by TAS macro: how high the player gets above where it started (-1: it couldn't be done)
 float StandingJump()
 {
@@ -6281,6 +6395,7 @@ const Named* FeatureList()
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
+        {"Mirage showcase", &TestShowcase, false},
         {"Mirage time trials", &TestTimeTrials, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},

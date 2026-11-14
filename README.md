@@ -760,6 +760,12 @@ MirrorsEdge.exe
     game's own 2008 editor (`tests/maps-src/MirageEditorRoom`). Self-tests "Mirage level additions", "Mirage maps",
     "Mirage editor map", "Mirage time trials" and "Mirage level editor".
 
+**Try it:** the **Mirage Showcase** (Mods tab, `mods/memenu-showcase`) is a tour of the loader in one window, written
+as an ordinary Lua mod: the player read live, the level's gravity changed and put back, a hook on the game's
+`TdPlayerPawn.Landed`, weighted jumps injected into `TdMove_Jump.StartMove`'s bytecode, a bounce pad class described
+in Lua and dropped where you stand, and a log of game events. Each section names the API it uses (self-test "Mirage
+showcase").
+
 **Next:** gameplay first (the plan was re-sequenced on 2026-11-13): live world access and a change log that makes
 every mod change reversible, then movement tuning, Kismet, physics, triggers and the game's traversal pieces, custom
 movement mechanics, and the in-game editors for each; platform and ecosystem work follows as gameplay needs it.
