@@ -80,6 +80,7 @@
 #include "util/float_util.h"
 #include "runtime/world_events.h"
 #include "runtime/changes.h"
+#include "features/editor/editor_core.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -5644,6 +5645,131 @@ void TestChangeLog()
     End(s);
 }
 
+// The in-game editors (step 16): the World Explorer lists the player among the actors in play; selected, the Object
+// Inspector shows its live GroundSpeed, a Vector it opens into X/Y/Z, its Controller as an object to select; typed edits
+// of GroundSpeed and JumpZ change the pawn and Undo puts both back exactly; a Lua mod's transaction (tests/mods/
+// inspector-lua: JumpZ doubled) shows in the inspector and its revert too; a selected actor that is destroyed reads as
+// gone (never another object); both windows draw.
+void TestInspector()
+{
+    Step& s = Begin("Mirage inspector");
+    Probe p(s);
+    Module* explorer = modules::Find("World Explorer");
+    Module* inspector = modules::Find("Object Inspector");
+    Module* modTest = modules::Find("Inspector (Lua)");
+    if (!explorer || !inspector || !modTest) {
+        p.Problem("the World Explorer, the Object Inspector or the Inspector (Lua) test mod is missing");
+        End(s);
+        return;
+    }
+    const bool explorerWas = explorer->Enabled(), inspectorWas = inspector->Enabled();
+    OnRenderThread([&] {
+        explorer->SetEnabled(true);
+        inspector->SetEnabled(true);
+        modTest->SetEnabled(false);
+        gui::visible = true;
+    });
+    const auto rowOf = [](const std::vector<editor::Row>& rows, const std::string& path) {
+        const auto it = std::find_if(rows.begin(), rows.end(), [&](const editor::Row& r) { return r.path == path; });
+        return it == rows.end() ? editor::Row{} : *it;
+    };
+    const auto rows = [](const std::set<std::string>& open = {}) {
+        std::vector<editor::Row> out;
+        OnGameThread([&] { out = editor::Rows(editor::Selected(), "", open); });
+        return out;
+    };
+    const auto fmtFloat = [](float f) {
+        char b[48];
+        std::snprintf(b, sizeof b, "%.6g", f);
+        return std::string(b);
+    };
+
+    // 1. The explorer lists the player; selected from there
+    std::vector<editor::ActorRow> actors;
+    Classes::ATdPlayerPawn* pawn = nullptr;
+    OnGameThread([&] {
+        pawn = game::Pawn();
+        actors = editor::Actors();
+    });
+    const auto me = std::find_if(actors.begin(), actors.end(), [&](const editor::ActorRow& a) { return a.actor == pawn; });
+    if (!pawn || me == actors.end()) p.Problem(fmt::format("the explorer's {} actors don't include the player", actors.size()));
+    OnGameThread([&] { editor::Select(pawn); });
+    if (editor::SelectedLabel().find("TdPlayerPawn") == std::string::npos) p.Problem("selecting the player: " + editor::SelectedLabel());
+
+    // 2. Its properties, live
+    float ground = 0.f, jump = 0.f;
+    OnGameThread([&] { ground = pawn->GroundSpeed; jump = pawn->JumpZ; });
+    auto now = rows({"Location"});
+    const editor::Row speedRow = rowOf(now, "GroundSpeed");
+    if (speedRow.value != fmtFloat(ground) || !speedRow.editable)
+        p.Problem(fmt::format("GroundSpeed reads '{}' (editable {}), the pawn has {}", speedRow.value, speedRow.editable, ground));
+    if (rowOf(now, "Location").kind != "Vector" || rowOf(now, "Location.X").path.empty())
+        p.Problem("Location isn't a Vector row that opens into X, Y, Z");
+    const editor::Row controller = rowOf(now, "Controller");
+    void* pc = nullptr;
+    OnGameThread([&] { pc = game::Controller(); });
+    if (controller.ref != pc) p.Problem("the Controller row doesn't point to the player's controller");
+    s.notes.push_back(fmt::format("{} actors listed; the player has {} rows (Location opened), GroundSpeed {}", actors.size(), now.size(), speedRow.value));
+
+    // 3. Typed edits, and Undo
+    const std::size_t depthBefore = editor::UndoDepth();
+    std::string error;
+    bool okSpeed = false, okJump = false;
+    OnGameThread([&] {
+        okSpeed = editor::SetValue(editor::Selected(), "GroundSpeed", "1234", &error);
+        okJump = editor::SetValue(editor::Selected(), "JumpZ", "777", &error);
+    });
+    float speedSet = 0.f, jumpSet = 0.f;
+    OnGameThread([&] { speedSet = pawn->GroundSpeed; jumpSet = pawn->JumpZ; });
+    if (!okSpeed || !okJump || speedSet != 1234.f || jumpSet != 777.f)
+        p.Problem(fmt::format("the edits didn't land: GroundSpeed {}, JumpZ {} ({})", speedSet, jumpSet, error));
+    if (editor::UndoDepth() != depthBefore + 2) p.Problem("two edits didn't make two undo steps");
+    OnGameThread([&] { editor::Undo(); editor::Undo(); });
+    float speedBack = 0.f, jumpBack = 0.f;
+    OnGameThread([&] { speedBack = pawn->GroundSpeed; jumpBack = pawn->JumpZ; });
+    if (speedBack != ground || jumpBack != jump)
+        p.Problem(fmt::format("Undo left GroundSpeed {} (was {}), JumpZ {} (was {})", speedBack, ground, jumpBack, jump));
+
+    // 4. A mod's change shows in the inspector, and its revert too
+    OnRenderThread([&] { modTest->SetEnabled(true); });
+    WaitFor(5.0, [&] { return rowOf(rows(), "JumpZ").value == fmtFloat(jump * 2.f); });
+    const std::string modded = rowOf(rows(), "JumpZ").value;
+    OnRenderThread([&] { modTest->SetEnabled(false); });
+    WaitFor(5.0, [&] { return rowOf(rows(), "JumpZ").value == fmtFloat(jump); });
+    const std::string reverted = rowOf(rows(), "JumpZ").value;
+    if (modded != fmtFloat(jump * 2.f)) p.Problem("the inspector didn't show the mod's JumpZ (" + modded + ")");
+    if (reverted != fmtFloat(jump)) p.Problem("the inspector didn't show the mod's revert (" + reverted + ")");
+
+    // 5. A selected actor that is destroyed: gone, never another object
+    Classes::AActor* probe = nullptr;
+    OnGameThread([&] {
+        Classes::FVector at = pawn->Location;
+        at.X += 300.f;
+        probe = pawn->Spawn(Classes::ADynamicSMActor_Spawnable::StaticClass(), nullptr, Classes::FName{}, at, pawn->Rotation, nullptr, true);
+        editor::Select(probe);
+    });
+    Classes::UObject* selectedProbe = nullptr;
+    OnGameThread([&] { selectedProbe = editor::Selected(); if (probe) probe->Destroy(); });
+    Classes::UObject* afterDestroy = reinterpret_cast<Classes::UObject*>(1);
+    OnGameThread([&] { afterDestroy = editor::Selected(); });
+    if (!probe || selectedProbe != probe) p.Problem("selecting a spawned actor didn't hold it");
+    if (afterDestroy) p.Problem("the destroyed actor is still the selection");
+    if (!rows().empty()) p.Problem("the inspector still lists properties of the destroyed actor");
+
+    // The windows drew
+    const std::uint64_t e0 = editor::Frames(editor::Window::Explorer), i0 = editor::Frames(editor::Window::Inspector);
+    WaitFor(5.0, [&] { return editor::Frames(editor::Window::Explorer) > e0 + 3 && editor::Frames(editor::Window::Inspector) > i0 + 3; });
+    if (editor::Frames(editor::Window::Explorer) <= e0 + 3 || editor::Frames(editor::Window::Inspector) <= i0 + 3)
+        p.Problem("the World Explorer or the Object Inspector window wasn't drawn");
+
+    OnGameThread([] { editor::Select(nullptr); });
+    OnRenderThread([&] {
+        explorer->SetEnabled(explorerWas);
+        inspector->SetEnabled(inspectorWas);
+    });
+    End(s);
+}
+
 // The Mirage Showcase (mods/memenu-showcase), each of its parts doing what it says in the game: its window draws; it
 // reads the player live; its hook on TdPlayerPawn.Landed counts a jump's landing; its injection into
 // TdMove_Jump.StartMove makes a standing jump lower and its low gravity makes one higher (each measured against a jump
@@ -6695,6 +6821,7 @@ const Named* FeatureList()
         {"Mirage editor map", &TestEditorMap, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage change log", &TestChangeLog, false},
+        {"Mirage inspector", &TestInspector, false},
         {"Mirage showcase", &TestShowcase, false},
         {"Mirage time trials", &TestTimeTrials, false},
 #endif

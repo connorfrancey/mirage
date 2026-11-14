@@ -169,6 +169,7 @@ memenu_feature(mod_manager       misc GAME STAGE 9 FILES features/misc/mod_manag
 memenu_feature(script_editor     misc GAME STAGE 9 FILES features/misc/script_editor.cpp)
 memenu_feature(time_trials       misc GAME STAGE 9 FILES features/misc/time_trials.cpp)
 memenu_feature(level_editor      misc GAME STAGE 9 FILES features/misc/level_editor.cpp)
+memenu_feature(object_editors    misc GAME STAGE 9 FILES features/editor/editor_core.cpp features/editor/world_explorer.cpp features/editor/object_inspector.cpp)
 
 # -------------------------------------------------------------------------------------------------
 # The game integration layer, only when something uses it

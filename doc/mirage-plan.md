@@ -913,6 +913,27 @@ holds a raw pointer across frames.
 height live, undoes it, and the same changes made from a Lua mod show in the inspector; turning the mod off restores
 the values.
 
+**Status (2026-11-13): done, without docking.** The menu's ImGui is the release branch (no
+`ImGuiConfigFlags_DockingEnable` in its `imgui.h`): switching the whole menu to the docking branch is left for later, so
+the editors are ordinary windows whose places ImGui's layout file keeps. `features/editor/editor_core` holds the
+selection (a step 14 handle: it reads as nothing once the object is gone), an object's properties as rows (every
+member, sorted, `var()` ones marked; structs, static and dynamic arrays opened in place, up to 64 elements; object
+references selectable), typed writes (float, int, byte, bool, name) made as step 15 transactions under the owner
+"editor", and their Undo. The **World Explorer** (Debug tab) lists every actor in play, nearest first or grouped by
+class, filtered, with "Look at" (the actor under the crosshair); the **Object Inspector** shows the selection's rows
+live, edits in place, Undo, "The player". Reads happen on the game thread while a window is shown (explorer once a
+second, inspector five times), drawn from a copy on the render thread.
+
+Self-test "Mirage inspector" (`tests/mods/inspector-lua`): the explorer lists the player among 4,589 actors; selected,
+its GroundSpeed reads the pawn's value (720), Location opens into X/Y/Z, its Controller row points to the controller;
+GroundSpeed 1234 and JumpZ 777 typed in land on the pawn and two Undos put both back exactly; the mod's doubled JumpZ
+shows in the inspector and so does its revert; a selected actor that is destroyed reads as gone, with no rows; both
+windows draw. Measured (debug, Prologue): the explorer's refresh 7.3 ms (once a second; 12.3 ms before names were
+cached), the inspector's 1.1 ms (633 rows with Location open, five times a second).
+
+Left: docking and saved workspace layouts per workspace; panels from mods (a `MirageUi` registration); a selection
+event for mods; functions and the decompiled script in the inspector; editing objects, strings and structs as a whole.
+
 ### 17. The player and movement: inspection and tuning (P0)
 
 **Objective.** Everything about Faith's movement is visible and tunable, live, per mod, with undo.
