@@ -22,6 +22,12 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL ObjectHandle(MirageObject* object, MirageHandle* out);
 	MirageObject* MIRAGE_CALL HandleObject(const MirageHandle* handle);
 	int32_t MIRAGE_CALL ActorsQuery(const MirageActorQuery* query, MirageObject** out, int32_t capacity);
+	int32_t MIRAGE_CALL ChangeBegin(MirageMod* mod, const char* name);
+	void MIRAGE_CALL ChangeEnd(MirageMod* mod);
+	int32_t MIRAGE_CALL ChangeRevert(MirageMod* mod, int32_t id);
+	uint32_t MIRAGE_CALL ChangeList(MirageMod* mod, char* buffer, uint32_t capacity);
+	// The change log's writer (runtime/changes): wired once at startup
+	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
 											   MirageHookFn fn, void* user);
 	MirageHook* MIRAGE_CALL HookFunction(MirageMod* mod, const char* function, int32_t when, int32_t priority,

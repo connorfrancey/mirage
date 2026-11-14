@@ -129,6 +129,7 @@ static void Run(HMODULE module)
         {
             mirage::classes::Prepare();          // Mods' classes (step 12): the engine's loader found on a worker
             mirage::maps::Install();             // Mods' maps in the level select (step 13): the config lookup hooked
+            mirage::mods::game_api::WireChanges();   // Mods' transactions (step 15) write through the runtime's writer
             // The world phase's mods load on the first tick after a level has loaded
             static std::atomic<bool> levelLoaded{false}, worldLoaded{false};
             game::OnLevelLoad([](bool finished) {

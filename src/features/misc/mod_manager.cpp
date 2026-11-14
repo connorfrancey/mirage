@@ -8,6 +8,7 @@
 #include "game/game.h"
 #include "gui.h"
 #include "log.h"
+#include "runtime/changes.h"
 #include "runtime/inject.h"
 #include "runtime/mods.h"
 #include "theme.h"
@@ -167,6 +168,28 @@ namespace
 					ImGui::TextColored({0.95f, 0.8f, 0.3f, 1.f}, "also: %s", others.c_str());
 					if (ImGui::IsItemHovered())
 						ImGui::SetTooltip("Other mods inject into this function: at one place, higher priority runs first");
+				}
+			}
+			// Its transactions (step 15): what it changed reversibly, each put back with a click (or all at its unload)
+			const auto changes = mirage::changes::List(m.id);
+			if (!changes.empty()) {
+				ImGui::Separator();
+				ImGui::TextDisabled("Changes (put back when it unloads)");
+				for (auto t = changes.rbegin(); t != changes.rend(); ++t) {
+					ImGui::PushID(t->id);
+					const std::string label = t->name + " (" + std::to_string(t->paths.size()) + " value" +
+											  (t->paths.size() == 1 ? "" : "s") + (t->reverted ? ", put back)" : ")");
+					const bool open = ImGui::TreeNode(label.c_str());
+					if (!t->reverted) {
+						ImGui::SameLine();
+						if (ImGui::SmallButton("Put back"))
+							game::RunOnGameThread([mod = m.id, id = t->id] { mirage::changes::Revert(mod, id); });
+					}
+					if (open) {
+						for (const auto& path : t->paths) ImGui::BulletText("%s", path.c_str());
+						ImGui::TreePop();
+					}
+					ImGui::PopID();
 				}
 			}
 			if (!m.required.empty() || !m.optional.empty() || !m.incompatible.empty() || !m.dependents.empty()) ImGui::Separator();

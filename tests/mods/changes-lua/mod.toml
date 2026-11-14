@@ -1,0 +1,3 @@
+id = "changes-lua"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): reversible changes (step 15): a transaction, a write outside it, revert"

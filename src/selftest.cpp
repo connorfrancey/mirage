@@ -79,6 +79,7 @@
 #include "game/object_ref.h"
 #include "util/float_util.h"
 #include "runtime/world_events.h"
+#include "runtime/changes.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -5493,8 +5494,8 @@ void TestWorldAccess()
     if (WorldSharedNum("probe_valid") != 1.f) p.Problem("the probe wasn't valid in its actor_added event");
     if (WorldSharedNum("query_tag") != 1.f || WorldSharedNum("query_tag_is_probe") != 1.f)
         p.Problem(fmt::format("actors{{tag}} found {} actor(s), not the probe alone", WorldShared("query_tag")));
-    if (WorldSharedNum("query_near_has_probe") != 1.f || WorldSharedNum("query_near_first_is_pawn") != 1.f)
-        p.Problem("actors{near = pawn, radius} didn't list the player first and the probe among them");
+    if (WorldSharedNum("query_near_has_probe") != 1.f || WorldSharedNum("query_near_sorted") != 1.f)
+        p.Problem("actors{near = pawn, radius} didn't list them nearest first with the player and the probe among them");
     if (WorldSharedNum("query_class") < 1.f) p.Problem("actors{class = \"Engine.PlayerStart\"} found none");
     if (WorldSharedNum("query_missing") != 0.f) p.Problem("a class that doesn't exist matched actors");
 
@@ -5552,6 +5553,94 @@ void TestWorldAccess()
                                   WorldSharedNum("streamed")));
     OnRenderThread([m] { m->SetEnabled(false); });
     WaitGrounded();
+    End(s);
+}
+
+// Reversible changes (step 15), with tests/mods/changes-lua: its transaction halves the level's gravity (written twice:
+// the first old value is kept) and lowers KillZ, and a write outside it moves StallZ. The mod manager's list has the
+// transaction with its 2 values. Off, the mod reverts: gravity and KillZ exactly as before, StallZ still moved. On again,
+// then a hot reload: unloading puts the transaction back by itself, so the mod's new code halves the level's own gravity
+// once (0.5x, not 0.25x). Off at the end: the level as it was.
+float ChangesShared(const char* key)
+{
+    char v[64]{};
+    mirage::mods::game_api::ShareGet("changes-lua", key, v, sizeof v);
+    return util::ParseFloatOr(v, -1.f);
+}
+
+void TestChangeLog()
+{
+    Step& s = Begin("Mirage change log");
+    Probe p(s);
+    Module* m = modules::Find("Changes (Lua)");
+    if (!m) {
+        p.Problem("the Changes (Lua) module is missing (tests/mods/changes-lua)");
+        End(s);
+        return;
+    }
+    struct World { float gravity = 0.f, killZ = 0.f, stallZ = 0.f; };
+    const auto read = [] {
+        World w;
+        OnGameThread([&] {
+            if (auto* world = static_cast<Classes::AWorldInfo*>(game::World())) {
+                w.gravity = world->WorldGravityZ;
+                w.killZ = world->KillZ;
+                w.stallZ = world->StallZ;
+            }
+        });
+        return w;
+    };
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitTicks(3);
+    const World before = read();
+
+    // 1. The transaction, and the write outside it
+    const float idBefore = ChangesShared("id");
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitFor(5.0, [&] { return ChangesShared("id") > idBefore; });
+    const World on = read();
+    if (on.gravity != before.gravity * 0.5f || on.killZ != before.killZ - 1000.f || on.stallZ != before.stallZ + 1.f)
+        p.Problem(fmt::format("the mod's writes didn't land: gravity {} -> {}, KillZ {} -> {}, StallZ {} -> {}", before.gravity,
+                              on.gravity, before.killZ, on.killZ, before.stallZ, on.stallZ));
+    const auto list = mirage::changes::List("changes-lua");
+    if (list.empty() || list.back().paths.size() != 2)
+        p.Problem(fmt::format("the mod manager's list has {} transaction(s), the last with {} value(s), not 2", list.size(),
+                              list.empty() ? 0 : list.back().paths.size()));
+
+    // 2. Off: the mod reverts; the write outside stays
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitFor(5.0, [] { return ChangesShared("reverted") >= 2.f; });
+    const World off = read();
+    if (off.gravity != before.gravity || off.killZ != before.killZ)
+        p.Problem(fmt::format("revert left gravity {} (was {}), KillZ {} (was {})", off.gravity, before.gravity, off.killZ, before.killZ));
+    if (off.stallZ != before.stallZ + 1.f) p.Problem("the write outside the transaction was put back too");
+
+    // 3. On again, and a hot reload: the unload puts it back, the new code applies it once
+    const float idOn = ChangesShared("id");
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitFor(5.0, [&] { return ChangesShared("id") > idOn; });
+    const float idReload = ChangesShared("id");
+    std::string reload;
+    OnGameThread([&] { reload = mirage::mods::Reload("changes-lua"); }, 10.0);
+    if (!reload.empty()) p.Problem("hot reload: " + reload);
+    WaitFor(10.0, [&] { return ChangesShared("id") > idReload; });
+    const World reloaded = read();
+    if (reloaded.gravity != before.gravity * 0.5f)
+        p.Problem(fmt::format("after the hot reload the gravity is {} ({}x the level's): the unload didn't put it back",
+                              reloaded.gravity, reloaded.gravity / before.gravity));
+
+    // 4. Off: the level as it was (and StallZ, the write outside, by hand)
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitFor(5.0, [&] { return read().gravity == before.gravity; });
+    const World end = read();
+    OnGameThread([&] {
+        if (auto* world = static_cast<Classes::AWorldInfo*>(game::World())) world->StallZ = before.stallZ;
+    });
+    if (end.gravity != before.gravity || end.killZ != before.killZ) p.Problem("switched off at the end, the level isn't as it was");
+    s.notes.push_back(fmt::format("gravity {} -> {} -> {} (reverted), 0.5x again after a hot reload; KillZ {} -> {} -> {}; "
+                                  "StallZ moved outside the transaction and kept; the mod manager lists the transaction "
+                                  "with {} values", before.gravity, on.gravity, off.gravity, before.killZ, on.killZ, off.killZ,
+                                  list.empty() ? 0 : list.back().paths.size()));
     End(s);
 }
 
@@ -6605,6 +6694,7 @@ const Named* FeatureList()
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
         {"Mirage world access", &TestWorldAccess, false},
+        {"Mirage change log", &TestChangeLog, false},
         {"Mirage showcase", &TestShowcase, false},
         {"Mirage time trials", &TestTimeTrials, false},
 #endif
@@ -6723,6 +6813,15 @@ static void RunTests(bool fromMenu)
     } stopWatchdog{watchdog};
 #endif
     const auto saved = SaveAll();
+    // The player moving as the game makes it: modules the player left on that change movement (the Level Editor's Fly
+    // is No Clip) are off for the run, and back as they were after it (RestoreAll)
+    OnRenderThread([] {
+        for (const char* name : {"No Clip", "Flight", "Game Speed"})
+            if (Module* m = modules::Find(name); m && m->Enabled()) {
+                spdlog::info("Self-test: {} was on: off for the run", name);
+                m->SetEnabled(false);
+            }
+    });
     notify::SetMuted(true);         // Nothing on screen but what the modules draw (the HUD checks measure it)
     if (g_options.fast) SetFrameRateCap(false);
 

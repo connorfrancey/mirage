@@ -65,13 +65,20 @@ mirage.on("tick", function()
     local tagged = mirage.actors { tag = "WorldGravityZ" }
     mirage.share("query_tag", #tagged)
     mirage.share("query_tag_is_probe", (#tagged == 1 and tagged[1] == probe) and 1 or 0)
-    -- Around the player, nearest first: the player itself (distance 0) first, the probe among them
+    -- Around the player, nearest first: the player itself (distance 0) and the probe among them
     local pawn = mirage.pawn()
     local near = pawn and mirage.actors { near = pawn, radius = 600 } or {}
-    local has = 0
-    for _, a in ipairs(near) do if a == probe then has = 1 end end
+    local has, has_pawn, sorted, last = 0, 0, 1, -1
+    for _, a in ipairs(near) do
+        if a == probe then has = 1 end
+        if a == pawn then has_pawn = 1 end
+        local l, p = a.Location, pawn.Location
+        local d = (l.X - p.X) ^ 2 + (l.Y - p.Y) ^ 2 + (l.Z - p.Z) ^ 2
+        if d + 0.01 < last then sorted = 0 end     -- Nearest first (ties in any order)
+        last = d
+    end
     mirage.share("query_near", #near)
-    mirage.share("query_near_first_is_pawn", (#near > 0 and near[1] == pawn) and 1 or 0)
+    mirage.share("query_near_sorted", (sorted == 1 and has_pawn == 1) and 1 or 0)
     mirage.share("query_near_has_probe", has)
     -- By class: actors of an engine class, and a class that doesn't exist
     mirage.share("query_class", #mirage.actors { class = "Engine.PlayerStart" })

@@ -133,7 +133,22 @@ rewind puts the game's memory back but never a mod's: after `state_restored`, lo
 Objects kept across ticks are safe to keep: a Lua object knows the object it was made for (its slot in the engine's
 object list, its name and its class), and once that object is gone (destroyed, a level unloaded, garbage collected, or
 another object at the same address) it reads as nothing and calls on it fail, instead of reaching another object.
-`mirage.valid(obj)` says which. Native mods get the same with `object_handle` / `handle_object` (a `MirageHandle` is
+`mirage.valid(obj)` says which.
+
+Reversible changes (step 15): writes inside a transaction are recorded with the values they replace, and put back when
+the mod asks, and by the runtime when it unloads, reloads or crashes. Writes outside one stay as they are (moving the
+player, setting its health: gameplay a hot reload mustn't undo).
+
+```lua
+local id = mirage.transaction("low gravity", function()
+    local world = mirage.world()
+    world.WorldGravityZ = world.WorldGravityZ * 0.5      -- recorded: put back by mirage.revert(id) or the unload
+end)
+mirage.revert(id)          -- or mirage.revert(): every transaction of the mod; mirage.changes() lists them
+```
+
+C# has `Transaction(name, () => ...)`, `Revert(id)` and `ChangesJson`; C, `change_begin` / `change_end` / `change_revert`
+/ `change_list`. The mod manager lists each mod's transactions, with "Put back". Native mods get the same with `object_handle` / `handle_object` (a `MirageHandle` is
 plain data), C# with `GameObject.HandleOf()` / `GameObject.Resolve()`. `actor_removed` gives the actor that went, `==`
 to the one a mod kept (and no longer valid). Subscribing to `actor_added` / `actor_removed` makes the runtime compare
 the levels' actor lists each tick: subscribe only while you need them.

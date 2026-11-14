@@ -164,6 +164,38 @@ namespace Mirage
             }
         }
 
+        /// <summary>
+        /// A transaction (step 15): the writes <paramref name="body"/> makes to game objects are recorded with the values
+        /// they replace, and put back by <see cref="Revert"/> or when the mod unloads, reloads or crashes. Returns its id.
+        /// Game thread; transactions don't nest.
+        /// </summary>
+        public int Transaction(string name, Action body)
+        {
+            var n = System.Runtime.InteropServices.Marshal.StringToCoTaskMemUTF8(name);
+            int id;
+            try { id = Bridge.Api->change_begin(Handle, (byte*)n); }
+            finally { System.Runtime.InteropServices.Marshal.FreeCoTaskMem(n); }
+            if (id == 0) throw new InvalidOperationException("a transaction is open already, or this isn't the game thread");
+            try { body(); }
+            finally { Bridge.Api->change_end(Handle); }
+            return id;
+        }
+
+        /// <summary>Puts transaction <paramref name="id"/> back (-1: every one not reverted yet); how many values</summary>
+        public int Revert(int id = -1) => Bridge.Api->change_revert(Handle, id);
+
+        /// <summary>The mod's transactions as JSON: [{"id", "name", "values": [...], "reverted"}]</summary>
+        public string ChangesJson
+        {
+            get
+            {
+                uint n = Bridge.Api->change_list(Handle, null, 0);
+                var buf = new byte[n + 1];
+                fixed (byte* p = buf) Bridge.Api->change_list(Handle, p, n + 1);
+                return System.Text.Encoding.UTF8.GetString(buf, 0, (int)n);
+            }
+        }
+
         /// <summary>Keeps an object from the garbage collector until <see cref="Release"/> or the mod's unload.</summary>
         public bool Keep(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 1) != 0;
         public bool Release(GameObject o) => Bridge.Api->object_keep(Handle, o.Handle, 0) != 0;

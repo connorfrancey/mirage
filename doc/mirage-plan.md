@@ -851,6 +851,24 @@ a mod still reverts what the log holds when the runtime unloads it.
 **Milestone (Scenario H).** The test mod above is disabled, re-enabled, hot reloaded and unloaded mid-level; every
 change is reverted byte-identically each time, and the mod manager lists every change it made.
 
+**Status (2026-11-13): done for property writes; the other kinds of change keep their own undo.** One decision changed
+the scope: writes are recorded **inside transactions only** (`change_begin` / `change_end`, Lua `mirage.transaction`,
+C# `Mod.Transaction`), not every `object_set`. Recording everything would make every Lua hot reload undo gameplay
+writes (the trainer teleports the player and sets its health; a reload would teleport it back). Inside a transaction
+the first old value of each object property is kept (`runtime/changes`, through step 14's handles); `change_revert` /
+`mirage.revert` / `Mod.Revert` put them back newest first, and the runtime does it when the mod unloads, reloads or
+crashes; an object gone since is skipped and counted. `change_list` (Lua `mirage.changes()`, C# `ChangesJson`) and
+the mod manager's "Changes" (with "Put back") list them. ABI v1 appended the four calls (offsets 560-572).
+
+Self-test "Mirage change log" (`tests/mods/changes-lua`): gravity -800 → -400 (written twice inside the transaction:
+the first old value kept) and KillZ −1000; StallZ written outside; switched off, the mod's revert puts gravity and
+KillZ back exactly and leaves StallZ; on again then a hot reload: the unload put it back, so the new code halves the
+level's gravity once (0.5×, not 0.25×); the mod manager lists the transaction with its 2 values.
+
+Left: default overrides (step 7), script patches and injections (8, 11), layers (13) and classes (12) still undo
+themselves as before and aren't listed in "Changes" yet; level-scoped transactions and the editors' undo through this
+log come with steps 16 and 19 (the Level Editor keeps its own layer history).
+
 ### 16. Editor core, Object Inspector and World Explorer (P1)
 
 **Objective.** The in-game workspaces every later editor sits in, and the first two: browse the world and inspect and

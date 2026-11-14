@@ -831,6 +831,18 @@ typedef struct MirageApi {
     MirageObject*(MIRAGE_CALL* handle_object)(const MirageHandle* handle);
     /* The actors in play that match, up to `capacity` of them into `out` (may be NULL to count); returns how many match */
     int32_t(MIRAGE_CALL* actors_query)(const MirageActorQuery* query, MirageObject** out, int32_t capacity);
+
+    /* ---- Reversible changes (step 15). Game thread. Writes with object_set between change_begin and change_end are a
+     * transaction: the value each property had before its first write is kept, and put back by change_revert, and by
+     * the runtime when the mod unloads, reloads or crashes (newest transaction first; an object gone since is skipped).
+     * Writes outside a transaction aren't recorded (gameplay writes, such as moving the player, stay as they are). */
+    /* Opens one, named for the mod manager's list: its id (> 0), or 0 (one is open already) */
+    int32_t(MIRAGE_CALL* change_begin)(MirageMod* mod, const char* name);
+    void(MIRAGE_CALL* change_end)(MirageMod* mod);
+    /* Puts back transaction `id` (-1: every one of the mod's not reverted yet): how many values were put back */
+    int32_t(MIRAGE_CALL* change_revert)(MirageMod* mod, int32_t id);
+    /* The mod's transactions as JSON: [{"id", "name", "values": ["Object.Path", ...], "reverted"}]; its full length */
+    uint32_t(MIRAGE_CALL* change_list)(MirageMod* mod, char* buffer, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

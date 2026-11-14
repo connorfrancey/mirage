@@ -200,6 +200,9 @@ namespace mirage::mods
 		static int ClassName(lua_State* L);
 		static int IsA(lua_State* L);
 		static int Valid(lua_State* L);
+		static int Transaction(lua_State* L);
+		static int Revert(lua_State* L);
+		static int Changes(lua_State* L);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
 		static int ProxyIndex(lua_State* L);
@@ -1047,6 +1050,62 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.transaction("name", function() ... end) -> its id: the writes the function makes to game objects are
+	// recorded with the values they replace, and put back by mirage.revert(id) or when the mod unloads (step 15). An
+	// error in the function still closes the transaction (what it wrote is in it), then goes on as an error.
+	int LuaMod::Transaction(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const char* name = luaL_checkstring(L, 1);
+		luaL_checktype(L, 2, LUA_TFUNCTION);
+		const int id = self.api_->change_begin(self.mod_, name);
+		if (!id) return luaL_error(L, "mirage.transaction: one is open already (they don't nest), or not on the game thread");
+		lua_pushvalue(L, 2);
+		const int status = lua_pcall(L, 0, 0, 0);
+		self.api_->change_end(self.mod_);
+		if (status != LUA_OK) return lua_error(L);
+		lua_pushinteger(L, id);
+		return 1;
+	}
+
+	// mirage.revert([id]) -> how many values were put back (no id: every transaction of the mod not reverted yet)
+	int LuaMod::Revert(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		lua_pushinteger(L, self.api_->change_revert(self.mod_, static_cast<int32_t>(luaL_optinteger(L, 1, -1))));
+		return 1;
+	}
+
+	// mirage.changes() -> { { id, name, values = { "Object.Path", ... }, reverted }, ... }, oldest first
+	int LuaMod::Changes(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		std::string text(self.api_->change_list(self.mod_, nullptr, 0) + 1, '\0');
+		self.api_->change_list(self.mod_, text.data(), static_cast<uint32_t>(text.size()));
+		const auto j = nlohmann::json::parse(text.c_str(), nullptr, false);
+		lua_newtable(L);
+		if (!j.is_array()) return 1;
+		int n = 0;
+		for (const auto& t : j) {
+			lua_newtable(L);
+			lua_pushinteger(L, t.value("id", 0));
+			lua_setfield(L, -2, "id");
+			lua_pushstring(L, t.value("name", std::string()).c_str());
+			lua_setfield(L, -2, "name");
+			lua_pushboolean(L, t.value("reverted", false));
+			lua_setfield(L, -2, "reverted");
+			lua_newtable(L);
+			int k = 0;
+			for (const auto& v : t.value("values", nlohmann::json::array())) {
+				lua_pushstring(L, v.get<std::string>().c_str());
+				lua_rawseti(L, -2, ++k);
+			}
+			lua_setfield(L, -2, "values");
+			lua_rawseti(L, -2, ++n);
+		}
+		return 1;
+	}
+
 	// mirage.valid(object) -> whether it is still the object it was (false once it is gone, or for nil)
 	int LuaMod::Valid(lua_State* L)
 	{
@@ -1770,7 +1829,8 @@ namespace mirage::mods
 			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn}, {"layer_actor", LayerActor},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
-			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {nullptr, nullptr}};
+			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
+			{"changes", Changes}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

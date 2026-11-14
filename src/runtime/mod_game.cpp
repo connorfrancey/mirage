@@ -9,6 +9,7 @@
 #include "game/uobject.h"
 #include "gui.h"
 #include "runtime/call.h"
+#include "runtime/changes.h"
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/layers.h"
@@ -228,6 +229,9 @@ namespace mirage::mods
 		for (auto& n : mod.natives) n->live = false;		// Its natives return zero from here (their index stays)
 		natives::Release(mod.id);
 		if (game::IsGameThread()) layers::Remove(mod.id);	// Its level additions (else the next tick sees it unloaded)
+		// Its transactions put back (step 15), on the game thread where the objects are
+		if (game::IsGameThread()) changes::RevertAndForget(mod.id);
+		else game::RunOnGameThread([id = mod.id] { changes::RevertAndForget(id); });
 		// Its classes and the objects it kept go with it (on the game thread: actors are destroyed)
 		if (!mod.classes.empty() || !mod.kept.empty()) {
 			auto retire = [modClasses = mod.classes, kept = mod.kept] {
@@ -633,7 +637,12 @@ namespace mirage::mods
 		int32_t MIRAGE_CALL ObjectSet(MirageObject* object, const char* path, const MirageValue* in)
 		{
 			if (!object || !path || !Alive(Obj(object))) return 0;
-			return Write(reflect::Resolve(Obj(object)->Class, Obj(object), path), in);
+			const reflect::Value v = reflect::Resolve(Obj(object)->Class, Obj(object), path);
+			if (changes::Recording() && v) {		// In a transaction (step 15): the value it had, to put back
+				MirageValue old{};
+				if (Read(v, &old)) changes::Record(object, path, old);
+			}
+			return Write(v, in);
 		}
 
 		uint32_t MIRAGE_CALL ObjectName(MirageObject* object, char* buffer, uint32_t capacity)
@@ -746,6 +755,23 @@ namespace mirage::mods
 			return 0;
 		}
 
+		// ---- Reversible changes (step 15) -------------------------------------------------------------------------
+		int32_t MIRAGE_CALL ChangeBegin(MirageMod* mod, const char* name)
+		{
+			if (!mod || !game::IsGameThread()) return 0;
+			return changes::Begin(mod->id, name ? name : "");
+		}
+		void MIRAGE_CALL ChangeEnd(MirageMod*) { changes::End(); }
+		int32_t MIRAGE_CALL ChangeRevert(MirageMod* mod, int32_t id)
+		{
+			if (!mod || !game::IsGameThread()) return 0;
+			return changes::Revert(mod->id, id).restored;
+		}
+		uint32_t MIRAGE_CALL ChangeList(MirageMod* mod, char* buffer, uint32_t capacity)
+		{
+			return CopyOut(mod ? changes::ListJson(mod->id) : std::string("[]"), buffer, capacity);
+		}
+
 		// ---- World access (step 14) ------------------------------------------------------------------------------
 		// A handle is the object plus what identifies it: its slot, its name and its class. A new object in a freed
 		// slot can come at the same address, but the engine names objects uniquely (Class_N, counting up), so it
@@ -813,6 +839,16 @@ namespace mirage::mods
 			if (out)
 				for (int32_t i = 0; i < capacity && i < static_cast<int32_t>(found.size()); ++i) out[i] = Handle(found[static_cast<std::size_t>(i)].second);
 			return static_cast<int32_t>(found.size());
+		}
+
+		void WireChanges()
+		{
+			changes::Writer w;
+			w.handle = &ObjectHandle;
+			w.resolve = &HandleObject;
+			w.set = &ObjectSet;
+			w.name = &ObjectName;
+			changes::SetWriter(w);
 		}
 	}
 }
