@@ -25,6 +25,8 @@ namespace mirage::maps
 	// Finds the engine functions and hooks the config lookup (after game::Init). False if they weren't found: mod maps
 	// then load by name but don't show in the level select.
 	bool Install();
+	// GMalloc, the engine's allocator (its variable's address, found by Install): nullptr before
+	void** GMallocVariable();
 	// Game thread, every tick: registers the maps of mods that loaded (and drops those of mods that unloaded)
 	void Tick();
 

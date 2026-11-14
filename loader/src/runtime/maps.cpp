@@ -258,6 +258,8 @@ namespace mirage::maps
 		}
 	}
 
+	void** GMallocVariable() { return g_mallocVar; }
+
 	bool Install()
 	{
 		// InitializeListElementProviders: its prologue up to `lea ecx, [ebp+88h]; push ebx; call Empty`

@@ -79,4 +79,6 @@ namespace mirage::hooks
 	// What the ProcessInternal detour adds to a call of a function nobody hooks: its table lookup, timed over `rounds`
 	// lookups of functions that aren't in the table (nanoseconds each). Any thread.
 	double UnhookedLookupNanoseconds(int rounds = 1000000);
+	// UFunction::Func's offset (worked out from the loaded functions the first time), -1 until it is known. Game thread.
+	int FuncOffset();
 }

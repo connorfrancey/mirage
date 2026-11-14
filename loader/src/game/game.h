@@ -64,6 +64,7 @@ namespace game {
 	void OnTick(TickCallback callback); // Runs on the game thread, once per engine tick, not while loading
 	void RunOnGameThread(std::function<void()> fn);   // Runs on the next tick
 	bool IsGameThread();				// The calling thread is the one the engine ticks on (known after the first tick)
+	unsigned long GameThreadId();		// That thread's id (0 before the first tick)
 
 	// The local player's move state handler, on the tick its state has just changed (the hook mmultiplayer's trainer uses
 	// for its "strang" tool). Game thread. Return true to skip the engine's handler for this call.

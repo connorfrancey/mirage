@@ -18,6 +18,7 @@ add_executable(mirage_tests
         test_abi.cpp
         test_resolve.cpp
         test_detours.cpp
+        test_crashhandler.cpp
         test_memory.cpp
         # The memory manager's parts without the game (runtime/mem): the test exe keeps the CRT's own operator new
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/analysis.cpp
@@ -35,6 +36,9 @@ add_executable(mirage_tests
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/config_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/detours.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/hooking.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/crashhandler/analysis_text.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/crashhandler/memory_text.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/crashhandler/analyzer/builtin.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/resolve.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/semver.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/manifest.cpp
@@ -61,7 +65,7 @@ add_executable(mirage_tests
 target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src ${CMAKE_SOURCE_DIR}/loader/include ${CMAKE_SOURCE_DIR}/mods)
 target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(mirage_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 MirageHook::MirageHook magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
+target_link_libraries(mirage_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
 if(MSVC)
   target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
 endif()

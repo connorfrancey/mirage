@@ -374,11 +374,165 @@ CPMAddPackage(
 )
 endif()
 # -------------------------------------------------------------------------------------------------
+# Utility and ImGui libraries for the full build (not the staged build's bare stages)
+
+# readerwriterqueue: a lock-free single-producer, single-consumer queue. Header only; MirageHook fetches the same version.
+CPMAddPackage(
+        NAME readerwriterqueue
+        GITHUB_REPOSITORY cameron314/readerwriterqueue
+        GIT_TAG ${READERWRITERQUEUE_VERSION}
+        DOWNLOAD_ONLY YES
+)
+if(NOT TARGET readerwriterqueue)
+    add_library(readerwriterqueue INTERFACE)
+    target_include_directories(readerwriterqueue SYSTEM INTERFACE ${readerwriterqueue_SOURCE_DIR})
+endif()
+
+# simdutf: Unicode validation and transcoding (UTF-8/16/32, Latin-1) with SIMD
+CPMAddPackage(
+        NAME simdutf
+        GITHUB_REPOSITORY simdutf/simdutf
+        GIT_TAG ${SIMDUTF_VERSION}
+        OPTIONS
+            "SIMDUTF_TESTS OFF"
+            "SIMDUTF_BENCHMARKS OFF"
+            "SIMDUTF_TOOLS OFF"
+            "SIMDUTF_ICONV OFF"
+            "BUILD_TESTING OFF"
+)
+
+# libuv: an event loop for sockets, pipes, timers, file watching and child processes
+CPMAddPackage(
+        NAME libuv
+        GITHUB_REPOSITORY libuv/libuv
+        GIT_TAG ${LIBUV_VERSION}
+        OPTIONS
+            "LIBUV_BUILD_SHARED OFF"
+            "LIBUV_BUILD_TESTS OFF"
+            "LIBUV_BUILD_BENCH OFF"
+            "BUILD_TESTING OFF"
+)
+
+# cpptrace: stack traces with symbols (dbghelp on Windows)
+CPMAddPackage(
+        NAME cpptrace
+        GITHUB_REPOSITORY jeremy-rifkin/cpptrace
+        GIT_TAG ${CPPTRACE_VERSION}
+        OPTIONS
+            "CPPTRACE_BUILD_SHARED OFF"
+            "BUILD_SHARED_LIBS OFF"
+)
+
+# ghc::filesystem: std::filesystem's interface as a header (paths UTF-8 on every platform)
+CPMAddPackage(
+        NAME ghc_filesystem
+        GITHUB_REPOSITORY gulrak/filesystem
+        GIT_TAG ${GHC_FILESYSTEM_VERSION}
+        DOWNLOAD_ONLY YES
+)
+if(NOT TARGET ghc_filesystem)
+    add_library(ghc_filesystem INTERFACE)
+    target_include_directories(ghc_filesystem SYSTEM INTERFACE ${ghc_filesystem_SOURCE_DIR}/include)
+endif()
+
+# DirectXMath: SIMD vector and matrix math (D3D's conventions). Header only.
+CPMAddPackage(
+        NAME DirectXMath
+        GITHUB_REPOSITORY microsoft/DirectXMath
+        GIT_TAG ${DIRECTXMATH_VERSION}
+        DOWNLOAD_ONLY YES
+)
+if(NOT TARGET directxmath)
+    add_library(directxmath INTERFACE)
+    target_include_directories(directxmath SYSTEM INTERFACE ${DirectXMath_SOURCE_DIR}/Inc)
+endif()
+
+# bitsery: binary serialization, header only
+CPMAddPackage(
+        NAME bitsery
+        GITHUB_REPOSITORY fraillt/bitsery
+        GIT_TAG ${BITSERY_VERSION}
+        DOWNLOAD_ONLY YES
+)
+if(NOT TARGET bitsery)
+    add_library(bitsery INTERFACE)
+    target_include_directories(bitsery SYSTEM INTERFACE ${bitsery_SOURCE_DIR}/include)
+endif()
+
+# span-lite: nonstd::span, header only
+CPMAddPackage(
+        NAME span-lite
+        GITHUB_REPOSITORY martinmoene/span-lite
+        GIT_TAG ${SPAN_LITE_VERSION}
+        DOWNLOAD_ONLY YES
+)
+if(NOT TARGET span_lite)
+    add_library(span_lite INTERFACE)
+    target_include_directories(span_lite SYSTEM INTERFACE ${span-lite_SOURCE_DIR}/include)
+endif()
+
+# ImGuiColorTextEdit: a code editor widget with syntax highlighting (no CMake project: built here against our ImGui)
+CPMAddPackage(
+        NAME ImGuiColorTextEdit
+        GITHUB_REPOSITORY BalazsJako/ImGuiColorTextEdit
+        GIT_TAG ${IMGUICOLORTEXTINPUT_GIT_COMMIT}
+        DOWNLOAD_ONLY YES
+)
+if(ImGuiColorTextEdit_ADDED)
+    add_library(imgui_color_text_edit STATIC ${ImGuiColorTextEdit_SOURCE_DIR}/TextEditor.cpp)
+    target_include_directories(imgui_color_text_edit SYSTEM PUBLIC ${ImGuiColorTextEdit_SOURCE_DIR})
+    target_link_libraries(imgui_color_text_edit PUBLIC imgui)
+endif()
+
+# imgui_markdown: Markdown drawn with ImGui. Header only (the implementation is in the header).
+CPMAddPackage(
+        NAME imgui_markdown
+        GITHUB_REPOSITORY enkisoftware/imgui_markdown
+        GIT_TAG ${IMGUI_MARKDOWN_GIT_COMMIT}
+        DOWNLOAD_ONLY YES
+)
+if(imgui_markdown_ADDED)
+    add_library(imgui_markdown INTERFACE)
+    target_include_directories(imgui_markdown SYSTEM INTERFACE ${imgui_markdown_SOURCE_DIR})
+    target_link_libraries(imgui_markdown INTERFACE imgui)
+endif()
+
+# imgui-flame-graph: a flame graph widget (profiling)
+CPMAddPackage(
+        NAME imgui_flame_graph
+        GITHUB_REPOSITORY bwrsandman/imgui-flame-graph
+        GIT_TAG ${IMGUI_FLAMEGRAPH_GIT_COMMIT}
+        DOWNLOAD_ONLY YES
+)
+if(imgui_flame_graph_ADDED)
+    add_library(imgui_flame_graph STATIC ${imgui_flame_graph_SOURCE_DIR}/imgui_widget_flamegraph.cpp)
+    target_include_directories(imgui_flame_graph SYSTEM PUBLIC ${imgui_flame_graph_SOURCE_DIR})
+    target_link_libraries(imgui_flame_graph PUBLIC imgui)
+    target_compile_definitions(imgui_flame_graph PRIVATE IMGUI_DEFINE_MATH_OPERATORS)   # It uses ImVec2's + and -
+endif()
+
+# imgui_club: ImGui extras by its author; the memory editor among them. Header only.
+CPMAddPackage(
+        NAME imgui_club
+        GITHUB_REPOSITORY ocornut/imgui_club
+        GIT_TAG ${IMGUI_CLUB_GIT_COMMIT}
+        DOWNLOAD_ONLY YES
+)
+if(imgui_club_ADDED)
+    add_library(imgui_club INTERFACE)
+    target_include_directories(imgui_club SYSTEM INTERFACE ${imgui_club_SOURCE_DIR})
+    target_link_libraries(imgui_club INTERFACE imgui)
+endif()
+
+# -------------------------------------------------------------------------------------------------
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
-        imgui imjson MirageHook::MirageHook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads)
+        imgui imjson MirageHook::MirageHook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads
+        readerwriterqueue simdutf::simdutf uv_a cpptrace::cpptrace ghc_filesystem directxmath bitsery span_lite
+        imgui_color_text_edit imgui_markdown imgui_flame_graph imgui_club)
 if(MIRAGE_GAME)
-  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler lua::lua toml11::toml11 stb_headers)
+  target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler lua::lua toml11::toml11 stb_headers
+          Zydis dbghelp)   # Zydis (built for MirageHook) and dbghelp: the crash handler's disassembly and symbols
   target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/loader/include)   # mirage/api.h: the mod ABI
 endif()
 

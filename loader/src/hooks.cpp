@@ -374,7 +374,10 @@ namespace
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         static const std::string iniPath = (paths::Dir() / "Mirage.ini").string();
-        ImGui::GetIO().IniFilename = iniPath.c_str(); // Remembers window positions
+        ImGui::GetIO().IniFilename = iniPath.c_str(); // Remembers window positions (and docked layouts)
+        // Windows dock into each other (the docking branch). Inside the game's window only: no multi-viewports, the
+        // DX9 backend draws one swap chain, the game's
+        ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
         LoadMenuFont();
         gui::ApplyStyle();
         if (!ImGui_ImplWin32_Init(g_hwnd)) HOOKS_LOG(error, "ImGui_ImplWin32_Init failed");
@@ -422,6 +425,9 @@ namespace
     }
 
     // One ImGui frame: the menu and every module's overlay, drawn into the current render target.
+    std::atomic<void (*)()> g_exclusiveDraw{nullptr};    // hooks::SetExclusiveDraw
+    std::atomic<unsigned long> g_renderThread{0};        // hooks::RenderThreadId
+
     void DrawMenu()
     {
         PROF_THREAD("Render thread");
@@ -439,12 +445,18 @@ namespace
             ImGui::GetIO().DeltaTime = std::clamp(dt, 1e-5f, 0.25f);
         }
         ImGui::NewFrame();
-        ImGui::GetIO().MouseDrawCursor = gui::visible;
+        if (void (*exclusive)() = g_exclusiveDraw.load()) {
+            // The game has crashed: only the crash window, no module code and no queued work
+            ImGui::GetIO().MouseDrawCursor = true;
+            exclusive();
+        } else {
+            ImGui::GetIO().MouseDrawCursor = gui::visible;
 #if MIRAGE_GAME
-        game::SetInputBlocked(gui::visible);        // Also ignore look input (gamepad) while the menu is open
+            game::SetInputBlocked(gui::visible);        // Also ignore look input (gamepad) while the menu is open
 #endif
-        DrainRenderQueue();
-        gui::Render();
+            DrainRenderQueue();
+            gui::Render();
+        }
         ImGui::EndFrame();
         ImGui::Render();
         g_menuVertices.store(static_cast<unsigned>(ImGui::GetDrawData()->TotalVtxCount), std::memory_order_relaxed);
@@ -518,6 +530,7 @@ namespace
     HRESULT WINAPI HookedEndScene(IDirect3DDevice9* dev)
     {
         if (t_stalledDraw) return oEndScene(dev);   // an overlay inside our own stalled frame's Present
+        g_renderThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
         if (g_endSceneCalls.fetch_add(1, std::memory_order_relaxed) == 0)
             HOOKS_LOG(info, "First EndScene call (device={}, thread {})", static_cast<void*>(dev), GetCurrentThreadId());
         std::lock_guard lock(g_frameMutex);
@@ -844,6 +857,10 @@ bool hooks::DrawWhileStalled()
     back->Release();
     return drawn;
 }
+
+void hooks::SetExclusiveDraw(void (*fn)()) { g_exclusiveDraw.store(fn); }
+void* hooks::GameWindow() { return g_hwnd; }
+unsigned long hooks::RenderThreadId() { return g_renderThread.load(std::memory_order_relaxed); }
 
 unsigned hooks::StalledFrames() { return g_stalledFrames.load(std::memory_order_relaxed); }
 unsigned hooks::MenuVertices() { return g_menuVertices.load(std::memory_order_relaxed); }

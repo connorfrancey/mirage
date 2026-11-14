@@ -428,6 +428,12 @@ namespace mirage::hooks
 		return ok;
 	}
 
+	int FuncOffset()
+	{
+		std::lock_guard lock(g_lock);
+		return Calibrate() ? g_funcOffset : -1;
+	}
+
 	double UnhookedLookupNanoseconds(int rounds)
 	{
 		volatile int sink = 0;

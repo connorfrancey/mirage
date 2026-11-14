@@ -1377,6 +1377,14 @@ namespace mirage::mods
 		}
 	}
 
+	std::string ModOfModule(const void* module)
+	{
+		if (!module) return {};
+		for (auto& owned : g_mods)
+			if (owned->dll && static_cast<const void*>(owned->dll) == module) return owned->id;
+		return {};
+	}
+
 	std::string AttributeCrash(const void* address, unsigned long code, bool* guarded)
 	{
 		if (t_guarded > 0) {	// The guard around the call catches it (and names the mod)

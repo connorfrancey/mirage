@@ -849,6 +849,7 @@ void game::OnTick(TickCallback callback)
 }
 
 bool game::IsGameThread() { return g_gameThread.load(std::memory_order_relaxed) == GetCurrentThreadId(); }
+unsigned long game::GameThreadId() { return g_gameThread.load(std::memory_order_relaxed); }
 
 void game::RunOnGameThread(std::function<void()> fn)
 {

@@ -57,9 +57,12 @@ set(ZSTD_VERSION v1.5.7)
 #  - imguizmo: https://github.com/CedricGuillemet/ImGuizmo
 #  - implot:
 #  - imcurve: https://github.com/jsoulier/imcurve
-set(IMGUI_VERSION v1.92.9b)
+set(IMGUI_VERSION v1.92.9b-docking)   # The docking branch (its tags carry -docking)
 set(IMGUIFILEBROWSER_GIT_COMMIT 47a1884524d6a3df5d99f70ecc82e1ed0ccd26cf)
 set(IMGUICOLORTEXTINPUT_GIT_COMMIT ca2f9f1462e3b60e56351bc466acda448c5ea50d)
+set(IMGUI_MARKDOWN_GIT_COMMIT 68fb679b1ab314940589445b36934682cd3e8027)      # https://github.com/enkisoftware/imgui_markdown
+set(IMGUI_FLAMEGRAPH_GIT_COMMIT aae0bd9665d1379c511d0b8a64d3752301a327a2)    # https://github.com/bwrsandman/imgui-flame-graph
+set(IMGUI_CLUB_GIT_COMMIT b083116866e05e0d4bccb2c7f28d94a76ee4965e)          # https://github.com/ocornut/imgui_club
 set(IMGUI_RICHMD_VERSION v1.0.0)
 set(IMGUI_NODEEDITOR_VERSION v0.9.4)
 set(IMPLOT_VERSION v1.1)
@@ -89,3 +92,13 @@ set(STB_COMMIT 4e9b368bfc071e97206ea5c6adba68dd0cbf8897)
 
 # fast_float - https://github.com/fastfloat/fast_float
 set(FASTFLOAT_VERSION v8.3.3)
+
+# Utility libraries
+set(READERWRITERQUEUE_VERSION v1.0.6)   # https://github.com/cameron314/readerwriterqueue (MirageHook's pin: one copy)
+set(SIMDUTF_VERSION v9.3.3)             # https://github.com/simdutf/simdutf
+set(LIBUV_VERSION v1.53.0)              # https://github.com/libuv/libuv
+set(CPPTRACE_VERSION v1.0.4)            # https://github.com/jeremy-rifkin/cpptrace
+set(GHC_FILESYSTEM_VERSION v1.5.16)     # https://github.com/gulrak/filesystem
+set(DIRECTXMATH_VERSION jun2026)        # https://github.com/microsoft/DirectXMath
+set(BITSERY_VERSION v5.2.5)             # https://github.com/fraillt/bitsery
+set(SPAN_LITE_VERSION v0.11.0)          # https://github.com/martinmoene/span-lite

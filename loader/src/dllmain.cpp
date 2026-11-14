@@ -42,6 +42,7 @@
 #include "runtime/firstparty.h"
 #include "runtime/mem/manager.h"
 #include "runtime/crash_reporter.h"
+#include "crashhandler/symbols.h"
 #include "runtime/hang.h"
 #endif
 #if MIRAGE_FEATURE_INPUT
@@ -132,6 +133,7 @@ static void Run(HMODULE module)
         {
             mirage::classes::Prepare();          // Mods' classes (step 12): the engine's loader found on a worker
             mirage::maps::Install();             // Mods' maps in the level select (step 13): the config lookup hooked
+            game::RunOnGameThread([] { crashhandler::symbols::Refresh(); });   // The crash handler's engine names
             mirage::mods::game_api::WireChanges();   // Mods' transactions (step 15) write through the runtime's writer
             // The world phase's mods load on the first tick after a level has loaded
             static std::atomic<bool> levelLoaded{false}, worldLoaded{false};
@@ -141,6 +143,7 @@ static void Run(HMODULE module)
                 mirage::hang::SetLoading(!finished);
                 events::Bus().Publish(events::LevelLoad{finished, finished ? game::MapName() : std::string()});
                 if (!finished) return;
+                crashhandler::symbols::Refresh();   // Names for the engine's code in crash reports (classes may have loaded)
                 levelLoaded = true;
                 mirage::layers::OnLevelLoaded();
                 mirage::routes::OnLevelLoaded();

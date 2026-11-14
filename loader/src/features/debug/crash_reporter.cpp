@@ -2,6 +2,7 @@
 // runtime/hang.h), the reports they wrote, and "the game crashed last time" at the next start (like Geode).
 #include "core/module.h"
 #include "gui.h"
+#include "crashhandler/window.h"
 #include "runtime/crash_reporter.h"
 #include "runtime/hang.h"
 
@@ -31,7 +32,7 @@ public:
         const auto in = [](ctl::Section& section, std::initializer_list<ctl::Setting*> controls) {
             for (ctl::Setting* c : controls) c->VisibleIf([&section] { return section.Get(); });
         };
-        in(crashSection, {&handle, &openReport, &showLast, &openFolder});
+        in(crashSection, {&handle, &window, &openReport, &showLast, &openFolder});
         in(hangSection, {&hangOn, &gameSeconds, &renderSeconds, &sampleStack});
     }
 
@@ -57,6 +58,7 @@ public:
             }
         }
         if (showLastWindow_) DrawLastCrash();
+        crashhandler::window::DrawPreview();
     }
 
     void DrawPanel(float width) override
@@ -95,6 +97,7 @@ private:
     {
         mirage::crash::SetMode(handle.Get() == 0 ? mirage::crash::Mode::Mirage : mirage::crash::Mode::Game);
         mirage::crash::SetOpenReport(openReport.Get());
+        mirage::crash::SetWindow(window.Get());
         mirage::hang::Settings h;
         h.enabled = hangOn.Get();
         h.gameSeconds = gameSeconds.Get();
@@ -128,7 +131,10 @@ private:
     ctl::Combo handle{this, "Handle crashes", {"Mirage (report + minidump)", "The game's own"}, 0,
                       "Mirage: a fatal crash writes a report and a minidump to mirage\\crashlogs, opens the report once the game is "
                       "gone, and the next start shows it. The game's own: its crash dialog, as without the menu"};
-    ctl::Checkbox openReport{this, "Open the report after a crash", true};
+    ctl::Checkbox window{this, "Show the crash window", true,
+                         "When the game crashes, a window over the game shows what happened (where, likely causes, both call "
+                         "stacks, registers, the code), and lets you copy the report, restart or close the game"};
+    ctl::Checkbox openReport{this, "Open the report after a crash", true, "When the crash window can't be shown"};
     ctl::Checkbox showLast{this, "Show the last crash at start", true};
     ctl::Button openFolder{this, "Open the crash reports folder", [] { OpenPath(mirage::crash::Folder()); }};
 

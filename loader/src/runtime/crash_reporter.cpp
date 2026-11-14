@@ -6,6 +6,10 @@
 #include "runtime/mods.h"
 
 #include "core/hooking.h"
+#include "crashhandler/collect.h"
+#include "crashhandler/window.h"
+#include "game/game.h"
+#include "hooks.h"
 #include <spdlog/spdlog.h>
 
 #include <DbgHelp.h>
@@ -16,6 +20,7 @@
 #include <cstdio>
 #include <cwchar>
 #include <fstream>
+#include <memory>
 #include <mutex>
 
 namespace mirage::crash
@@ -35,6 +40,8 @@ namespace mirage::crash
 		LPTOP_LEVEL_EXCEPTION_FILTER g_gameFilter = nullptr;	// What the game set (called in Game mode)
 		std::atomic<int> g_mode{static_cast<int>(Mode::Mirage)};
 		std::atomic<bool> g_openReport{true};
+		std::atomic<bool> g_window{true};		// The crash window (crashhandler/window.h) for fatal crashes
+		std::atomic<bool> g_fatalDump{true};	// A fatal crash writes a minidump (SetFatalDump)
 		std::atomic<bool> g_installed{false};
 		std::atomic<LONG> g_handling{0};
 		bool TakeHandling() { LONG expected = 0; return g_handling.compare_exchange_strong(expected, 1); }						// One fatal crash at a time
@@ -233,6 +240,20 @@ namespace mirage::crash
 		const Job* g_current = nullptr;
 		void EssentialsOfCurrent() { WriteEssentials(*g_current); }
 
+		// The crash handler's analysis of the current job (crashhandler/): names for the call stack, the UnrealScript
+		// stack, annotated registers and stack, the code at the crash, possible causes. Kept for the window.
+		std::mutex g_analysisLock;
+		std::unique_ptr<crashhandler::Analysis> g_analysis;
+		void AnalysisOfCurrent()
+		{
+			auto a = std::make_unique<crashhandler::Analysis>(
+				crashhandler::Collect(g_current->record, g_current->context, g_current->thread, g_current->title, g_current->fatal));
+			const std::string text = crashhandler::ToText(*a);
+			Put("%s", text.c_str());
+			std::lock_guard lock(g_analysisLock);
+			g_analysis = std::move(a);
+		}
+
 		bool OpenFile(const wchar_t* path, HANDLE* out)
 		{
 			*out = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -261,6 +282,11 @@ namespace mirage::crash
 				const std::size_t essentials = g_len;
 				Guarded(&WriteModules);
 				Guarded(&WriteMirageParts);
+				{
+					std::lock_guard lock(g_analysisLock);
+					g_analysis.reset();
+				}
+				if (!Guarded(&AnalysisOfCurrent)) Put("\n(the analysis stopped early: reading the crash failed)\n");
 				Put("\nThe menu's log: %ls\\..\\logs\\mirage.log\n", g_folder);
 				WriteFile(f, g_text + essentials, static_cast<DWORD>(g_len - essentials), &written, nullptr);
 				FlushFileBuffers(f);
@@ -307,14 +333,65 @@ namespace mirage::crash
 			return WaitForSingleObject(g_jobDone, 20000) == WAIT_OBJECT_0 && g_job.ok;
 		}
 
-		[[noreturn]] void Die(const EXCEPTION_POINTERS* ep)
+		// The same game, started again with the same command line, before this one ends
+		void StartAgain()
 		{
-			const bool written = Handoff(ep, "the game crashed", true);
+			wchar_t exe[MAX_PATH] = {};
+			GetModuleFileNameW(nullptr, exe, MAX_PATH);
+			std::wstring folder = exe;
+			folder.resize(folder.find_last_of(L'\\'));
+			std::wstring cmd = GetCommandLineW();
+			STARTUPINFOW si{sizeof si};
+			PROCESS_INFORMATION pi{};
+			if (CreateProcessW(exe, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, folder.c_str(), &si, &pi)) {
+				CloseHandle(pi.hThread);
+				CloseHandle(pi.hProcess);
+			}
+		}
+
+		// A fatal crash: the report, then the crash window, which decides what happens. Returns only when the crashed
+		// code may go on (`canResume`: the unhandled-exception filter, for a breakpoint): EXCEPTION_CONTINUE_EXECUTION.
+		LONG HandleFatal(EXCEPTION_POINTERS* ep, bool canResume)
+		{
+			const bool written = Handoff(ep, "the game crashed", true, g_fatalDump.load());
 			// Best effort: the log too (another thread could hold its lock: not waited for long)
 			HANDLE flush = CreateThread(nullptr, 0, [](LPVOID) -> DWORD { spdlog::default_logger_raw()->flush(); return 0; }, nullptr, 0, nullptr);
 			if (flush) {
 				WaitForSingleObject(flush, 1000);
 				CloseHandle(flush);
+			}
+			std::unique_ptr<crashhandler::Analysis> analysis;
+			{
+				std::lock_guard lock(g_analysisLock);
+				if (g_analysis) analysis = std::make_unique<crashhandler::Analysis>(*g_analysis);
+			}
+			const DWORD self = GetCurrentThreadId();
+			// Not when the render thread crashed: the device and the menu's frame are its own, in whatever state
+			if (g_window.load() && analysis && self != hooks::RenderThreadId()) {
+				crashhandler::window::Options o;
+				o.canContinue = canResume && ep && ep->ExceptionRecord && ep->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT;
+				o.canEndThread = self != game::GameThreadId();
+				o.report = written ? g_job.reportPath : L"";
+				o.folder = g_folder;
+				switch (crashhandler::window::Run(*analysis, o)) {
+					case crashhandler::window::Action::Continue:
+						ep->ContextRecord->Eip += 1;		// Past the int3
+						g_handling = 0;
+						return EXCEPTION_CONTINUE_EXECUTION;
+					case crashhandler::window::Action::EndThread:
+						spdlog::warn("Crash reporter: the crashed thread {} ended from the crash window; the game goes on", self);
+						g_handling = 0;
+						ExitThread(ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 1);
+					case crashhandler::window::Action::Restart:
+						StartAgain();
+						TerminateProcess(GetCurrentProcess(), ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 1);
+						for (;;) Sleep(1000);
+					case crashhandler::window::Action::Close:
+						TerminateProcess(GetCurrentProcess(), ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 1);
+						for (;;) Sleep(1000);
+					case crashhandler::window::Action::None:
+						break;		// It couldn't be shown: the report in Notepad, as before
+				}
 			}
 			if (written && g_openReport.load()) {
 				// Notepad shows it once the fullscreen game is gone
@@ -339,7 +416,7 @@ namespace mirage::crash
 			if (g_mode.load() == static_cast<int>(Mode::Mirage) && info && info->ExceptionPointers && !info->ClientPointers &&
 				pid == GetCurrentProcessId() && GetCurrentThreadId() != GetThreadId(g_reporter) &&
 				TakeHandling()) {
-				Die(info->ExceptionPointers);
+				HandleFatal(info->ExceptionPointers, false);		// Never returns without resuming
 			}
 			return oMiniDump(process, pid, file, type, info, user, callback);
 		}
@@ -348,7 +425,7 @@ namespace mirage::crash
 		{
 			if (g_mode.load() == static_cast<int>(Mode::Game) || !TakeHandling())
 				return g_gameFilter ? g_gameFilter(ep) : EXCEPTION_CONTINUE_SEARCH;
-			Die(ep);
+			return HandleFatal(ep, true);
 		}
 
 		LPTOP_LEVEL_EXCEPTION_FILTER WINAPI HookedSetFilter(LPTOP_LEVEL_EXCEPTION_FILTER filter)
@@ -417,6 +494,16 @@ namespace mirage::crash
 	void SetMode(Mode mode) { g_mode = static_cast<int>(mode); }
 	Mode GetMode() { return static_cast<Mode>(g_mode.load()); }
 	void SetOpenReport(bool open) { g_openReport = open; }
+	void SetWindow(bool show) { g_window = show; }
+	void SetFatalDump(bool dump) { g_fatalDump = dump; }
+
+	bool LastAnalysis(crashhandler::Analysis& out)
+	{
+		std::lock_guard lock(g_analysisLock);
+		if (!g_analysis) return false;
+		out = *g_analysis;
+		return true;
+	}
 
 	std::wstring WriteReport(const EXCEPTION_POINTERS* ep, const char* title, bool dump)
 	{

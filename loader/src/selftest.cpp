@@ -43,6 +43,7 @@
 #include "core/events.h"
 #include "core/tasks.h"
 #include "runtime/crash_reporter.h"
+#include "crashhandler/window.h"
 #include "runtime/mod_dotnet.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/manager.h"
@@ -1268,11 +1269,13 @@ void TestEngineDeath()
     WaitTicks(2);
     const int before = g_deathBefore, after = g_deathAfter;
     const void* pawnBefore = nullptr;
+    std::string nameBefore;     // Objects are named uniquely (TdPlayerPawn_N): the new pawn may get the old one's memory
     OnGameThread([&] {
         auto* pawn = game::Pawn();
         auto* pc = game::Controller();
         if (!pawn || !pc) return;
         pawnBefore = pawn;
+        nameBefore = pawn->GetName();
         Classes::FTraceHitInfo hit{};
         pawn->TakeDamage(pawn->Health + 10000, nullptr, pawn->Location, Classes::FVector{},
                          Classes::UTdDmgType_Fell::StaticClass(), hit, nullptr);
@@ -1292,7 +1295,7 @@ void TestEngineDeath()
         // Back in the game: a new pawn, alive and movable
         const bool back = WaitFor(60.0, [&] {
             bool ok = false;
-            OnGameThread([&] { auto* pw = game::Pawn(); ok = pw && pw != pawnBefore && pw->Health > 0; }, 1.0);
+            OnGameThread([&] { auto* pw = game::Pawn(); ok = pw && pw->GetName() != nameBefore && pw->Health > 0; }, 1.0);
             return ok;
         });
         // Walking again, with no cutscene or input hold. Not PlayerNotReady(): the engine leaves the controller's
@@ -2046,6 +2049,15 @@ int Filter(EXCEPTION_POINTERS* ep)
     g_context = *ep->ContextRecord;
     return EXCEPTION_EXECUTE_HANDLER;
 }
+// A thread that crashes for real (nothing catches it): the crash window's end-to-end check
+DWORD WINAPI CrashingThread(LPVOID)
+{
+    SetThreadDescription(GetCurrentThread(), L"mirage self-test crash");
+    volatile int* p = reinterpret_cast<volatile int*>(0x24);
+    *p = 1;
+    return 0;
+}
+
 bool Fault()
 {
     __try {
@@ -2070,17 +2082,75 @@ void TestCrashReporter()
         if (!crash_test::Fault()) p.Problem("the test fault didn't fault");
     }
     EXCEPTION_POINTERS ep{&crash_test::g_record, &crash_test::g_context};
-    const std::wstring report = mirage::crash::WriteReport(&ep, "self-test (not a real crash)");
+    // No minidump: dbghelp suspends every other thread of the running game to write one, and deadlocks when one of them
+    // holds a lock it needs (seen: the report written, the .dmp left at 0 bytes, the game frozen)
+    const std::wstring report = mirage::crash::WriteReport(&ep, "self-test (not a real crash)", false);
     if (report.empty()) p.Problem("no report was written");
     else {
         const std::string text = mirage::crash::ReadReport(fs::path(report));
         for (const char* part : {"What: access violation", "Where: Mirage.dll+", "Access: writing 0x00000010", "Call stack", "Modules ("})
             if (text.find(part) == std::string::npos) p.Problem(std::string("the report has no \"") + part + "\"");
-        if (!fs::exists(fs::path(report).replace_extension(".dmp"))) p.Problem("no minidump next to the report");
         s.notes.push_back("report: " + fs::path(report).filename().string() + ", " + std::to_string(text.size()) + " bytes");
+    }
+
+    // 1b. The crash handler's analysis in the report: named frames (Mirage.dll has its PDB next to it), the
+    // UnrealScript stack's section, the code at the crash; and the same analysis in the crash window's preview
+    if (!report.empty()) {
+        const std::string text = mirage::crash::ReadReport(fs::path(report), 256 * 1024);
+        for (const char* part : {"Thread: ", "UnrealScript call stack:", "Code at the crash:", "=> ", "Registers:"})
+            if (text.find(part) == std::string::npos) p.Problem(std::string("the report has no \"") + part + "\" (the analysis)");
+        crashhandler::Analysis a;
+        if (!mirage::crash::LastAnalysis(a)) p.Problem("the reporter kept no analysis");
+        else {
+            const bool pdb = fs::exists(paths::Dir() / "Mirage.pdb");
+            if (pdb && (a.frames.empty() || a.frames.front().symbol.find("Fault") == std::string::npos))
+                p.Problem("the faulting frame isn't named from the PDB: " + (a.frames.empty() ? std::string("no frames") : a.frames.front().Full()));
+            if (a.disasm.empty() || std::none_of(a.disasm.begin(), a.disasm.end(), [](const crashhandler::DisasmLine& l) { return l.current; }))
+                p.Problem("no disassembly at the fault");
+            if (a.findings.empty()) p.Problem("no possible cause for a write to 0x10 (the null pointer analyzer)");
+            s.notes.push_back("analysis: " + a.where.Full() + ", " + std::to_string(a.frames.size()) + " frames, " +
+                              std::to_string(a.findings.size()) + " finding(s)");
+            crashhandler::window::Preview(a, report);
+            if (!WaitFor(5.0, [] { return crashhandler::window::PreviewFrames() >= 3; }))
+                p.Problem("the crash window's preview didn't draw");
+            crashhandler::window::ClosePreview();
+        }
         std::error_code ec;
         fs::remove(fs::path(report), ec);
         fs::remove(fs::path(report).replace_extension(".dmp"), ec);
+    }
+
+    // 1c. A real crash on a thread of its own: the crash window comes up over the running game, "End this thread" ends
+    // that thread, and the game goes on. No minidump for it (it would only slow the run).
+    {
+        p.Expect("Crash in the menu");             // The crash logger sees the fault first (it is in this DLL)
+        p.Expect("the crashed thread");            // The reporter's warning that the thread ended
+        mirage::crash::SetFatalDump(false);
+        HANDLE t = CreateThread(nullptr, 0, &crash_test::CrashingThread, nullptr, 0, nullptr);
+        if (!t) p.Problem("the crashing thread didn't start");
+        else {
+            if (!WaitFor(20.0, [] { return crashhandler::window::Showing() && crashhandler::window::FramesDrawn() >= 3; }))
+                p.Problem("the crash window didn't come up for a crashed thread");
+            crashhandler::window::Choose(crashhandler::window::Action::EndThread);
+            if (WaitForSingleObject(t, 10000) != WAIT_OBJECT_0) p.Problem("the crashed thread didn't end");
+            else {
+                DWORD code = 0;
+                GetExitCodeThread(t, &code);
+                if (code != EXCEPTION_ACCESS_VIOLATION) p.Problem(fmt::format("the crashed thread ended with 0x{:X}", code));
+            }
+            CloseHandle(t);
+            if (crashhandler::window::Showing()) p.Problem("the crash window is still up");
+            crashhandler::Analysis a;
+            if (mirage::crash::LastAnalysis(a)) {
+                if (a.threadName.find("mirage self-test crash") == std::string::npos)
+                    p.Problem("the crashed thread isn't named: " + a.threadName);
+                s.notes.push_back("crash window: " + std::to_string(crashhandler::window::FramesDrawn()) + " frames, " + a.threadName);
+            }
+            const auto before = Ticks();
+            WaitTicks(5);
+            if (Ticks() == before) p.Problem("the game stopped after the crashed thread ended");
+        }
+        mirage::crash::SetFatalDump(true);
     }
 
     // 2. The event bus and the background tasks, through the game's dispatchers

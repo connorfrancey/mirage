@@ -22,6 +22,11 @@ namespace hooks {
     // renderer has been idle for a few calls; true when it presented a frame.
     void CaptureFrames(bool on);
     bool DrawWhileStalled();
+    // While set, every menu frame draws only `fn` (the crash window: nothing else of the menu runs once the game has
+    // crashed). nullptr: the menu again. Any thread.
+    void SetExclusiveDraw(void (*fn)());
+    unsigned long RenderThreadId();   // The thread EndScene last ran on (0 before the first frame)
+    void* GameWindow();               // The game's window, an HWND (nullptr before the first frame)
     unsigned StalledFrames();
 // Vertices the menu's ImGui frame drew last time (the menu window, every module's overlay): the self-test's "does this
 // module draw" check.

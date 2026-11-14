@@ -16,6 +16,8 @@
 // log) is added after, each part guarded, and skipped if it fails. Then the process ends.
 #include <Windows.h>
 
+#include "crashhandler/analysis.h"
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -28,10 +30,16 @@ namespace mirage::crash
 	void Uninstall();
 	void SetMode(Mode mode);
 	Mode GetMode();
-	void SetOpenReport(bool open);				// Open the report in Notepad once the game is gone
+	void SetOpenReport(bool open);				// Open the report in Notepad once the game is gone (no crash window)
+	void SetWindow(bool show);					// The crash window for a fatal crash (crashhandler/window.h)
+	void SetFatalDump(bool dump);				// A fatal crash writes a minidump (on unless the self-test turns it off)
+	// The analysis of the last report written (crashhandler/analysis.h). False if none.
+	bool LastAnalysis(crashhandler::Analysis& out);
 
 	// Writes a report for `ep` now (the self-test, a hang report). Returns the report's path ("" if it failed). Does not
-	// end the process. `dump`: a minidump next to it too (tens of MB; a fatal crash always gets one).
+	// end the process. `dump`: a minidump next to it too (tens of MB; a fatal crash always gets one). Not for a game that
+	// goes on: dbghelp suspends every other thread to write it, and deadlocks the game when one of them holds a lock it
+	// needs (the heap's, the loader's).
 	std::wstring WriteReport(const EXCEPTION_POINTERS* ep, const char* title, bool dump = true);
 
 	std::filesystem::path Folder();				// mirage\crashlogs

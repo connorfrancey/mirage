@@ -57,6 +57,8 @@ namespace mirage::mods
 	// __try handles on a thread it started would be blamed too; the calls the runtime guards are told apart: "" and
 	// *guarded set, since their guard reports the fault).
 	std::string AttributeCrash(const void* address, unsigned long code, bool* guarded);
+	// The id of the loaded mod whose native DLL `module` is ("" if none). Any thread, no lock (for the crash handler).
+	std::string ModOfModule(const void* module);
 
 	// The mods <folder>/crashes.toml lists, id -> why they won't load (what Discover leaves out)
 	std::map<std::string, std::string> CrashedMods(const std::filesystem::path& folder);
