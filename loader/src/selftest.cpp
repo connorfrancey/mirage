@@ -3746,6 +3746,18 @@ void TestScriptInjectionMods()
     setOn(b, true);
     setOn(a, true);
     if (bytes() == original) p.Problem("with both on, StartMove's bytecode is unchanged (the mods' logs say why)");
+    // A module's change lands on one of its ticks, which the scheduler may defer: wait for the change itself (who
+    // patched StartMove, which injections it has; a rebuild numbers its sites anew, so the bytes differ each time)
+    const auto patchedBy = [&] {
+        std::string owner;
+        OnGameThread([&] { owner = mirage::scripts::Owner(fn); });
+        return owner;
+    };
+    const auto injectedBy = [](const char* mod) {
+        for (const auto& i : mirage::inject::List())
+            if (i.owner == mod && i.function.find("StartMove") != std::string::npos && i.places > 0) return true;
+        return false;
+    };
     if (auto* seen = dynamic_cast<ctl::SliderInt*>(b->FindSetting("Seen"))) OnRenderThread([seen] { seen->Set(-1); });
     const int runsBefore = intOf(a, "Runs");
     const float heavy = StandingJump();
@@ -3756,8 +3768,10 @@ void TestScriptInjectionMods()
     float both = -1.f;
     if (higher) {
         setOn(higher, true);
+        if (!WaitFor(10.0, [&] { return patchedBy() == "higher-jumps"; })) p.Problem("Higher Jumps didn't patch under the injections");
         both = StandingJump();
         setOn(higher, false);
+        if (!WaitFor(10.0, [&] { return patchedBy() != "higher-jumps"; })) p.Problem("Higher Jumps' patch stayed after it went off");
     }
 
     // Hot reload of inject-a: its injection out, the mod loaded again, its injection back on its next tick
@@ -3766,14 +3780,14 @@ void TestScriptInjectionMods()
     if (!reload.empty()) p.Problem("hot reload of inject-a: " + reload);
     Module* a2 = modules::Find("Inject A (Lua)");
     if (a2 && !a2->Enabled()) setOn(a2, true);
-    WaitTicks(10);
+    if (!WaitFor(10.0, [&] { return injectedBy("inject-a"); })) p.Problem("inject-a's injection didn't come back after its reload");
     if (auto* seen = dynamic_cast<ctl::SliderInt*>(b->FindSetting("Seen"))) OnRenderThread([seen] { seen->Set(-1); });
     const float reloaded = StandingJump();
     if (intOf(b, "Seen") != 1) p.Problem("after inject-a's reload inject-b saw " + std::to_string(intOf(b, "Seen")) + ", not 1");
 
     setOn(a2 ? a2 : a, false);
     setOn(b, false);
-    if (bytes() != original) p.Problem("with both off again, StartMove isn't its original bytecode");
+    if (!WaitFor(10.0, [&] { return bytes() == original; })) p.Problem("with both off again, StartMove isn't its original bytecode");
     const float after = StandingJump();
     OnGameThread([] { player_state::Load(); });
     WaitGrounded();
@@ -3786,7 +3800,7 @@ void TestScriptInjectionMods()
     if (normal <= 10.f) p.Problem("the player didn't jump");
     else {
         if (std::fabs(heavy - normal) < normal * 0.05f) p.Problem("the injected local didn't change the jump (" + std::string(line) + ")");
-        if (std::fabs(reloaded - heavy) > normal * 0.1f) p.Problem("after the reload the jump isn't the injected one");
+        if (std::fabs(reloaded - heavy) > normal * 0.1f) p.Problem("after the reload the jump isn't the injected one (" + std::string(line) + ")");
         if (std::fabs(after - normal) > normal * 0.1f) p.Problem("with both off the jump isn't the normal one");
         if (higher && both < heavy * 1.6f) p.Problem("Higher Jumps under the injections didn't raise the injected jump");
     }

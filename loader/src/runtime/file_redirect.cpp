@@ -5,6 +5,8 @@
 #include <spdlog/spdlog.h>
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -37,6 +39,23 @@ namespace mirage::files
 		// Packages the game has opened this session, and the file it got (empty: the original): kept for the session
 		std::unordered_map<std::wstring, std::wstring> g_opened;
 		std::atomic<unsigned long long> g_redirected{0}, g_built{0};
+
+		// SetPending: undecided opens wait for the table on its way
+		std::mutex g_pendingLock;
+		std::condition_variable g_pendingDone;
+		bool g_pending = false;
+		void WaitWhilePending()
+		{
+			std::unique_lock lock(g_pendingLock);
+			if (!g_pending) return;
+			const auto start = std::chrono::steady_clock::now();
+			if (!g_pendingDone.wait_for(lock, std::chrono::seconds(20), [] { return !g_pending; }))
+				spdlog::warn("Content: a package was opened while mod content was still being prepared (20 s): it may be the "
+							 "original for this session");
+			else if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(50))
+				spdlog::info("Content: a package open waited {} ms for mod content being prepared",
+							 std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+		}
 		thread_local int t_bypass = 0;
 
 		std::wstring Key(const std::filesystem::path& p)
@@ -71,6 +90,11 @@ namespace mirage::files
 			{
 				std::shared_lock lock(g_lock);
 				if (const auto o = g_opened.find(key); o != g_opened.end()) return o->second;	// Same as before
+			}
+			WaitWhilePending();		// Not decided yet: with the table that is coming, if one is
+			{
+				std::shared_lock lock(g_lock);
+				if (const auto o = g_opened.find(key); o != g_opened.end()) return o->second;	// Decided while waiting
 				const auto it = g_table.find(key);
 				if (it == g_table.end()) {
 					lock.unlock();
@@ -124,6 +148,15 @@ namespace mirage::files
 			const std::wstring copy = Lookup(name);
 			return g_getAttributes(copy.empty() ? name : copy.c_str(), level, info);
 		}
+	}
+
+	void SetPending(bool pending)
+	{
+		{
+			std::lock_guard lock(g_pendingLock);
+			g_pending = pending;
+		}
+		if (!pending) g_pendingDone.notify_all();
 	}
 
 	Bypass::Bypass() { ++t_bypass; }

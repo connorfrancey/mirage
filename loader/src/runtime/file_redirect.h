@@ -31,6 +31,11 @@ namespace mirage::files
 	void Set(const std::map<std::filesystem::path, std::filesystem::path>& copies,
 			 const std::set<std::filesystem::path>& onDemand, Builder build);
 
+	// A new table is on its way (a mod's content is being worked out on a worker): while pending, a package the game
+	// hasn't opened yet waits for it (at most 20 s) before its file is decided, so a level that loads right after a mod
+	// switches on gets the mod's copies, not the originals for the rest of the session. Any thread.
+	void SetPending(bool pending);
+
 	// The menu's own reads of the originals, on this thread, while one of these lives: never redirected.
 	struct Bypass
 	{

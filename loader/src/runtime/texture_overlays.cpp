@@ -291,6 +291,7 @@ namespace mirage::textures
 					std::unique_lock lock(g_lock);
 					g_busy = false;
 					g_status.busy = false;
+					if (!g_dirty) files::SetPending(false);		// The table is the wanted one (or nothing more is coming)
 					g_cv.notify_all();
 					g_cv.wait(lock, [] { return g_quit || g_dirty; });
 					if (g_quit) return;
@@ -309,6 +310,7 @@ namespace mirage::textures
 
 		void Wake()
 		{
+			files::SetPending(true);		// Packages opened from now wait for the table this work makes
 			g_dirty = true;
 			if (!g_worker.joinable()) {
 				g_quit = false;
@@ -370,6 +372,7 @@ namespace mirage::textures
 		}
 		g_cv.notify_all();
 		if (g_worker.joinable()) g_worker.join();
+		files::SetPending(false);		// Nothing is coming any more
 		files::Uninstall();
 	}
 }
