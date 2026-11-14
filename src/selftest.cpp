@@ -5317,7 +5317,86 @@ void TestLevelEditor()
         else if (std::fabs(x - moved.location[0]) > 1.f || std::fabs(scale - 1.5f) > 1e-3f || strength != 1234.f)
             p.Problem("the spawned actor doesn't have the saved location, scale and Strength");
 
-        // 5. The Collision View draws it: among the volumes near the player
+        // 5. The editor's tools: the class list, the class's properties, duplicate, undo / redo, drop to floor, snap
+        if (again) {
+            namespace le = level_editor;
+            const auto layerNow = [] { return le::Entries(); };
+            const auto entryOf = [&](const std::string& n) {
+                for (const auto& e : layerNow()) if (e.name == n) return e;
+                return layers::EditActor{};
+            };
+            const auto spawned = [](const std::string& n) {
+                Classes::AActor* a = nullptr;
+                OnGameThread([&] { a = layers::Find("layer-test", n); });
+                return a;
+            };
+            // Placeable classes: an engine trigger yes, the abstract Actor no
+            std::vector<std::string> classes;
+            OnGameThread([&] { classes = le::PlaceableClasses(); });
+            const bool hasTrigger = std::find(classes.begin(), classes.end(), "Engine.Trigger") != classes.end();
+            const bool hasActor = std::find(classes.begin(), classes.end(), "Engine.Actor") != classes.end();
+            if (!hasTrigger || hasActor)
+                p.Problem(fmt::format("the class list ({} classes) {} Engine.Trigger and {} Engine.Actor", classes.size(),
+                                      hasTrigger ? "has" : "lacks", hasActor ? "has" : "doesn't have"));
+            // Its class's editable properties, with the value the layer gave it
+            le::Select("layer-test", name);
+            WaitFor(5.0, [] { return le::Selected() >= 0; });
+            std::vector<le::Property> props;
+            OnGameThread([&] { props = le::PropertiesOf(name); });
+            const auto strengthProp = std::find_if(props.begin(), props.end(), [](const le::Property& x) { return x.name == "Strength"; });
+            if (strengthProp == props.end()) p.Problem(fmt::format("Strength isn't among its {} editable properties", props.size()));
+            else if (util::ParseFloatOr(strengthProp->value, 0.f) != 1234.f) p.Problem("its Strength reads " + strengthProp->value + ", the layer says 1234");
+
+            // Duplicate: a second entry, spawned; undo takes it away (and its actor), redo brings it back
+            const std::size_t before = layerNow().size();
+            const std::size_t undoBefore = le::UndoDepth();
+            le::Duplicate();
+            WaitFor(5.0, [&] { return layerNow().size() == before + 1; });
+            const auto after = layerNow();
+            const std::string copy = after.size() == before + 1 ? after.back().name : std::string();
+            WaitFor(10.0, [&] { return !copy.empty() && spawned(copy) != nullptr; });
+            if (copy.empty() || !spawned(copy)) p.Problem("Duplicate didn't add a spawned copy");
+            le::Undo();
+            WaitFor(10.0, [&] { return layerNow().size() == before && spawned(copy) == nullptr; });
+            if (layerNow().size() != before || spawned(copy)) p.Problem("Undo didn't take the copy away");
+            le::Redo();
+            WaitFor(10.0, [&] { return layerNow().size() == before + 1 && spawned(copy) != nullptr; });
+            if (layerNow().size() != before + 1) p.Problem("Redo didn't bring the copy back");
+            if (le::UndoDepth() <= undoBefore) p.Problem("the editor's history didn't grow");
+
+            // Drop to floor: down onto the floor (it starts at the player's height), and again: it stays
+            le::Select("layer-test", name);
+            WaitFor(5.0, [&] { const int i = le::Selected(); return i >= 0 && layerNow()[static_cast<std::size_t>(i)].name == name; });
+            const float z0 = entryOf(name).location[2];
+            le::DropToFloor();
+            WaitFor(5.0, [&] { return entryOf(name).location[2] != z0; });
+            const float z1 = entryOf(name).location[2];
+            WaitFor(10.0, [&] { return spawned(name) != nullptr; });
+            le::DropToFloor();
+            WaitTicks(10);
+            const float z2 = entryOf(name).location[2];
+            if (!(z1 < z0)) p.Problem(fmt::format("Drop to floor left it at Z {:.0f} (from {:.0f})", z1, z0));
+            else if (std::fabs(z2 - z1) > 2.f) p.Problem(fmt::format("dropped again it moved from Z {:.1f} to {:.1f}: not on the floor", z1, z2));
+
+            // Snap: onto a 64 grid
+            le::SetSnap(64.f, 45.f, 0.f);
+            le::SnapSelected();
+            WaitFor(5.0, [&] { const auto e = entryOf(name); return std::fmod(std::fabs(e.location[0]), 64.f) < 0.01f; });
+            const auto snapped = entryOf(name);
+            le::SetSnap(0.f, 0.f, 0.f);
+            bool onGrid = true;
+            for (float v : snapped.location) onGrid &= std::fabs(v - std::round(v / 64.f) * 64.f) < 0.01f;
+            if (!onGrid) p.Problem(fmt::format("Snap left it at [{:.1f}, {:.1f}, {:.1f}]", snapped.location[0], snapped.location[1], snapped.location[2]));
+            s.notes.push_back(fmt::format("{} placeable classes; {} editable properties (Strength {}); duplicate, undo, redo; "
+                                          "dropped to the floor {:.0f} -> {:.0f}; snapped to [{:.0f}, {:.0f}, {:.0f}]",
+                                          classes.size(), props.size(), strengthProp != props.end() ? strengthProp->value : "?", z0, z1,
+                                          snapped.location[0], snapped.location[1], snapped.location[2]));
+            // The pad as it is now, for the Collision View check below
+            WaitFor(10.0, [&] { again = spawned(name); return again != nullptr; });
+            if (again) OnGameThread([&] { objectName = again->GetName(); });
+        }
+
+        // 6. The Collision View draws it: among the volumes near the player
         if (again && withView) {
             OnRenderThread([&] {
                 view->expanded = true;

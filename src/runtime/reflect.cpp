@@ -97,6 +97,16 @@ namespace mirage::reflect
 		}
 	}
 
+	std::vector<const Member*> List(Classes::UStruct* type)
+	{
+		std::vector<const Member*> out;
+		if (!type) return out;
+		const auto& members = MembersOf(type);
+		out.reserve(members.size());
+		for (const auto& [name, m] : members) out.push_back(&m);
+		return out;
+	}
+
 	const Member* Find(Classes::UStruct* type, std::string_view name)
 	{
 		if (!type) return nullptr;

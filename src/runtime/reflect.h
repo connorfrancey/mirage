@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 #include <string_view>
 
 namespace Classes
@@ -44,6 +45,8 @@ namespace mirage::reflect
 
 	// The property `name` of `type` or a struct/class it extends (cached per type). nullptr if there is none.
 	const Member* Find(Classes::UStruct* type, std::string_view name);
+	// Every property of `type` and what it extends (cached per type, like Find), in no particular order. Game thread.
+	std::vector<const Member*> List(Classes::UStruct* type);
 
 	// Where a dotted path leads: the member it ends at and its address
 	struct Value

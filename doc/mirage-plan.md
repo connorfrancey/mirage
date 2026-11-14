@@ -708,7 +708,12 @@ route on the Prologue and the same route on a mod's map each finish, and a TAS o
 in the same time; the mod's map is in level select and restarts from its checkpoint. The Level Editor (`features/misc/level_editor`) places
 an actor of any class where the camera looks, moves it live with a gizmo, edits its location, rotation, scale and
 properties, and saves the layer, which is spawned again from the file; the Collision View draws a mod's class as a
-live cylinder (self-test "Mirage level editor"). Layers and routes are read again when they change, without reloading
+live cylinder (self-test "Mirage level editor"). Finished on 2026-11-13: a searchable list of every placeable class
+the game has loaded (186 in the Prologue) beside the mod's own; markers on every placed actor (click to select);
+undo / redo of the layer (Ctrl+Z / Ctrl+Y), duplicate (Ctrl+D), delete; snapping of the gizmo to a grid, an angle and
+a scale step; drop to floor (the collision's bottom onto the world under it), bring here, go to it; and the selected
+actor's editable (`var()`) properties with their live values, one click to add one to the layer. The self-test checks
+each (the gizmo only when the game isn't minimized: checked with `--visible`). Layers and routes are read again when they change, without reloading
 the mod. The new map is `MirageEditorRoom`, built in the game's own UnrealEd (`MirrorsEdge.exe editor`) from the
 editor's command box and Save As ([tests/maps-src/MirageEditorRoom](../tests/maps-src/MirageEditorRoom/README.md)):
 self-test "Mirage editor map" loads it from the level select, and a TAS walking across it records and plays back
