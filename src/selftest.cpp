@@ -4792,7 +4792,8 @@ void TestLevelLayers()
 
 // Maps from mods (step 13): tests/mods/map-test's maps/MirageTestMap.me1 (the game-test copies the Prologue's persistent
 // level there) is in the game's level select data (the TdGameData store's TdMaps list, as the level select asks it) and
-// in the menu's Levels list with its two checkpoints; it loads at one of them. Then the test level is loaded again.
+// in the menu's Levels list with its two checkpoints; it loads at one of them, and the game's Restart Checkpoint puts the
+// player back at that checkpoint in the same map. Then the test level is loaded again.
 void TestModMaps()
 {
     Step& s = Begin("Mirage maps");
@@ -4873,6 +4874,52 @@ void TestModMaps()
         OnGameThread([&] { map = game::MapName(); });
         s.notes.push_back("loaded: " + map + ", " + levels::LastMessage());
         if (Lower(map) != "miragetestmap") p.Problem("the level loaded is " + map + ", not MirageTestMap");
+
+        // Restarted from its checkpoint: moved away first, the game's own restart puts a new player back where the
+        // checkpoint spawned the first one, in the same map
+        if (Module* restart = modules::Find("Restart Checkpoint")) {
+            Classes::FVector spawn{};
+            const void* pawnBefore = nullptr;
+            OnGameThread([&] {
+                if (auto* pawn = game::Pawn()) {
+                    spawn = pawn->Location;
+                    pawnBefore = pawn;
+                    pawn->Location.X += 600.f;
+                }
+            });
+            const int loadsBefore = g_loadsFinished.load();
+            OnRenderThread([restart] { restart->Toggle(); });
+            const void* pawnAfter = nullptr;
+            WaitFor(60.0, [&] {
+                OnGameThread([&] { pawnAfter = game::Pawn(); }, 1.0);
+                return pawnAfter && pawnAfter != pawnBefore && !game::IsLoading();
+            });
+            // Walking again, with no cutscene or input hold. Not WaitPlayerReady(): the engine leaves the controller's
+            // bFrozen set after its own checkpoint restart (see the death test)
+            const bool walking = WaitFor(30.0, [&] {
+                bool ok = false;
+                OnGameThread([&] {
+                    auto* pc = game::Controller();
+                    ok = pc && game::Pawn() && game::IsInState(pc, "PlayerWalking") && !pc->bCinematicMode && !pc->bIgnoreMoveInput;
+                }, 1.0);
+                return ok;
+            });
+            if (!walking) p.Problem("after the restart, the player isn't back in PlayerWalking");
+            Classes::FVector at{};
+            std::string after;
+            OnGameThread([&] {
+                if (auto* pawn = game::Pawn()) at = pawn->Location;
+                after = game::MapName();
+            });
+            const float off = std::hypot(at.X - spawn.X, at.Y - spawn.Y);
+            s.notes.push_back(fmt::format("restarted from the checkpoint{}: {:.0f} units from the first spawn",
+                                          g_loadsFinished.load() > loadsBefore ? " (a level load)" : "", off));
+            if (!pawnAfter || pawnAfter == pawnBefore) p.Problem("Restart Checkpoint didn't respawn the player in MirageTestMap");
+            else if (Lower(after) != "miragetestmap") p.Problem("Restart Checkpoint left MirageTestMap for " + after);
+            else if (off > 150.f) p.Problem(fmt::format("the restart put the player {:.0f} units from the checkpoint's spawn", off));
+        } else {
+            p.Problem("the Restart Checkpoint module (memenu-levels) is missing");
+        }
     }
 
     // Back to the test level for the steps after this one

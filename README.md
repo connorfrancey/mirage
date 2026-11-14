@@ -752,6 +752,13 @@ MirrorsEdge.exe
    reloads a mod, switches it off or on for the next start, and lets a crashed mod load again. The remaining features
    wait on API they need (a UI layer above all): see the plan.
 
+13. **Levels and world building:** a mod's `levels/<map>.toml` places actors (any class, its own too) into a level
+    and streams its own packages in as sublevels; `maps/<Name>.me1` adds a map to the level select with its
+    checkpoints; `routes/<map>.toml` adds time-trial routes (Time Trials window, ghost, speedrun timer splits). The
+    **Level Editor** (Misc tab) places, moves (gizmo) and edits actors in game and saves the layer. A TAS of a route on
+    an existing map and on a mod's map records and plays back verified. Self-tests "Mirage level additions", "Mirage
+    maps", "Mirage time trials" and "Mirage level editor".
+
 **Next:** the API the remaining features need (UI layer, object queries, input), then tooling, docs and distribution.
 
 ### Testing
