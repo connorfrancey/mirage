@@ -868,8 +868,10 @@ void WaitGrounded()
         bool ok = false;
         OnGameThread([&] {
             auto* pawn = game::Pawn();
+            // Walking, not only on the ground: after a high fall the landing moves hold the player's velocity for a
+            // while, and a step that launches the player (the bounce pads) would measure the landing instead
             ok = pawn && pawn->Physics == Classes::EPhysics::PHYS_Walking &&
-                 pawn->MovementState != Classes::EMovement::MOVE_Jump;
+                 pawn->MovementState == Classes::EMovement::MOVE_Walking;
         }, 1.0);
         return ok;
     });
@@ -1917,9 +1919,17 @@ void TestMirageModHooks()
     std::snprintf(line, sizeof line, "a call: %.2f us; a native hook adds %.2f us, a Lua hook %.2f us; an unhooked script "
                   "call pays %.1f ns for the detour's lookup", bare, nativeUs, luaUs, lookupNs);
     s.notes.push_back(line);
-    if (lookupNs > 100.0) p.Problem("the detour's lookup costs " + std::to_string(lookupNs) + " ns (budget 100)");
-    if (nativeUs > 5.0) p.Problem("a native hook adds " + std::to_string(nativeUs) + " us a call (budget 5)");
-    if (luaUs > 50.0) p.Problem("a Lua hook adds " + std::to_string(luaUs) + " us a call (budget 50)");
+    // The budgets are release numbers (measured there: 0.44 us native, 1.25 us Lua). A debug build runs everything
+    // 7-20 times slower (the bare call too), so it gets ten times the budget: still far below what a real regression costs.
+#ifdef NDEBUG
+    constexpr double kScale = 1.0;
+#else
+    constexpr double kScale = 10.0;
+#endif
+    const auto budget = [&](double limit) { return std::to_string(static_cast<int>(limit * kScale)); };
+    if (lookupNs > 100.0 * kScale) p.Problem("the detour's lookup costs " + std::to_string(lookupNs) + " ns (budget " + budget(100) + ")");
+    if (nativeUs > 5.0 * kScale) p.Problem("a native hook adds " + std::to_string(nativeUs) + " us a call (budget " + budget(5) + ")");
+    if (luaUs > 50.0 * kScale) p.Problem("a Lua hook adds " + std::to_string(luaUs) + " us a call (budget " + budget(50) + ")");
     s.notes.push_back("map " + (lastMap ? lastMap->Get() : std::string()) + ", " + std::to_string(ticks ? ticks->Get() : 0) + " tick events");
     p.Check(1, true);
     End(s);
@@ -2613,7 +2623,7 @@ Bounce BounceOn(Classes::UClass* cls, Probe& p, Step& s, bool destroy = true)
         return out;
     }
     if (strength != 1500.f) p.Problem(fmt::format("its Strength is {} (the default is 1500)", strength));
-    for (int i = 0; i < 60 && out.bounces == 0; ++i)
+    for (int i = 0, after = 0; i < 60 && after < 10; ++i, after += out.bounces > 0 ? 1 : 0)   // Ten ticks past the touch
     {
         WaitTicks(1);
         OnGameThread([&] {
@@ -2870,10 +2880,14 @@ void TestClassesExample()
     OnGameThread([&] { before = pads().size(); });
     OnRenderThread([m] { m->SetEnabled(true); });
     Classes::AActor* pad = nullptr;
-    for (int i = 0; i < 120 && !pad; ++i)    // About 10 s: the first compile takes 3-4 s
+    // The pad spawns where the player stands and may launch them in its first tick, before it is found here: the
+    // player's vertical speed is followed from the switch-on, every tick, so the launch's peak can't be missed
+    float velocityZ = 0.f;
+    for (int i = 0; i < 600 && !pad; ++i)    // About 10 s: the first compile takes 3-4 s
     {
-        WaitTicks(5);
+        WaitTicks(1);
         OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) velocityZ = (std::max)(velocityZ, pawn->Velocity.Z);
             const auto now = pads();
             if (now.size() > before) pad = now.back();
         });
@@ -2888,8 +2902,7 @@ void TestClassesExample()
     OnGameThread([&] { cls = pad->Class->GetPathName(); });
     s.notes.push_back("dropped a " + cls);
     int bounces = 0;
-    float velocityZ = 0.f;
-    for (int i = 0; i < 80 && bounces == 0; ++i)
+    for (int i = 0, after = 0; i < 80 && after < 10; ++i, after += bounces > 0 ? 1 : 0)   // Ten ticks past the touch
     {
         WaitTicks(1);
         OnGameThread([&] {

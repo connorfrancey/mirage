@@ -1377,9 +1377,12 @@ namespace mirage::mods
 		}
 	}
 
-	std::string AttributeCrash(const void* address, unsigned long code)
+	std::string AttributeCrash(const void* address, unsigned long code, bool* guarded)
 	{
-		if (t_guarded > 0) return {};	// The guard around the call catches it (and names the mod)
+		if (t_guarded > 0) {	// The guard around the call catches it (and names the mod)
+			if (guarded) *guarded = true;
+			return {};
+		}
 		HMODULE m = nullptr;
 		if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 								static_cast<LPCWSTR>(address), &m))

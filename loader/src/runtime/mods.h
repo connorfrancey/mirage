@@ -54,8 +54,9 @@ namespace mirage::mods
 
 	// A crash outside the guarded calls (a thread a mod started): the mod whose DLL holds `address`, "" if none. Writes
 	// the crash record for it. Any thread, from the crash handler (which sees exceptions first: one the mod's own
-	// __try handles on a thread it started would be blamed too; the calls the runtime guards are told apart).
-	std::string AttributeCrash(const void* address, unsigned long code);
+	// __try handles on a thread it started would be blamed too; the calls the runtime guards are told apart: "" and
+	// *guarded set, since their guard reports the fault).
+	std::string AttributeCrash(const void* address, unsigned long code, bool* guarded);
 
 	// The mods <folder>/crashes.toml lists, id -> why they won't load (what Discover leaves out)
 	std::map<std::string, std::string> CrashedMods(const std::filesystem::path& folder);

@@ -46,7 +46,8 @@ namespace diag {
     struct ExpectedFault { ExpectedFault(); ~ExpectedFault(); ExpectedFault(const ExpectedFault&) = delete; ExpectedFault& operator=(const ExpectedFault&) = delete; };
     long LogFatal(const EXCEPTION_POINTERS* ep, const char* where);   // For __except filters: logs, keeps searching
     // Asked first about every crash: the name of the mod whose code faulted ("" if none), which it records. Mirage mods.
-    void SetCrashAttributor(std::string (*attribute)(const void* address, unsigned long code));
+    // `guarded` is set when the fault is inside a call the runtime guards: the guard reports it, the logger doesn't.
+    void SetCrashAttributor(std::string (*attribute)(const void* address, unsigned long code, bool* guarded));
     // Until `untilTick` (GetTickCount64), crashes anywhere in the game are logged too, not only the menu's: TAS memory
     // snapshots change the game's memory under it. `released`: describes an address the snapshots let go of ("" if not).
     void LogGameCrashesUntil(unsigned long long untilTick, std::string (*released)(std::uintptr_t address) = nullptr);

@@ -90,7 +90,9 @@ static void Run(HMODULE module)
     STARTUP_STEP(mirage::mods::Discover(selfTest ? std::vector{paths::Dir() / "mods", paths::Dir() / "selftest-mods"}
                                                  : std::vector{paths::Dir() / "mods"}));
     STARTUP_STEP(mirage::mods::LoadPhase(mirage::mods::Phase::Early));
-    diag::SetCrashAttributor([](const void* address, unsigned long code) { return mirage::mods::AttributeCrash(address, code); });
+    diag::SetCrashAttributor([](const void* address, unsigned long code, bool* guarded) {
+        return mirage::mods::AttributeCrash(address, code, guarded);
+    });
 #endif
     STARTUP_STEP(modules::ApplyDefaults());   // Modules flagged enabledByDefault
     STARTUP_STEP(config::Load());             // Saved state overrides the defaults

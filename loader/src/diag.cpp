@@ -115,7 +115,7 @@ namespace {
     }
 
     std::atomic<unsigned long long> g_gameCrashesUntil{0};
-    std::string (*g_attribute)(const void*, unsigned long) = nullptr;     // diag::SetCrashAttributor
+    std::string (*g_attribute)(const void*, unsigned long, bool*) = nullptr;     // diag::SetCrashAttributor
     std::string (*g_released)(std::uintptr_t) = nullptr;
 
     thread_local int t_expected = 0;     // diag::ExpectedFault scopes on this thread
@@ -137,10 +137,14 @@ namespace {
             static thread_local bool attributing = false;
             if (!attributing) {
                 attributing = true;
-                const std::string mod = g_attribute(ep->ExceptionRecord->ExceptionAddress, ep->ExceptionRecord->ExceptionCode);
+                bool guarded = false;
+                const std::string mod = g_attribute(ep->ExceptionRecord->ExceptionAddress, ep->ExceptionRecord->ExceptionCode, &guarded);
                 if (!mod.empty()) diag::LogFatal(ep, ("Crash in the mod " + mod).c_str());
                 attributing = false;
                 if (!mod.empty()) return EXCEPTION_CONTINUE_SEARCH;
+                // A mod's callback faulting outside this DLL: the guard around the call names the mod and stops it. Logging
+                // it here too (the self-test logs the game's crashes as well) would report a handled fault as a crash.
+                if (guarded && !InSelf(ep->ExceptionRecord->ExceptionAddress)) return EXCEPTION_CONTINUE_SEARCH;
             }
         }
         if (!InSelf(ep->ExceptionRecord->ExceptionAddress) && !game) return EXCEPTION_CONTINUE_SEARCH;   // The game's business
@@ -190,7 +194,7 @@ void diag::RemoveCrashLogger()
     g_veh = nullptr;
 }
 
-void diag::SetCrashAttributor(std::string (*attribute)(const void* address, unsigned long code)) { g_attribute = attribute; }
+void diag::SetCrashAttributor(std::string (*attribute)(const void* address, unsigned long code, bool* guarded)) { g_attribute = attribute; }
 
 long diag::LogFatal(const EXCEPTION_POINTERS* ep, const char* where)
 {
