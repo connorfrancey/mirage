@@ -44,6 +44,7 @@
 #include "core/tasks.h"
 #include "runtime/crash_reporter.h"
 #include "crashhandler/window.h"
+#include "crashhandler/symbols.h"
 #include "runtime/mod_dotnet.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/manager.h"
@@ -911,6 +912,11 @@ void TestMirageUi()
 {
     Step& s = Begin("Mirage UI layer");
     Probe p(s);
+    {
+        bool docking = false;
+        OnRenderThread([&] { docking = ImGui::GetCurrentContext() && (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DockingEnable); });
+        if (!docking) p.Problem("ImGui's docking isn't on (the docking branch, ImGuiConfigFlags_DockingEnable)");
+    }
     Module* m = modules::Find("UI test (Lua)");
     if (!m) {
         p.Problem("the ui-lua test mod's module was not found (is tests/mods deployed?)");
@@ -2082,15 +2088,19 @@ void TestCrashReporter()
         if (!crash_test::Fault()) p.Problem("the test fault didn't fault");
     }
     EXCEPTION_POINTERS ep{&crash_test::g_record, &crash_test::g_context};
-    // No minidump: dbghelp suspends every other thread of the running game to write one, and deadlocks when one of them
-    // holds a lock it needs (seen: the report written, the .dmp left at 0 bytes, the game frozen)
-    const std::wstring report = mirage::crash::WriteReport(&ep, "self-test (not a real crash)", false);
+    // With a minidump: written by the helper process (loader/crashdump/), from outside the running game. From inside,
+    // dbghelp deadlocked here (the report written, the .dmp left at 0 bytes, the game frozen).
+    const std::wstring report = mirage::crash::WriteReport(&ep, "self-test (not a real crash)");
     if (report.empty()) p.Problem("no report was written");
     else {
         const std::string text = mirage::crash::ReadReport(fs::path(report));
         for (const char* part : {"What: access violation", "Where: Mirage.dll+", "Access: writing 0x00000010", "Call stack", "Modules ("})
             if (text.find(part) == std::string::npos) p.Problem(std::string("the report has no \"") + part + "\"");
-        s.notes.push_back("report: " + fs::path(report).filename().string() + ", " + std::to_string(text.size()) + " bytes");
+        std::error_code ec;
+        const auto dumpSize = fs::file_size(fs::path(report).replace_extension(".dmp"), ec);
+        if (ec || dumpSize < 64 * 1024) p.Problem("no minidump next to the report (the helper mirage_crashdump.exe)");
+        s.notes.push_back("report: " + fs::path(report).filename().string() + ", " + std::to_string(text.size()) +
+                          " bytes; minidump " + std::to_string(ec ? 0 : dumpSize / 1024) + " KB");
     }
 
     // 1b. The crash handler's analysis in the report: named frames (Mirage.dll has its PDB next to it), the
@@ -2118,6 +2128,24 @@ void TestCrashReporter()
         std::error_code ec;
         fs::remove(fs::path(report), ec);
         fs::remove(fs::path(report).replace_extension(".dmp"), ec);
+    }
+
+    // 1b'. Names for the game's code: an address a little into a native function is named after it (the table the
+    // crash handler builds from the native UFunctions on the game thread)
+    {
+        std::string expected, got;
+        OnGameThread([&] {
+            crashhandler::symbols::Refresh();
+            const int funcOffset = mirage::hooks::FuncOffset();
+            auto* fn = game::FindObject<Classes::UFunction>("Function Engine.Actor.Trace");
+            if (!fn || funcOffset <= 0) return;
+            const std::uint32_t func = *reinterpret_cast<const std::uint32_t*>(reinterpret_cast<const char*>(fn) + funcOffset);
+            expected = "Actor.execTrace";
+            got = crashhandler::symbols::Describe(func + 0x10).Full();
+        });
+        if (expected.empty()) p.Problem("Engine.Actor.Trace or UFunction::Func wasn't found (the engine names can't be checked)");
+        else if (got.find(expected) == std::string::npos) p.Problem("the game's code isn't named after its native function: " + got);
+        else s.notes.push_back("engine names: " + got);
     }
 
     // 1c. A real crash on a thread of its own: the crash window comes up over the running game, "End this thread" ends

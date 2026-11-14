@@ -37,9 +37,10 @@ namespace mirage::crash
 	bool LastAnalysis(crashhandler::Analysis& out);
 
 	// Writes a report for `ep` now (the self-test, a hang report). Returns the report's path ("" if it failed). Does not
-	// end the process. `dump`: a minidump next to it too (tens of MB; a fatal crash always gets one). Not for a game that
-	// goes on: dbghelp suspends every other thread to write it, and deadlocks the game when one of them holds a lock it
-	// needs (the heap's, the loader's).
+	// end the process. `dump`: a minidump next to it too (tens of MB; a fatal crash always gets one), written by the
+	// helper process mirage_crashdump.exe (loader/crashdump/): dbghelp suspends every thread of the process it dumps, and
+	// from inside the game it deadlocked when one of them held a lock it needed. Without the helper, only a fatal crash
+	// is dumped (from inside).
 	std::wstring WriteReport(const EXCEPTION_POINTERS* ep, const char* title, bool dump = true);
 
 	std::filesystem::path Folder();				// mirage\crashlogs

@@ -7,6 +7,7 @@
 #include "runtime/mem/heap.h"
 
 
+#include <filesystem>
 #include <spdlog/spdlog.h>
 
 #include <Windows.h>
@@ -191,7 +192,7 @@ namespace mirage::hang
 										   false);		// No minidump: a hang may pass, and tens of MB each time would add up
 			}
 			spdlog::error("Hang: the {} hasn't made progress for {:.1f} s; it is at {}{}", w.name, since, where,
-						  report.empty() ? std::string() : ". Report: " + std::string(report.begin(), report.end()));
+						  report.empty() ? std::string() : ". Report: " + std::filesystem::path(report).string());
 			notify::Push(std::string("The game isn't responding (") + w.name + "). " + failsafe::kName + " quits it.");
 			events::Bus().Publish(events::HangDetected{w.name, since, where});
 			std::lock_guard<std::mutex> l(g_lock);

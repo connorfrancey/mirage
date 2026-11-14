@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <cwchar>
 #include <fstream>
 #include <memory>
@@ -260,6 +261,58 @@ namespace mirage::crash
 			return *out != INVALID_HANDLE_VALUE;
 		}
 
+		// The minidump helper (loader/crashdump/): its path, written at Install from this DLL's resource 900
+		wchar_t g_dumper[MAX_PATH] = {};
+
+		void WriteDumper()
+		{
+			HRSRC r = FindResourceW(g_self, MAKEINTRESOURCEW(900), MAKEINTRESOURCEW(10));	// RT_RCDATA
+			HGLOBAL h = r ? LoadResource(g_self, r) : nullptr;
+			const void* data = h ? LockResource(h) : nullptr;
+			const DWORD size = r ? SizeofResource(g_self, r) : 0;
+			if (!data || !size) {
+				spdlog::warn("Crash reporter: no minidump helper in this build: minidumps are written from inside the game");
+				return;
+			}
+			const fs::path path = paths::Dir() / "mirage_crashdump.exe";
+			std::error_code ec;
+			bool same = fs::file_size(path, ec) == size && !ec;
+			if (same) {
+				std::ifstream in(path, std::ios::binary);
+				std::string have(size, '\0');
+				in.read(have.data(), size);
+				same = std::memcmp(have.data(), data, size) == 0;
+			}
+			if (!same) {
+				std::ofstream out(path, std::ios::binary | std::ios::trunc);
+				out.write(static_cast<const char*>(data), size);
+				if (!out) {
+					spdlog::warn("Crash reporter: couldn't write {}: minidumps are written from inside the game", path.string());
+					return;
+				}
+			}
+			wcsncpy_s(g_dumper, path.wstring().c_str(), _TRUNCATE);
+		}
+
+		// The minidump through the helper process (it suspends this one's threads from outside: nothing here can block
+		// it). False if the helper couldn't run or failed.
+		bool DumpFromOutside(const Job& job, const wchar_t* path)
+		{
+			if (!g_dumper[0]) return false;
+			wchar_t cmd[MAX_PATH * 3];
+			std::swprintf(cmd, std::size(cmd), L"\"%s\" %lu %lu %IX \"%s\"", g_dumper, GetCurrentProcessId(), job.thread,
+						  reinterpret_cast<std::uintptr_t>(&job.pointers), path);
+			STARTUPINFOW si{sizeof si};
+			PROCESS_INFORMATION pi{};
+			if (!CreateProcessW(g_dumper, cmd, nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) return false;
+			CloseHandle(pi.hThread);
+			DWORD code = 1;
+			if (WaitForSingleObject(pi.hProcess, 60000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &code);
+			else TerminateProcess(pi.hProcess, 1);
+			CloseHandle(pi.hProcess);
+			return code == 0;
+		}
+
 		// Runs on the reporter thread
 		void Produce(Job& job)
 		{
@@ -293,10 +346,12 @@ namespace mirage::crash
 				CloseHandle(f);
 				job.ok = true;
 			}
-			// The minidump, from this thread (dbghelp's advice: not from the one that crashed)
+			// The minidump: from the helper process. From inside (this thread, never the crashed one) only for a fatal crash
+			// the helper couldn't write: dbghelp suspends every other thread, and can deadlock on a lock one of them holds.
 			wchar_t dmp[MAX_PATH];
 			std::swprintf(dmp, MAX_PATH, L"%s.dmp", base);
-			if (job.dump && oMiniDump && OpenFile(dmp, &f)) {
+			if (job.dump && DumpFromOutside(job, dmp)) return;
+			if (job.dump && job.fatal && oMiniDump && OpenFile(dmp, &f)) {
 				MINIDUMP_EXCEPTION_INFORMATION mei{job.thread, &job.pointers, FALSE};
 				oMiniDump(GetCurrentProcess(), GetCurrentProcessId(), f,
 						  static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory | MiniDumpWithThreadInfo),
@@ -448,6 +503,7 @@ namespace mirage::crash
 						   reinterpret_cast<LPCWSTR>(&Install), &g_self);
 		const std::wstring folder = FolderPath().wstring();
 		wcsncpy_s(g_folder, folder.c_str(), _TRUNCATE);
+		WriteDumper();
 		g_jobReady = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 		g_jobDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
 		g_reporter = CreateThread(nullptr, 256 * 1024, ReporterThread, nullptr, 0, nullptr);
