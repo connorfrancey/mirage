@@ -1,0 +1,3 @@
+title = "Mirage Editor Room"
+description = "A map built with the game's own 2008 editor (UnrealEd): a room, a light and a player start"
+game = "TdGame.TdSPStoryGame"

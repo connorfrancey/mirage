@@ -510,7 +510,7 @@ states are patched and injected through steps 8 and 11), replication (single pla
 **Milestone:** a mod adds a new time-trial route to an existing map and a new small map built with the 2008 editor;
 both appear in level select, play, restart from checkpoints, and a TAS of each records and plays back verified.
 
-**Status (2026-11-13): done, except the map made with the 2008 editor (the author's to make).**
+**Status (2026-11-13): done.**
 Layers (`levels/<map>.toml`, `runtime/layers`), streamed sublevels, maps in level select (`maps/<Name>.me1`) and
 time-trial routes (`routes/<map>.toml`) each have a self-test. The milestone ("Mirage time trials", "Mirage maps"): a
 route on the Prologue and the same route on a mod's map each finish, and a TAS of each records and plays back verified
@@ -518,7 +518,11 @@ in the same time; the mod's map is in level select and restarts from its checkpo
 an actor of any class where the camera looks, moves it live with a gizmo, edits its location, rotation, scale and
 properties, and saves the layer, which is spawned again from the file; the Collision View draws a mod's class as a
 live cylinder (self-test "Mirage level editor"). Layers and routes are read again when they change, without reloading
-the mod. A new map made with the 2008 editor is the author's to make (the test map is a renamed `edge_p`).
+the mod. The new map is `MirageEditorRoom`, built in the game's own UnrealEd (`MirrorsEdge.exe editor`) from the
+editor's command box and Save As ([tests/maps-src/MirageEditorRoom](../tests/maps-src/MirageEditorRoom/README.md)):
+self-test "Mirage editor map" loads it from the level select, and a TAS walking across it records and plays back
+verified. The game's Restart Checkpoint needs a checkpoint: on a map without one it leaves no player, so restarting
+such a map is loading its start (what a TAS run does).
 
 ### 14. Mods for mods: services, events and versioned interfaces
 

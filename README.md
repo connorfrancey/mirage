@@ -756,8 +756,9 @@ MirrorsEdge.exe
     and streams its own packages in as sublevels; `maps/<Name>.me1` adds a map to the level select with its
     checkpoints; `routes/<map>.toml` adds time-trial routes (Time Trials window, ghost, speedrun timer splits). The
     **Level Editor** (Misc tab) places, moves (gizmo) and edits actors in game and saves the layer. A TAS of a route on
-    an existing map and on a mod's map records and plays back verified. Self-tests "Mirage level additions", "Mirage
-    maps", "Mirage time trials" and "Mirage level editor".
+    an existing map and on a mod's map records and plays back verified, and so does one on a map built with the
+    game's own 2008 editor (`tests/maps-src/MirageEditorRoom`). Self-tests "Mirage level additions", "Mirage maps",
+    "Mirage editor map", "Mirage time trials" and "Mirage level editor".
 
 **Next:** the API the remaining features need (UI layer, object queries, input), then tooling, docs and distribution.
 

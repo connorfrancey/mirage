@@ -4932,6 +4932,124 @@ void TestModMaps()
     End(s);
 }
 
+// A map made with the game's own 2008 editor (step 13's milestone): tests/mods/map-test's maps/MirageEditorRoom.me1
+// (a room, a light and a player start, built in UnrealEd: tests/maps-src/MirageEditorRoom) is in the level select and
+// loads with the player standing in the room. A TAS walking forward records, then plays back verified, the player
+// having walked (not fallen) somewhere else in the room. The room has no checkpoints: restarting it is loading its start
+// again, which each TAS run does (the game's Restart Checkpoint needs a checkpoint: without one it leaves no player).
+void TestEditorMap()
+{
+    Step& s = Begin("Mirage editor map");
+    Probe p(s);
+    const auto maps = levels::Maps();
+    int index = -1;
+    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
+        if (maps[static_cast<std::size_t>(i)].file == "MirageEditorRoom") index = i;
+    if (index < 0 || !tas::Available()) {
+        p.Problem(index < 0 ? "MirageEditorRoom isn't in the Levels list (is map-test loaded?)" : "the TAS isn't available");
+        End(s);
+        return;
+    }
+    const auto loadMap = [&](int map, int checkpoint, const std::string& want) -> bool {
+        const int before = g_loadsFinished.load();
+        OnRenderThread([map, checkpoint] { levels::Load(map, checkpoint, levels::Method::Game, false); });
+        if (!WaitFor(120.0, [&] { return g_loadsFinished.load() > before; })) { p.Problem(want + " didn't load"); return false; }
+        if (!WaitFor(60.0, [] { return game::GetStatus().hasPawn && !game::IsLoading(); })) { p.Problem("no player in " + want); return false; }
+        if (const std::string why = WaitPlayerReady(30.0); !why.empty()) { p.Problem("in " + want + ": " + why); return false; }
+        return true;
+    };
+    // Where the player is, and whether on the floor (the room: |X|, |Y| < 1024, its floor at Z -96)
+    struct Where { Classes::FVector at{}; bool walking = false; std::string map, text; };
+    const auto where = [] {
+        Where w;
+        OnGameThread([&] {
+            auto* pawn = game::Pawn();
+            auto* pc = game::Controller();
+            if (pawn) {
+                w.at = pawn->Location;
+                w.walking = pawn->Physics == Classes::EPhysics::PHYS_Walking;
+            }
+            w.map = game::MapName();
+            w.text = pawn ? fmt::format("[{:.0f}, {:.0f}, {:.0f}] physics {} vz {:.0f}{}{}", pawn->Location.X, pawn->Location.Y,
+                                        pawn->Location.Z, static_cast<int>(pawn->Physics.GetValue()), pawn->Velocity.Z,
+                                        pc && game::IsInState(pc, "PlayerWalking") ? ", PlayerWalking" : "",
+                                        pc && pc->bIgnoreMoveInput ? ", move input ignored" : "")
+                          : std::string("no player");
+        });
+        return w;
+    };
+    const auto inRoom = [](const Classes::FVector& v) {
+        return std::fabs(v.X) < 1024.f && std::fabs(v.Y) < 1024.f && v.Z > -96.f && v.Z < 704.f;
+    };
+
+    if (loadMap(index, 0, "MirageEditorRoom")) {
+        Where start;
+        WaitFor(10.0, [&] { start = where(); return start.walking; });
+        spdlog::info("Self-test: editor map loaded, the player: {}", start.text);
+        s.notes.push_back(fmt::format("loaded {}: the player at [{:.0f}, {:.0f}, {:.0f}]{}", start.map, start.at.X, start.at.Y,
+                                      start.at.Z, start.walking ? ", on the floor" : ""));
+        if (Lower(start.map) != "mirageeditorroom") p.Problem("the level loaded is " + start.map + ", not MirageEditorRoom");
+        else if (!inRoom(start.at) || !start.walking) p.Problem("the player isn't standing in the editor's room");
+
+        // A TAS from the level start: walks forward, recorded, then played back verified
+        std::string forward;
+        OnGameThread([&] { forward = KeyFor(game::Controller(), "GBA_MoveForward", "W"); });
+        tas::Replay saved;
+        tas::WithReplay([&](tas::Replay& r) { saved = r; });
+        tas::Macro m(60.f);
+        m.Describe("memenu self-test: walk in the editor's room").Wait(5).Press(forward).Wait(60).Release(forward).Wait(20);
+        tas::Replay macro = m.Build();
+        macro.start = tas::StartKind::Checkpoint;
+        macro.map = maps[static_cast<std::size_t>(index)].label;
+        macro.checkpoint.clear();              // The level's start
+        macro.syncValidUntil = 0;              // The first playback records the reference
+        tas::WithReplay([&](tas::Replay& r) { r = macro; });
+        OnRenderThread([] { gui::visible = false; });
+        const auto play = [&] {
+            tas::Play();
+            bool started = false;
+            tas::Status st{};
+            const ULONGLONG deadline = GetTickCount64() + 90000;
+            while (GetTickCount64() < deadline && !g_aborted) {
+                st = tas::GetStatus();
+                if (st.mode == tas::Mode::Playing && !st.armed) started = true;
+                if (started && (st.mode != tas::Mode::Playing || st.paused || st.frame >= st.frames)) break;
+                Sleep(10);
+            }
+            WaitFor(5.0, [&] { st = tas::GetStatus(); return st.mode != tas::Mode::Playing || st.paused; });
+            tas::Stop();        // At its end the TAS holds the game paused: where the player is, read after it let go
+            WaitFor(5.0, [] { return tas::GetStatus().mode == tas::Mode::Idle; });
+            WaitTicks(3);
+            return std::make_tuple(started, st, where());
+        };
+        const auto [ran1, first, end1] = play();
+        spdlog::info("Self-test: editor map, after the recording run: {}", end1.text);
+        const auto [ran2, second, end2] = play();      // From the level's start again: the room restarted
+        spdlog::info("Self-test: editor map, after the playback: {}", end2.text);
+        const float walked = std::hypot(end2.at.X - start.at.X, end2.at.Y - start.at.Y);
+        s.notes.push_back(fmt::format("TAS: walked {:.0f} units; playback {} ({} frames checked), ended {:.3f} units from the recording",
+                                      walked, second.verified ? "verified" : "not verified", second.syncChecked,
+                                      std::hypot(end2.at.X - end1.at.X, end2.at.Y - end1.at.Y)));
+        if (!ran1 || !ran2) p.Problem("the TAS didn't play in the editor's room: " + tas::GetStatus().message);
+        else if (!second.verified || second.desyncFrame >= 0)
+            p.Problem(fmt::format("the playback wasn't verified (desync on frame {}: {})", second.desyncFrame, second.desyncInfo));
+        if (walked < 100.f) p.Problem(fmt::format("the TAS walked the player only {:.0f} units", walked));
+        else if (!inRoom(end2.at) || !end2.walking) p.Problem("the walk didn't end on the room's floor: " + end2.text);
+        if (Lower(end2.map) != "mirageeditorroom") p.Problem("after the TAS the level is " + end2.map);
+        tas::WithReplay([&](tas::Replay& r) { r = saved; });
+        OnRenderThread([] { gui::visible = true; });
+    }
+
+    // Back to the test level
+    const std::string want = Lower(g_options.map);
+    for (int i = 0; i < static_cast<int>(maps.size()); ++i)
+        if (Lower(maps[static_cast<std::size_t>(i)].file) == want) {
+            loadMap(i, std::min(g_options.checkpoint, static_cast<int>(maps[static_cast<std::size_t>(i)].checkpoints.size())), g_options.map);
+            break;
+        }
+    End(s);
+}
+
 // Time-trial routes (step 13), the milestone: tests/mods/route-test has a route on the Prologue and the same one on
 // map-test's MirageTestMap (a copy of the Prologue). For each, a TAS macro starts at After_Intro and runs forward through
 // the start, the checkpoint and the finish: its first playback records the reference, the second plays back verified
@@ -6162,6 +6280,7 @@ const Named* FeatureList()
         {"Mirage level additions", &TestLevelLayers, false},
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage maps", &TestModMaps, false},
+        {"Mirage editor map", &TestEditorMap, false},
         {"Mirage time trials", &TestTimeTrials, false},
 #endif
         {"Engine script events", &TestEngineScriptEvents, false},
