@@ -46,7 +46,9 @@ namespace mirage::crash
 	// is dumped (from inside).
 	std::wstring WriteReport(const EXCEPTION_POINTERS* ep, const char* title, bool dump = true);
 
-	std::filesystem::path Folder();				// mirage\crashlogs
+	// mirage\crashlogs: crash-<time>.miragecrashlog (plain text) and .dmp; at the next start the reports move to
+	// crashlogs\.old as .miragecrashlog.zst (zstd, like logs\.old), the newest 100 kept. List and ReadReport read both.
+	std::filesystem::path Folder();
 
 	struct Report
 	{
@@ -54,8 +56,8 @@ namespace mirage::crash
 		std::string summary;					// The first lines (what, where, suspected)
 		std::filesystem::file_time_type time;
 	};
-	std::vector<Report> List(std::size_t max = 20);	// Newest first
+	std::vector<Report> List(std::size_t max = 20);	// Newest first, archived ones too
 	// The newest crash report from a session before this one that hasn't been shown yet (and marks it shown)
 	bool TakeUnseen(Report& out);
-	std::string ReadReport(const std::filesystem::path& path, std::size_t maxBytes = 64 * 1024);
+	std::string ReadReport(const std::filesystem::path& path, std::size_t maxBytes = 64 * 1024);	// Plain or .zst
 }

@@ -61,6 +61,7 @@ add_executable(mirage_tests
         ${CMAKE_SOURCE_DIR}/loader/src/core/cache_sched.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/memory_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/signature_cache.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/core/compressed_file.cpp     # logs/.old and crashlogs/.old (test_infra.cpp)
         ${CMAKE_SOURCE_DIR}/loader/src/core/address_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/string_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/hardware.cpp
@@ -69,7 +70,7 @@ target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src $
         ${CMAKE_BINARY_DIR}/generated)   # symbols_toml.inc
 target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(mirage_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
+target_link_libraries(mirage_tests PRIVATE GTest::gtest_main zstd_compress nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
 if(MSVC)
   target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
 endif()

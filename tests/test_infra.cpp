@@ -1,4 +1,5 @@
 // The event bus, background tasks, the resource cache and the config cache.
+#include "core/compressed_file.h"
 #include "core/events.h"
 #include "core/resource_cache.h"
 #include "core/tasks.h"
@@ -258,4 +259,28 @@ TEST(AdaptiveScheduler, ExpensiveEntriesGiveWayFirst)
     EXPECT_DOUBLE_EQ(sched::AdaptiveScale(3.0, 300.0, 100.0, 8.0), 7.0);
     EXPECT_DOUBLE_EQ(sched::AdaptiveScale(3.0, 100000.0, 100.0, 8.0), 8.0);   // Capped
     EXPECT_DOUBLE_EQ(sched::AdaptiveScale(3.0, 0.0, 0.0, 8.0), 1.5);          // No history yet: treated as cheap
+}
+
+// logs/.old and crashlogs/.old (core/compressed_file.h): a report compressed and read back is the same text, a plain one
+// reads as itself, and maxBytes cuts both
+TEST(CompressedFile, RoundTrip)
+{
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "mirage_zfile_test";
+    fs::create_directories(dir);
+    const fs::path plain = dir / "crash-20261115-020101.miragecrashlog";
+    std::string text;
+    for (int i = 0; i < 2000; ++i) text += "line " + std::to_string(i) + ": What: EXCEPTION_ACCESS_VIOLATION\n";
+    std::ofstream(plain, std::ios::binary | std::ios::trunc) << text;
+    const fs::path packed = dir / "crash-20261115-020101.miragecrashlog.zst";
+    std::string error;
+    ASSERT_TRUE(zfile::Compress(plain, packed, 9, error)) << error;
+    EXPECT_LT(fs::file_size(packed), fs::file_size(plain) / 4);
+    EXPECT_FALSE(fs::exists(dir / "crash-20261115-020101.miragecrashlog.zst.tmp"));
+    EXPECT_EQ(zfile::ReadText(packed, 1 << 20), text);
+    EXPECT_EQ(zfile::ReadText(plain, 1 << 20), text);
+    EXPECT_EQ(zfile::ReadText(packed, 100), text.substr(0, 100));
+    EXPECT_EQ(zfile::ReadText(plain, 100), text.substr(0, 100));
+    EXPECT_EQ(zfile::ReadText(dir / "missing.zst", 100), "");
+    fs::remove_all(dir);
 }

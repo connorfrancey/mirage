@@ -1,6 +1,7 @@
 #include "runtime/crash_reporter.h"
 
 #include "build_info.h"
+#include "core/compressed_file.h"
 #include "paths.h"
 #include "runtime/mem/manager.h"
 #include "runtime/mods.h"
@@ -10,6 +11,7 @@
 #include "crashhandler/window.h"
 #include "game/game.h"
 #include "hooks.h"
+#include <fmt/format.h>
 #include <spdlog/spdlog.h>
 
 #include <DbgHelp.h>
@@ -29,6 +31,7 @@ namespace mirage::crash
 	namespace
 	{
 		namespace fs = std::filesystem;
+		constexpr const wchar_t* kReportExtension = L".miragecrashlog";		// Plain text; archived as .miragecrashlog.zst
 
 		using MiniDumpFn = BOOL(WINAPI*)(HANDLE, DWORD, HANDLE, MINIDUMP_TYPE, PMINIDUMP_EXCEPTION_INFORMATION,
 										  PMINIDUMP_USER_STREAM_INFORMATION, PMINIDUMP_CALLBACK_INFORMATION);
@@ -325,7 +328,7 @@ namespace mirage::crash
 			wchar_t base[MAX_PATH];
 			std::swprintf(base, MAX_PATH, L"%s\\%s-%04d%02d%02d-%02d%02d%02d", g_folder, job.fatal ? L"crash" : L"report", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
 						  t.wSecond);
-			std::swprintf(job.reportPath, MAX_PATH, L"%s.txt", base);
+			std::swprintf(job.reportPath, MAX_PATH, L"%s%s", base, kReportExtension);
 
 			if (!Guarded(&EssentialsOfCurrent)) Put("\n(the report stopped early: reading the crash failed)\n");
 			// Written now, so the essentials are on disk whatever happens next
@@ -495,6 +498,59 @@ namespace mirage::crash
 
 		std::filesystem::path FolderPath() { return paths::Dir() / "crashlogs"; }
 		std::filesystem::path SeenMarker() { return FolderPath() / "last-shown.txt"; }
+		constexpr std::size_t kKeepOld = 100;		// Archived reports kept in crashlogs/.old
+
+		// A report's name without its extensions ("crash-20261115-020101"): the same before and after archiving
+		std::string KeyOf(const fs::path& p)
+		{
+			const std::string name = p.filename().string();
+			return name.substr(0, name.find('.'));
+		}
+		bool IsReport(const fs::path& p)
+		{
+			const std::string name = p.filename().string();
+			const bool ours = name.starts_with("crash-") || name.starts_with("report-") || name.starts_with("hang-");
+			const bool current = name.ends_with(".miragecrashlog") || name.ends_with(".miragecrashlog.zst");
+			const bool legacy = name.ends_with(".txt");		// Before .miragecrashlog
+			return ours && (current || legacy);
+		}
+
+		// The reports of earlier sessions, zstd-compressed into crashlogs/.old like the logs (logs/.old): the newest
+		// kKeepOld kept. Minidumps stay where they are (tens of MB each: compressing them would hold up the start).
+		void ArchiveOld()
+		{
+			std::error_code ec;
+			const fs::path folder = FolderPath(), old = folder / ".old";
+			std::vector<fs::path> reports;
+			for (const auto& e : fs::directory_iterator(folder, ec))
+				if (e.is_regular_file(ec) && IsReport(e.path()) && e.path().extension() != ".zst") reports.push_back(e.path());
+			if (!reports.empty()) fs::create_directories(old, ec);
+			int archived = 0;
+			for (const fs::path& r : reports) {
+				fs::path dst = old / (KeyOf(r) + std::string(".miragecrashlog.zst"));
+				for (int n = 2; fs::exists(dst, ec); ++n) dst = old / (KeyOf(r) + "-" + std::to_string(n) + ".miragecrashlog.zst");
+				std::string error;
+				if (fs::file_size(r, ec) == 0 || zfile::Compress(r, dst, 9, error)) {
+					fs::remove(r, ec);
+					++archived;
+				} else {
+					spdlog::warn("Crash reporter: could not archive {}: {}", r.filename().string(), error);
+				}
+			}
+			std::vector<fs::path> kept;
+			for (const auto& e : fs::directory_iterator(old, ec))
+				if (e.path().extension() == ".zst") kept.push_back(e.path());
+			int removed = 0;
+			if (kept.size() > kKeepOld) {
+				std::sort(kept.begin(), kept.end(), [&](const fs::path& a, const fs::path& b) {
+					return fs::last_write_time(a, ec) < fs::last_write_time(b, ec);
+				});
+				for (std::size_t i = 0; i < kept.size() - kKeepOld; ++i) removed += fs::remove(kept[i], ec) ? 1 : 0;
+			}
+			if (archived || removed)
+				spdlog::info("Crash reporter: {} earlier report(s) compressed into crashlogs\\.old{}", archived,
+							 removed ? fmt::format(", {} oldest removed", removed) : std::string());
+		}
 	}
 
 	void Install()
@@ -504,6 +560,7 @@ namespace mirage::crash
 						   reinterpret_cast<LPCWSTR>(&Install), &g_self);
 		const std::wstring folder = FolderPath().wstring();
 		wcsncpy_s(g_folder, folder.c_str(), _TRUNCATE);
+		ArchiveOld();
 		WriteDumper();
 		g_jobReady = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 		g_jobDone = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -573,21 +630,17 @@ namespace mirage::crash
 
 	std::filesystem::path Folder() { return FolderPath(); }
 
-	std::string ReadReport(const fs::path& path, std::size_t maxBytes)
-	{
-		std::ifstream in(path, std::ios::binary);
-		std::string text(maxBytes, '\0');
-		in.read(text.data(), static_cast<std::streamsize>(maxBytes));
-		text.resize(static_cast<std::size_t>(in.gcount()));
-		return text;
-	}
+	std::string ReadReport(const fs::path& path, std::size_t maxBytes) { return zfile::ReadText(path, maxBytes); }
 
 	std::vector<Report> List(std::size_t max)
 	{
 		std::vector<Report> out;
 		std::error_code ec;
-		for (const auto& e : fs::directory_iterator(FolderPath(), ec)) {
-			if (e.path().extension() != ".txt" || e.path().filename().string().rfind("crash-", 0) != 0) continue;
+		std::vector<fs::directory_entry> found;
+		for (const fs::path& dir : {FolderPath(), FolderPath() / ".old"})
+			for (const auto& e : fs::directory_iterator(dir, ec)) found.push_back(e);
+		for (const auto& e : found) {
+			if (!IsReport(e.path()) || !e.path().filename().string().starts_with("crash-")) continue;
 			Report r;
 			r.path = e.path();
 			r.time = e.last_write_time(ec);
@@ -609,7 +662,7 @@ namespace mirage::crash
 	{
 		const auto all = List(1);
 		if (all.empty()) return false;
-		const std::string name = all[0].path.filename().string();
+		const std::string name = KeyOf(all[0].path);		// Archived since it was written: the same report
 		std::string seen;
 		{
 			std::ifstream in(SeenMarker());

@@ -1,6 +1,7 @@
 #include "log.h"
 #include "build_info.h"
 #include "paths.h"
+#include "core/compressed_file.h"
 
 #include <spdlog/spdlog.h>
 #include <spdlog/details/null_mutex.h>
@@ -127,27 +128,11 @@ namespace {
         return "mirage_" + stamp + "_b" + (build.empty() ? "0" : build) + "_" + (magic.empty() ? "unknown" : magic);
     }
 
-    bool Compress(const fs::path& src, const fs::path& dst, std::string& error)
-    {
-        std::ifstream in(src, std::ios::binary);
-        const std::string data((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        if (!in && !in.eof()) { error = "cannot read it"; return false; }
+    bool Compress(const fs::path& src, const fs::path& dst, std::string& error) { return zfile::Compress(src, dst, kZstdLevel, error); }
+}
 
-        std::vector<char> out(ZSTD_compressBound(data.size()));
-        const std::size_t size = ZSTD_compress(out.data(), out.size(), data.data(), data.size(), kZstdLevel);
-        if (ZSTD_isError(size)) { error = ZSTD_getErrorName(size); return false; }
-
-        const fs::path tmp = dst.string() + ".tmp";
-        {
-            std::ofstream o(tmp, std::ios::binary | std::ios::trunc);
-            o.write(out.data(), static_cast<std::streamsize>(size));
-            if (!o) { error = "cannot write " + tmp.string(); return false; }
-        }
-        std::error_code ec;
-        fs::rename(tmp, dst, ec);
-        if (ec) { fs::remove(tmp, ec); error = "cannot rename to " + dst.string(); return false; }
-        return true;
-    }
+namespace {
+    namespace fs = std::filesystem;
 
     // Moves the previous session's log (and a mirage.log left next to the DLL by older builds) into logs/.old.
     // Returns what happened, logged once the logger exists.

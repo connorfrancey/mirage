@@ -8,7 +8,7 @@
 //   - takes one sample of the stuck thread: suspended for microseconds to read its registers and copy its stack into
 //     a fixed buffer (nothing is allocated or logged while it is suspended: it may hold the heap's lock), then resumed
 //   - logs where it is (module+offset of the instruction and the return addresses on its stack), writes a hang report
-//     to mirage\crashlogs\hang-*.txt, publishes events::HangDetected and shows a notification with the failsafe key
+//     to mirage\crashlogs\report-*.miragecrashlog, publishes events::HangDetected and shows a notification with the failsafe key
 //   - when progress resumes: logs how long it lasted and publishes events::HangRecovered
 // It never kills, resumes or changes the game: it only watches and reports.
 #include <cstdint>

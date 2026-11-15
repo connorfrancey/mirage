@@ -13,6 +13,7 @@
 #include <shellapi.h>
 
 #include <chrono>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -20,6 +21,18 @@ namespace {
 void OpenPath(const std::filesystem::path& p)
 {
     ShellExecuteW(nullptr, L"open", p.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+// A report in Notepad (.miragecrashlog has no program of its own); an archived one (.zst) as a plain copy in %TEMP%
+void OpenReport(const std::filesystem::path& p)
+{
+    std::filesystem::path file = p;
+    if (p.extension() == ".zst") {
+        file = std::filesystem::temp_directory_path() / p.stem();      // "crash-....miragecrashlog"
+        std::ofstream(file, std::ios::binary | std::ios::trunc) << mirage::crash::ReadReport(p, 16 * 1024 * 1024);
+    }
+    const std::wstring args = L"\"" + file.wstring() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"notepad.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
 class CrashReporter final : public Module {
@@ -79,7 +92,7 @@ public:
         if (ImGui::TreeNode("Crash reports")) {
             for (const auto& r : reports_) {
                 ImGui::PushID(r.path.string().c_str());
-                if (ImGui::SmallButton("Open")) OpenPath(r.path);
+                if (ImGui::SmallButton("Open")) OpenReport(r.path);
                 ImGui::SameLine();
                 ImGui::TextUnformatted(r.path.filename().string().c_str());
                 ImGui::Indent();
@@ -113,7 +126,7 @@ private:
             ImGui::TextWrapped("Mirror's Edge crashed in the last session. The report says:");
             ImGui::Separator();
             ImGui::TextUnformatted(last_.summary.c_str());
-            if (ImGui::Button("Open the report")) OpenPath(last_.path);
+            if (ImGui::Button("Open the report")) OpenReport(last_.path);
             ImGui::SameLine();
             if (ImGui::Button("Open the folder")) OpenPath(mirage::crash::Folder());
             ImGui::SameLine();

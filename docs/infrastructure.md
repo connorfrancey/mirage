@@ -37,8 +37,10 @@ disk first; then the module list, the mods loaded and the memory status, each gu
 minidump (from that thread, as dbghelp advises). At most 20 s, then the process ends whatever happened. Crashes in a
 mod's guarded call are not fatal and never come here: the runtime stops the mod.
 
-Files: `crash-<time>.txt/.dmp` for fatal crashes (shown at the next start), `report-<time>.txt` for reports that didn't
-end the game (hangs, the self-test).
+Files: `crash-<time>.miragecrashlog` (plain text) and `.dmp` for fatal crashes (shown at the next start),
+`report-<time>.miragecrashlog` for reports that didn't end the game (hangs, the self-test). At the next start the
+reports are zstd-compressed into `crashlogs\.old\<name>.miragecrashlog.zst` (like `logs\.old`), the newest 100 kept;
+the menu lists and shows archived ones too. Minidumps stay uncompressed (compressing tens of MB would hold up the start).
 
 ## Hang detector
 
