@@ -6,6 +6,7 @@
 #include "runtime/symbols.h"
 #include "sdk/SDK.hpp"
 
+#include <fmt/format.h>
 #include <spdlog/spdlog.h>
 
 #include <cmath>
@@ -49,6 +50,16 @@ namespace mirage::physics
 		static_assert(offsetof(CheckResult, component) == 0x30 && offsetof(CheckResult, levelIndex) == 0x40);
 		constexpr std::uint32_t kTraceWorld = 0x2086;		// What Actor.Trace asks for without actors
 		constexpr std::uint32_t kTraceActorsToo = 0x20BF;	// ... and with them
+		constexpr std::uint32_t kTraceMaterial = 0x800;		// ... and with a TraceHitInfo (the material hit)
+
+		// UObject::StaticConstructObject (runtime/symbols.toml): a setup or instance object a joint needs
+		Classes::UObject* Construct(Classes::UClass* cls, Classes::UObject* outer)
+		{
+			using Fn = Classes::UObject*(__cdecl*)(Classes::UClass*, Classes::UObject*, int, int, std::uint32_t, std::uint32_t,
+												   Classes::UObject*, void*, Classes::UObject*, void*);
+			auto construct = reinterpret_cast<Fn>(symbols::Find("StaticConstructObject"));
+			return construct ? construct(cls, outer, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr) : nullptr;
+		}
 
 		// The engine's UWorld: the persistent level's outer (WorldInfo -> PersistentLevel -> TheWorld)
 		void* World()
@@ -212,7 +223,9 @@ namespace mirage::physics
 		r.item = -1;
 		r.levelIndex = -1;
 		const FVector s = V(start), e = V(end), x = extent ? V(*extent) : FVector{};
-		const int nothing = check(world, &r, ignore, &e, &s, (flags & kActors) ? kTraceActorsToo : kTraceWorld, &x, nullptr);
+		std::uint32_t traceFlags = (flags & kActors) ? kTraceActorsToo : kTraceWorld;
+		if (flags & kMaterial) traceFlags |= kTraceMaterial;
+		const int nothing = check(world, &r, ignore, &e, &s, traceFlags, &x, nullptr);
 		out.hit = !nothing && r.time < 1.f;
 		if (!out.hit) return true;
 		out.actor = r.actor;
@@ -221,7 +234,55 @@ namespace mirage::physics
 		out.normal = V(r.normal);
 		out.time = r.time;
 		if (r.bone.Index > 0) out.bone = r.bone.GetName();
+		if (flags & kMaterial) {
+			out.material = static_cast<Classes::UObject*>(r.material);
+			out.physMaterial = static_cast<Classes::UObject*>(r.physMaterial);
+			// No physical material on the hit itself: the material's (what the engine's DetermineCorrectPhysicalMaterial does)
+			if (!out.physMaterial && out.material && out.material->IsA(Classes::UMaterialInterface::StaticClass()))
+				out.physMaterial = static_cast<Classes::UMaterialInterface*>(out.material)->GetPhysicalMaterial();
+		}
 		return true;
+	}
+
+	Classes::AActor* Joint(Classes::AActor* a, Classes::AActor* b, const Vec& location, int pitch, int yaw, int roll, JointKind kind,
+						   float breakThreshold, std::string* error)
+	{
+		auto fail = [&](const char* why) -> Classes::AActor* {
+			if (error) *error = why;
+			return nullptr;
+		};
+		if (!BodyComponent(a)) return fail("the first actor has no rigid body");
+		if (b && !BodyComponent(b)) return fail("the second actor has no rigid body");
+		auto* pawn = game::Pawn();
+		if (!pawn) return fail("no player to spawn from");
+		Classes::AActor* spawned = pawn->Spawn(Classes::ARB_ConstraintActorSpawnable::StaticClass(), nullptr, Classes::FName{}, V(location),
+											   Classes::FRotator{pitch, yaw, roll}, nullptr, true);
+		if (!spawned) return fail("the engine didn't spawn the joint");
+		auto* j = static_cast<Classes::ARB_ConstraintActorSpawnable*>(spawned);
+		// Its frames from where the joint is (not from what the setup was saved with)
+		j->bUpdateActor1RefFrame = true;
+		j->bUpdateActor2RefFrame = true;
+		Classes::UClass* setupClass = kind == kHinge ? Classes::URB_HingeSetup::StaticClass() : Classes::URB_BSJointSetup::StaticClass();
+		if (!j->ConstraintSetup || !j->ConstraintSetup->IsA(setupClass))
+			j->ConstraintSetup = static_cast<Classes::URB_ConstraintSetup*>(Construct(setupClass, j));
+		if (!j->ConstraintInstance)
+			j->ConstraintInstance = static_cast<Classes::URB_ConstraintInstance*>(Construct(Classes::URB_ConstraintInstance::StaticClass(), j));
+		if (!j->ConstraintSetup || !j->ConstraintInstance) {
+			j->Destroy();
+			return fail("the joint's setup couldn't be made (StaticConstructObject)");
+		}
+		j->InitConstraint(a, b, Classes::FName{}, Classes::FName{}, breakThreshold);
+		BodyComponent(a)->WakeRigidBody(Classes::FName{});
+		if (b) BodyComponent(b)->WakeRigidBody(Classes::FName{});
+		return j;
+	}
+
+	void RemoveJoint(Classes::AActor* joint)
+	{
+		if (!joint || joint->bDeleteMe || !joint->IsA(Classes::ARB_ConstraintActor::StaticClass())) return;
+		auto* j = static_cast<Classes::ARB_ConstraintActor*>(joint);
+		j->TermConstraint();
+		j->Destroy();
 	}
 
 	std::vector<Classes::AActor*> Overlap(const Vec& center, float radius, const void* cls)

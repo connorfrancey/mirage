@@ -1184,7 +1184,43 @@ namespace mirage::mods
 			Put(out->normal, h.normal);
 			out->time = h.time;
 			std::snprintf(out->bone, sizeof out->bone, "%s", h.bone.c_str());
+			out->material = Handle(h.material);
+			out->phys_material = Handle(h.physMaterial);
 			return 1;
+		}
+
+		MirageObject* MIRAGE_CALL PhysicsJoint(MirageMod* mod, MirageObject* a, MirageObject* b, const float* location, const int32_t* rotation,
+											   int32_t kind, float breakThreshold)
+		{
+			if (!mod || !location) return nullptr;
+			if (!game::IsGameThread()) {
+				PhysicsFail(mod, "physics_joint", "only on the game thread");
+				return nullptr;
+			}
+			Classes::AActor* first = ActorOf(a);
+			Classes::AActor* second = b ? ActorOf(b) : nullptr;
+			if (!first || (b && !second)) {
+				PhysicsFail(mod, "physics_joint", "not an actor in play");
+				return nullptr;
+			}
+			if (kind != MIRAGE_JOINT_BALL && kind != MIRAGE_JOINT_HINGE) {
+				PhysicsFail(mod, "physics_joint", "no such kind of joint");
+				return nullptr;
+			}
+			std::string why;
+			Classes::AActor* j = physics::Joint(first, second, VecOf(location), rotation ? rotation[0] : 0, rotation ? rotation[1] : 0,
+												rotation ? rotation[2] : 0, static_cast<physics::JointKind>(kind), breakThreshold, &why);
+			if (!j) {
+				PhysicsFail(mod, "physics_joint", why);
+				return nullptr;
+			}
+			MirageObject* h = Handle(j);
+			RecordEdit(mod, "joint " + j->GetName(), [hj = HandleOf(h)] {
+				Classes::AActor* x = ActorOf(HandleObject(&hj));
+				if (x) physics::RemoveJoint(x);
+				return x != nullptr;
+			});
+			return h;
 		}
 
 		int32_t MIRAGE_CALL WorldOverlap(const float* center, float radius, const char* className, MirageObject** out, int32_t capacity)

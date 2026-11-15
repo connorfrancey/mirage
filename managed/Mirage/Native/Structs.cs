@@ -68,6 +68,7 @@ namespace Mirage.Native
         public fixed float normal[3];
         public float time;
         public fixed byte bone[64];
+        public void* material, phys_material;
     }
 
     /// <summary>What the player is doing (api.h MirageMovement)</summary>

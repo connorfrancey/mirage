@@ -246,8 +246,15 @@ typedef struct MirageHit {
     float normal[3];
     float time;                 /* Where along the trace, 0..1 */
     char bone[64];              /* A skeletal mesh's bone, else "" */
+    MirageObject* material;     /* With MIRAGE_TRACE_MATERIAL: the material hit (a MaterialInterface) when the engine
+                                   reports one (BSP; static meshes often don't), else NULL */
+    MirageObject* phys_material; /* ... and the PhysicalMaterial hit (the hit's, else the material's), else NULL */
 } MirageHit;
 #define MIRAGE_TRACE_ACTORS 1u  /* world_trace: actors too (else only the world's geometry) */
+#define MIRAGE_TRACE_MATERIAL 2u /* world_trace: the material and physical material hit (a little slower) */
+/* physics_joint */
+#define MIRAGE_JOINT_BALL 0     /* Turns freely about the point */
+#define MIRAGE_JOINT_HINGE 1    /* Turns only about the joint's X axis (its rotation's forward) */
 /* physics_collision_get / _set */
 #define MIRAGE_COLLIDE_ACTORS 1u     /* bCollideActors: touches (triggers, overlaps) */
 #define MIRAGE_BLOCK_ACTORS 2u       /* bBlockActors: blocks pawns and actors */
@@ -1005,8 +1012,15 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* world_trace)(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags,
                                       MirageObject* ignore, MirageHit* out);
     /* Actors in play whose collision bounds touch the sphere (bounds, not shapes), of `class_name` or a subclass (NULL
-     * or "": any). Fills up to capacity, returns how many there are. */
+     * or "": any), as of this tick (an actor spawned now is found from the next). Fills up to capacity, returns how many
+     * there are. */
     int32_t(MIRAGE_CALL* world_overlap)(const float* center, float radius, const char* class_name, MirageObject** out, int32_t capacity);
+    /* A joint between two bodies (`b` NULL: `a` held to the world) at `location`, `rotation` 3 ints (NULL: none; a
+     * hinge turns about its X axis), MIRAGE_JOINT_BALL or _HINGE, breaking under `break_threshold` (0: never): the
+     * engine's RB_ConstraintActorSpawnable and InitConstraint. Removed on revert and unload. NULL when it can't (the log
+     * says why). */
+    MirageObject*(MIRAGE_CALL* physics_joint)(MirageMod* mod, MirageObject* a, MirageObject* b, const float* location,
+                                              const int32_t* rotation, int32_t kind, float break_threshold);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

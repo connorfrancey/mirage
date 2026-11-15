@@ -745,6 +745,11 @@ bool TestGame()
     return s.ok;
 }
 
+// Where the level step left the player (a step that needs room around the player goes back there: earlier steps can
+// reach later checkpoints, so a checkpoint restart may be somewhere else)
+Classes::FVector g_levelStart{};
+bool g_haveLevelStart = false;
+
 bool TestLevel()
 {
     if (g_options.keepLevel) {
@@ -787,6 +792,12 @@ bool TestLevel()
         p.Problem("30 s after loading, the player can't be moved: " + why + " (pick another checkpoint)");
     }
     s.notes.push_back(levels::LastMessage());
+    OnGameThread([] {
+        if (auto* pawn = game::Pawn()) {
+            g_levelStart = pawn->Location;
+            g_haveLevelStart = true;
+        }
+    });
     p.Check(1, true);
     End(s);
     return s.ok;
@@ -2444,6 +2455,18 @@ void TestPhysics()
         return;
     }
     if (!mirage::physics::TraceAvailable()) p.Problem("UWorld::SingleLineCheck wasn't found (runtime/symbols.toml)");
+    // From where the level started (a checkpoint restart, then back to that spot: earlier steps may have reached a
+    // later checkpoint): the mod finds room for its props around the player there
+    if (!RestartAndWait()) p.Problem("no new player came after the checkpoint restart");
+    if (g_haveLevelStart) {
+        OnGameThread([] {
+            if (auto* pawn = game::Pawn()) {
+                pawn->SetLocation(g_levelStart);
+                pawn->Velocity = Classes::FVector{};
+            }
+        });
+        WaitGrounded();
+    }
 
     // The mesh: a KActor's (made to be a prop), else the smallest-but-not-tiny one with collision in the level
     std::string mesh;
@@ -2487,6 +2510,7 @@ void TestPhysics()
     else if (PhysicsShared("done").empty()) p.Problem("the mod didn't finish (it shared: spawned '" + PhysicsShared("spawned") + "')");
     s.notes.push_back(fmt::format("prop of {}: simulated {}, dropped {:.0f} in {:.2f} s", mesh, PhysicsShared("simulated"),
                                   num("dropped"), num("fall_time")));
+    s.notes.push_back("where: " + PhysicsShared("where"));
     if (!yes("simulated")) p.Problem("the prop isn't simulated (PHYS_RigidBody with a body)");
     if (num("dropped") < 50.f) p.Problem(fmt::format("the prop dropped {:.0f} units: it didn't fall", num("dropped")));
 
@@ -2517,6 +2541,17 @@ void TestPhysics()
     if (PhysicsShared("block_after") != "false") p.Problem("set_collision didn't take block_actors away");
     if (!yes("overlap")) p.Problem("the overlap around the prop didn't find it");
     if (!yes("trace_hit_prop")) p.Problem("a downward trace with actors didn't hit the prop");
+
+    // Joints: each prop hangs about 100 below its anchor (without the joint it drops ~250 to the floor)
+    s.notes.push_back(fmt::format("joints: ball {} holds its prop {:.0f} from the anchor (dropped {:.0f}), hinge {} {:.0f} (dropped {:.0f}); "
+                                  "the floor under the player: material {}, physical material {}", PhysicsShared("joint_ball"),
+                                  num("hang_ball"), num("drop_ball"), PhysicsShared("joint_hinge"), num("hang_hinge"), num("drop_hinge"),
+                                  PhysicsShared("floor_material"), PhysicsShared("floor_physmat")));
+    for (const char* kind : {"ball", "hinge"}) {
+        const float hang = num((std::string("hang_") + kind).c_str());
+        if (hang < 50.f || hang > 150.f) p.Problem(fmt::format("the {} joint's prop is {:.0f} from its anchor, not about 100", kind, hang));
+    }
+    if (PhysicsShared("floor_physmat") == "none") p.Problem("a material trace onto the floor reported no physical material");
 
     // 500 traces in one tick: lines down from a ring around the player
     double ms = -1.0;

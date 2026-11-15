@@ -16,6 +16,7 @@
 namespace Classes
 {
 	class AActor;
+	class UObject;
 	class UPrimitiveComponent;
 	class UStaticMesh;
 }
@@ -62,6 +63,14 @@ namespace mirage::physics
 		bool collideActors = false, blockActors = false, blockRigidBody = false;
 	};
 	Collision GetCollision(Classes::AActor* actor);
+
+	// A joint between two bodies (`b` null: `a` held to the world) at `location`: kBall turns freely about the point,
+	// kHinge only about the joint's X axis (its rotation's forward). An RB_ConstraintActorSpawnable, made by the engine's
+	// InitConstraint. `breakThreshold` 0: never breaks. nullptr and `error` if not.
+	enum JointKind { kBall = 0, kHinge = 1 };
+	Classes::AActor* Joint(Classes::AActor* a, Classes::AActor* b, const Vec& location, int pitch, int yaw, int roll, JointKind kind,
+						   float breakThreshold, std::string* error);
+	void RemoveJoint(Classes::AActor* joint);
 	void SetCollision(Classes::AActor* actor, const Collision& c);
 
 	// ---- Queries -------------------------------------------------------------------------------------------------------
@@ -73,10 +82,13 @@ namespace mirage::physics
 		Vec location, normal;
 		float time = 1.f;								// Where along the trace, 0..1
 		std::string bone;								// A skeletal mesh's bone, else ""
+		Classes::UObject* material = nullptr;			// With kMaterial: the material hit (UMaterialInterface)
+		Classes::UObject* physMaterial = nullptr;		// ... and its physical material (the hit's, else the material's)
 	};
 	enum TraceFlags : std::uint32_t
 	{
 		kActors = 1,			// Actors too (else the world's geometry: BSP, static meshes, terrain)
+		kMaterial = 2,			// The material and physical material hit (TRACE_Material: a little slower)
 	};
 	// A line (extent null or zero) or a box swept along it (extent: half sizes). `ignore`: an actor the trace doesn't hit.
 	// False if the engine's line check isn't known (the log says why).
@@ -84,6 +96,6 @@ namespace mirage::physics
 	bool TraceAvailable();
 
 	// Actors in play whose collision bounds touch the sphere (bounds, not shapes: a box around a ramp overlaps more than
-	// the ramp does), of `cls` or a subclass (null: any)
+	// the ramp does), of `cls` or a subclass (null: any). The actors as of this tick: one spawned now is found from the next.
 	std::vector<Classes::AActor*> Overlap(const Vec& center, float radius, const void* cls);
 }

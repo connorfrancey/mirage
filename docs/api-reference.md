@@ -42,7 +42,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Mod tests](#mod-tests) (1)
 - [The player and movement](#the-player-and-movement) (1)
 - [Kismet](#kismet) (8)
-- [Physics and world queries](#physics-and-world-queries) (9)
+- [Physics and world queries](#physics-and-world-queries) (10)
 - [Types](#types)
 
 ## Basics
@@ -1357,7 +1357,15 @@ A line trace from `start` to `end`, or a box swept along it (`extent`: half size
 int32_t(MIRAGE_CALL* world_overlap)(const float* center, float radius, const char* class_name, MirageObject** out, int32_t capacity);
 ```
 
-Actors in play whose collision bounds touch the sphere (bounds, not shapes), of `class_name` or a subclass (NULL or "": any). Fills up to capacity, returns how many there are.
+Actors in play whose collision bounds touch the sphere (bounds, not shapes), of `class_name` or a subclass (NULL or "": any), as of this tick (an actor spawned now is found from the next). Fills up to capacity, returns how many there are.
+
+### `physics_joint`
+
+```c
+MirageObject*(MIRAGE_CALL* physics_joint)(MirageMod* mod, MirageObject* a, MirageObject* b, const float* location, const int32_t* rotation, int32_t kind, float break_threshold);
+```
+
+A joint between two bodies (`b` NULL: `a` held to the world) at `location`, `rotation` 3 ints (NULL: none; a hinge turns about its X axis), MIRAGE_JOINT_BALL or _HINGE, breaking under `break_threshold` (0: never): the engine's RB_ConstraintActorSpawnable and InitConstraint. Removed on revert and unload. NULL when it can't (the log says why).
 
 ## Types
 
@@ -1538,6 +1546,9 @@ typedef struct MirageHit {
     float normal[3];
     float time;                 /* Where along the trace, 0..1 */
     char bone[64];              /* A skeletal mesh's bone, else "" */
+    MirageObject* material;     /* With MIRAGE_TRACE_MATERIAL: the material hit (a MaterialInterface) when the engine
+                                   reports one (BSP; static meshes often don't), else NULL */
+    MirageObject* phys_material; /* ... and the PhysicalMaterial hit (the hit's, else the material's), else NULL */
 } MirageHit;
 ```
 

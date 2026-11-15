@@ -1,0 +1,5 @@
+# Self-test (step 6 of the next ten steps): the physics API from C#, as a mod test (Mod.Test, run by the self-test step
+# "Mod tests"): a prop spawned and found again, a joint, traces with a material, and the revert taking them away
+id = "physics-cs"
+version = "1.0.0"
+mirage = "^0.1"

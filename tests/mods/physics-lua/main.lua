@@ -15,6 +15,15 @@ local prop, phase, clock, mark = nil, "idle", 0, {}
 local AIR_PUSH = { x = 5000, y = 0, z = 0 }
 
 local function len(v) return math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z) end
+
+-- Room around a point: no world geometry within 80 units along the six axes, and no prop near (traces with actors
+-- would also hit trigger actors, which don't get in a prop's way)
+local function roomy(p)
+    for _, d in ipairs({ { 80, 0, 0 }, { -80, 0, 0 }, { 0, 80, 0 }, { 0, -80, 0 }, { 0, 0, 80 }, { 0, 0, -80 } }) do
+        if mirage.trace(p, { x = p.x + d[1], y = p.y + d[2], z = p.z + d[3] }) then return false end
+    end
+    return #mirage.overlap(p, 80, "KActor") == 0
+end
 local function minus(a, b) return { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z } end
 local function share(k, v) mirage.share(k, tostring(v)) end
 local function go(next) phase, clock = next, 0 end
@@ -49,6 +58,7 @@ local function step(dt)
         if mesh == "" then return end
         local at = spot()
         if not at then share("problem", "no clear spot in front of the player") return go("done") end
+        mark.spawnAt = at
         prop = mirage.spawn_prop(mesh, at)
         if not prop then share("problem", "spawn_prop failed (the log says why)") return go("done") end
         b = mirage.body(prop)
@@ -67,7 +77,7 @@ local function step(dt)
         -- On the floor (friction): only that it moves
         if not mark.pushed then
             mark.pushed = true
-            mirage.impulse(prop, { x = 20000, y = 0, z = 0 })
+            mirage.impulse(prop, AIR_PUSH)       -- Gentle: a fast slide ends against a wall
         elseif not mark.vfloor then
             mark.vfloor = len(b.velocity)
             share("speed_floor", mark.vfloor)
@@ -78,8 +88,17 @@ local function step(dt)
         -- Gravity off, lifted 150 and still: an impulse's speed is exactly impulse / mass here (no floor, no friction)
         if not mark.floated then
             mark.floated = true
-            mark.zf = b.location.z + 150
-            mirage.set_body(prop, { gravity_scale = 0, location = { x = b.location.x, y = b.location.y, z = mark.zf },
+            -- Lifted to a spot with room around it
+            local lift = { x = b.location.x, y = b.location.y, z = b.location.z + 150 }
+            for _, o in ipairs({ { 0, 0 }, { 0, 150 }, { 0, -150 }, { -150, 0 }, { 150, 0 } }) do
+                local c = { x = b.location.x + o[1], y = b.location.y + o[2], z = b.location.z + 150 }
+                if roomy(c) then lift = c break end
+            end
+            mark.zf = lift.z
+            share("where", string.format("player %.0f %.0f %.0f, spawn %.0f %.0f %.0f, lifted to %.0f %.0f %.0f (room: %s)",
+                mirage.body(mirage.pawn()).location.x, mirage.body(mirage.pawn()).location.y, mirage.body(mirage.pawn()).location.z,
+                mark.spawnAt.x, mark.spawnAt.y, mark.spawnAt.z, lift.x, lift.y, lift.z, tostring(roomy(lift))))
+            mirage.set_body(prop, { gravity_scale = 0, location = { x = lift.x, y = lift.y, z = mark.zf },
                                     velocity = { x = 0, y = 0, z = 0 }, angular = { x = 0, y = 0, z = 0 }, awake = true })
         elseif clock > 0.5 and not mark.risen then
             mark.risen = true
@@ -106,11 +125,16 @@ local function step(dt)
             end
             mark.others = mark.others or {}
             if mark.o == nil then
-                -- Each a little higher (clear of the one launched before it), or lower when something is above
-                local at = { x = mark.spot.x, y = mark.spot.y, z = mark.spot.z + 90 * mark.i }
-                if mirage.trace(mark.spot, at, { actors = true, ignore = prop }) then
-                    at = { x = mark.spot.x - 120 * mark.i, y = mark.spot.y, z = mark.spot.z }
+                -- A spot near the first one with room around it (walls, ceilings, the props launched before): each mass
+                -- tries its own side first (the launched ones drift off along x, the slow heavy ones only a little)
+                local tries = { { 0, 160 * mark.i, 0 }, { 0, -160 * mark.i, 0 }, { 0, 0, 100 * mark.i }, { -200 * mark.i, 0, 0 },
+                                { -200 * mark.i, 160 * mark.i, 0 }, { -200 * mark.i, -160 * mark.i, 0 } }
+                local at
+                for _, o in ipairs(tries) do
+                    local c = { x = mark.spot.x + o[1], y = mark.spot.y + o[2], z = mark.spot.z + o[3] }
+                    if roomy(c) then at = c break end
                 end
+                if not at then share("problem", "no room in the air near the first prop for the " .. scale .. "x one") return go("done") end
                 mark.o = mirage.spawn_prop(mirage.shared("selftest", "mesh"), at, nil, scale) or false
                 share("mass_" .. scale, mark.o and mirage.body(mark.o).mass_scale or "not spawned")
                 if mark.o then
@@ -144,13 +168,41 @@ local function step(dt)
             if a == prop then found = true end
         end
         share("overlap", found)
+        -- What the floor under the player is made of
+        local at = mirage.body(mirage.pawn()).location
+        local floor = mirage.trace(at, { x = at.x, y = at.y, z = at.z - 1000 }, { material = true })
+        share("floor_material", floor and floor.material and mirage.name(floor.material) or "none")
+        share("floor_physmat", floor and floor.phys_material and mirage.name(floor.phys_material) or "none")
         local was = mirage.collision(prop)
         mirage.set_collision(prop, { collide_actors = was.collide_actors, block_actors = false, block_rigid_body = was.block_rigid_body })
         local now = mirage.collision(prop)
         share("block_before", was.block_actors)
         share("block_after", now.block_actors)
-        go("done")
-        share("done", 1)
+        go("joint")
+    elseif phase == "joint" then
+        -- A prop on a ball joint and one on a hinge, each 100 below its anchor: they hang there (without the joint they
+        -- would drop about 250 to the floor)
+        if not mark.hung then
+            mark.hung = {}
+            for i, kind in ipairs({ "ball", "hinge" }) do
+                local p = { x = mark.spot.x - 150 * i, y = mark.spot.y, z = mark.spot.z + 100 }
+                local anchor = { x = p.x, y = p.y, z = p.z + 100 }
+                local o = mirage.spawn_prop(mirage.shared("selftest", "mesh"), p)
+                local j = o and mirage.joint(o, nil, anchor, { kind = kind })
+                mark.hung[kind] = { prop = o, anchor = anchor, start = p.z }
+                share("joint_" .. kind, j and mirage.name(j) or "not made")
+            end
+        elseif clock > 1.5 then
+            for kind, h in pairs(mark.hung) do
+                if h.prop then
+                    local l = mirage.body(h.prop).location
+                    share("hang_" .. kind, len(minus(l, h.anchor)))
+                    share("drop_" .. kind, h.start - l.z)
+                end
+            end
+            go("done")
+            share("done", 1)
+        end
     end
 end
 

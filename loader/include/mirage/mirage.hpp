@@ -607,6 +607,12 @@ namespace mirage
 	{
 		return MIRAGE_API_HAS(&Api(), physics_spawn) ? Api().physics_spawn(Mod(), mesh, location, nullptr, massScale) : nullptr;
 	}
+	// A joint (api.h physics_joint): `b` null holds `a` to the world
+	inline MirageObject* Joint(MirageObject* a, MirageObject* b, const float (&location)[3], int32_t kind = MIRAGE_JOINT_BALL,
+							   float breakThreshold = 0.f)
+	{
+		return MIRAGE_API_HAS(&Api(), physics_joint) ? Api().physics_joint(Mod(), a, b, location, nullptr, kind, breakThreshold) : nullptr;
+	}
 	// A line trace (or, with extent, a box sweep); true when it hit something (out.hit)
 	inline bool Trace(const float (&start)[3], const float (&end)[3], MirageHit& out, uint32_t flags = 0,
 					  const float* extent = nullptr, MirageObject* ignore = nullptr)

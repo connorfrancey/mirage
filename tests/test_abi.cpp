@@ -176,8 +176,9 @@ MIRAGE_AT(physics_collision_get, 652);
 MIRAGE_AT(physics_collision_set, 656);
 MIRAGE_AT(world_trace, 660);
 MIRAGE_AT(world_overlap, 664);
+MIRAGE_AT(physics_joint, 668);
 static_assert(sizeof(MirageBody) == 68 && offsetof(MirageBody, mass_scale) == 52);  // mass_scale: read only
-static_assert(sizeof(MirageHit) == 108 && offsetof(MirageHit, bone) == 44);
+static_assert(sizeof(MirageHit) == 116 && offsetof(MirageHit, bone) == 44 && offsetof(MirageHit, phys_material) == 112);
 static_assert(sizeof(MirageMovement) == 36 && offsetof(MirageMovement, move_object) == 32);
 static_assert(sizeof(MirageRegisters) == 44 && offsetof(MirageRegisters, continue_at) == 40);
 // managed/Mirage/Native/Structs.cs mirrors these by hand (Bridge.Initialize checks the same sizes in the game)

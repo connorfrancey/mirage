@@ -259,17 +259,47 @@ namespace Mirage
         }
 
         /// <summary>A line trace (or a box sweep with <paramref name="extent"/>); null when nothing was hit. Game thread.</summary>
-        public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default)
+        public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default,
+                               bool material = false)
         {
             float* s = stackalloc float[3] { start.X, start.Y, start.Z };
             float* e = stackalloc float[3] { end.X, end.Y, end.Z };
             float* x = stackalloc float[3];
             if (extent is Vec3 ext) { x[0] = ext.X; x[1] = ext.Y; x[2] = ext.Z; }
             var h = new MirageHit { size = (uint)sizeof(MirageHit) };
-            var r = Bridge.Api->world_trace(Handle, s, e, extent is null ? null : x, actors ? 1u : 0u, ignore.Handle, &h);
+            var r = Bridge.Api->world_trace(Handle, s, e, extent is null ? null : x, (actors ? 1u : 0u) | (material ? 2u : 0u),
+                                            ignore.Handle, &h);
             if (r != 1) return null;
             return new TraceHit(new GameObject(h.actor), new Vec3(h.location[0], h.location[1], h.location[2]),
-                                new Vec3(h.normal[0], h.normal[1], h.normal[2]), h.time);
+                                new Vec3(h.normal[0], h.normal[1], h.normal[2]), h.time, new GameObject(h.phys_material));
+        }
+
+        /// <summary>
+        /// Actors in play whose collision bounds touch the sphere (bounds, not shapes), of <paramref name="className"/> or
+        /// a subclass (null: any). Game thread.
+        /// </summary>
+        public GameObject[] Overlap(Vec3 center, float radius, string? className = null)
+        {
+            float* c = stackalloc float[3] { center.X, center.Y, center.Z };
+            var cls = Utf8.Intern(className ?? "");
+            var n = Bridge.Api->world_overlap(c, radius, cls, null, 0);
+            if (n <= 0) return System.Array.Empty<GameObject>();
+            var found = new void*[n];
+            fixed (void** f = found) n = System.Math.Min(n, Bridge.Api->world_overlap(c, radius, cls, f, n));
+            var result = new GameObject[n];
+            for (var i = 0; i < n; i++) result[i] = new GameObject(found[i]);
+            return result;
+        }
+
+        /// <summary>
+        /// A joint between two bodies (<paramref name="b"/> default: <paramref name="a"/> held to the world) at
+        /// <paramref name="location"/>; <paramref name="hinge"/>: turns only about the joint's X axis. Removed on revert and
+        /// unload. Game thread.
+        /// </summary>
+        public GameObject Joint(GameObject a, Vec3 location, GameObject b = default, bool hinge = false, float breakThreshold = 0f)
+        {
+            float* at = stackalloc float[3] { location.X, location.Y, location.Z };
+            return new GameObject(Bridge.Api->physics_joint(Handle, a.Handle, b.Handle, at, null, hinge ? 1 : 0, breakThreshold));
         }
 
         /// <summary>The player's last 256 move transitions as JSON (api.h movement_transitions has the shape). Any thread.</summary>
@@ -509,5 +539,5 @@ namespace Mirage
                                        float MassScale, float GravityScale, bool Awake, bool Simulated);
 
     /// <summary>What a trace hit (<see cref="Mod.Trace"/>)</summary>
-    public readonly record struct TraceHit(GameObject Actor, Vec3 Location, Vec3 Normal, float Time);
+    public readonly record struct TraceHit(GameObject Actor, Vec3 Location, Vec3 Normal, float Time, GameObject PhysMaterial);
 }

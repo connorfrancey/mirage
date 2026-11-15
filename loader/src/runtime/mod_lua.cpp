@@ -223,6 +223,7 @@ namespace mirage::mods
 		static int SetCollisionFn(lua_State* L);
 		static int TraceFn(lua_State* L);
 		static int OverlapFn(lua_State* L);
+		static int JointFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1537,6 +1538,9 @@ namespace mirage::mods
 			lua_getfield(L, 3, "actors");
 			if (lua_toboolean(L, -1)) flags |= MIRAGE_TRACE_ACTORS;
 			lua_pop(L, 1);
+			lua_getfield(L, 3, "material");
+			if (lua_toboolean(L, -1)) flags |= MIRAGE_TRACE_MATERIAL;
+			lua_pop(L, 1);
 			lua_getfield(L, 3, "extent");
 			hasExtent = ReadVec(L, -1, extent);
 			lua_pop(L, 1);
@@ -1565,6 +1569,52 @@ namespace mirage::mods
 		lua_setfield(L, -2, "time");
 		lua_pushstring(L, h.bone);
 		lua_setfield(L, -2, "bone");
+		if (h.material) {
+			PushObject(L, h.material);
+			lua_setfield(L, -2, "material");
+		}
+		if (h.phys_material) {
+			PushObject(L, h.phys_material);
+			lua_setfield(L, -2, "phys_material");
+		}
+		return 1;
+	}
+
+	// mirage.joint(a, b, {x, y, z}, {kind = "ball" | "hinge", rotation = {pitch, yaw, roll}, break_threshold = 0}): a joint
+	// between two bodies (b nil: a held to the world), or nil (the log says why). Removed on revert and unload.
+	int LuaMod::JointFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_joint)) return luaL_error(L, "mirage.joint: this runtime has no joints");
+		MirageObject* a = CheckObject(L, 1);
+		MirageObject* b = lua_isnoneornil(L, 2) ? nullptr : CheckObject(L, 2);
+		float at[3];
+		CheckVec(L, 3, at);
+		int32_t kind = MIRAGE_JOINT_BALL, rot[3] = {};
+		bool hasRot = false;
+		float breakAt = 0.f;
+		if (lua_istable(L, 4)) {
+			lua_getfield(L, 4, "kind");
+			if (const char* k = lua_tostring(L, -1); k && std::strcmp(k, "hinge") == 0) kind = MIRAGE_JOINT_HINGE;
+			lua_pop(L, 1);
+			lua_getfield(L, 4, "break_threshold");
+			breakAt = static_cast<float>(lua_tonumber(L, -1));
+			lua_pop(L, 1);
+			lua_getfield(L, 4, "rotation");
+			if (lua_istable(L, -1)) {
+				static const char* keys[] = {"pitch", "yaw", "roll"};
+				for (int i = 0; i < 3; ++i) {
+					lua_getfield(L, -1, keys[i]);
+					rot[i] = static_cast<int32_t>(lua_tointeger(L, -1));
+					lua_pop(L, 1);
+				}
+				hasRot = true;
+			}
+			lua_pop(L, 1);
+		}
+		MirageObject* j = self.api_->physics_joint(self.mod_, a, b, at, hasRot ? rot : nullptr, kind, breakAt);
+		if (j) PushObject(L, j);
+		else lua_pushnil(L);
 		return 1;
 	}
 
@@ -2349,7 +2399,7 @@ namespace mirage::mods
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
-			{"overlap", OverlapFn}, {nullptr, nullptr}};
+			{"overlap", OverlapFn}, {"joint", JointFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

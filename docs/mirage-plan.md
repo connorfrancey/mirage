@@ -1905,6 +1905,13 @@ with a template and docs.
    check was too strict (fixed since), and one release run crashed on the render thread during "Memory manager"
    (`MirrorsEdge.exe+0x14B7C18`, creating a texture with the RHI's D3D device pointer null: a device reset at that
    moment?) — open, seen once.
+   2026-11-15: the round of ten (with steps 2-5) passed 9; the failure was a test comparing pawns by address (fixed:
+   ObjectId, as two more steps were since). Two intermittent game crashes stay open, both in the game's own code with
+   no Mirage frame on the stack, each seen about twice in ~50 launches: `+0x14B7C18` again (release, on the rendering
+   thread: FD3D9DynamicRHI::CreateTexture2D reading `Direct3DDevice` at +0x10, null; this time during "Mirage movement
+   tuning"), and `+0x74D433` at level load (a worker task un-compressing a SHA-1-checked blob and freeing a garbage
+   pointer from it; not a damaged profile: Cryptigo.dat was unchanged). `+0xFA52A2` that follows both on the main
+   thread is a consequence. Their minidumps are in mirage\crashlogs.
 2. **Engine hooks by symbol.** `game::FindPattern` becomes MirageHook's scanner (resolve steps, cache). The patterns
    already in the code (ProcessEvent, ProcessInternal, death, the config lookup, input) become named entries in a
    `symbols.toml` verified at start. Append to ABI v1: hook by symbol (before / after / replace, chained by priority
@@ -1984,7 +1991,7 @@ with a template and docs.
    engine holds; the engine adds one thing at load, each streamed sublevel's root sequence nested in the level's root.
 6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with
    native-only queries through step 2.
-   **Status (2026-11-15): Scenario E passes; constraints, physical materials and the TAS question are left.**
+   **Status (2026-11-15): done (the TAS side is step 24's).**
    `runtime/physics`: bodies through the engine's own functions (velocity, angular velocity, position, rotation,
    impulses, forces, sleep and wake, `RB_BodyInstance.CustomGravityFactor` as gravity scale: verified, a body with 0
    floats); props are `KActorSpawnable`s given a mesh with `DynamicSMActor.SetStaticMesh`, which makes the body;
@@ -1999,9 +2006,15 @@ with a template and docs.
    box, 50: 0.25x and 2x exact, 4x the same as 2x), and the runtime caps to match. Self-test "Mirage physics"
    (tests/mods/physics-lua): the prop falls ~225 units in about 1.5 s, the same impulse in the air gives 142, 568, 71
    u/s at 1x, 0.25x, 2x (identical in 3 release runs), gravity 0 holds it within 3 units, an overlap and a trace with
-   actors find it, the revert removes it. **500 line traces: 0.70 ms in release** (target 1 ms; 1.9 ms in debug). Left:
-   constraints (`RB_ConstraintActor`), physical materials on hits, rewinds and replays with props (step 24), a C# mod
-   using the API in the game (it compiles; the Lua mod is the test).
+   actors find it, the revert removes it. **500 line traces: 0.70 ms in release** (target 1 ms; 1.9 ms in debug).
+   Then: **joints** (`physics_joint`, ball or hinge, to another body or the world: an `RB_ConstraintActorSpawnable`
+   with a setup made by the engine's object constructor, and `InitConstraint`; in the test both hold their prop 100
+   units under the anchor); **materials on hits** (`MIRAGE_TRACE_MATERIAL`: the hit's physical material, read from the
+   hit record at +0x2C, else the material's; static meshes report no render material in this build); **C#**
+   (tests/mods/physics-cs, a mod test: a prop, an impulse, a trace through it, the floor's physical material,
+   PM_Metal_PropLarge, a joint, the revert). An overlap sees the actors as of the tick (a prop spawned now from the
+   next). The step goes back to where the level started before it runs: earlier steps reach later checkpoints, and
+   the props need room. Rewinds and replays with props are step 24's.
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.
 8. **Input actions and custom moves.** As step 22. The experiment between a new `TdMove` subclass, a reused move
    slot and a "virtual move" comes first and decides the API. The replay part of step 24 stays with the menu. Mirage
