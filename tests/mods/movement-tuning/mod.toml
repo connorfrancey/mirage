@@ -1,0 +1,9 @@
+# Self-test (step 4 of the next ten steps, the plan's Scenario A): movement tuned from data. Five constants of the
+# player's moves and pawn, on the classes' defaults and on the live objects (instances = true), put back exactly when
+# the mod's module goes off.
+id = "movement-tuning"
+name = "Movement Tuning (test)"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): jumps higher and runs faster, from content/defaults.toml"
+mirage = "^0.1"
+content = ["content"]

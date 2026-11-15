@@ -205,6 +205,7 @@ namespace mirage::mods
 		static int Changes(lua_State* L);
 		static int SymbolFn(lua_State* L);
 		static int TestFn(lua_State* L);
+		static int MovementFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1127,6 +1128,39 @@ namespace mirage::mods
 		return 0;
 	}
 
+	// mirage.movement(): what the player is doing, {move, previous, physics, velocity = {x, y, z}, speed, object}, or
+	// nil without a player. move and previous are EMovement values (the SDK's TdGame enum); object is the current move.
+	int LuaMod::MovementFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		MirageMovement m{};
+		m.size = sizeof m;
+		if (!MIRAGE_API_HAS(self.api_, movement_get) || !self.api_->movement_get(&m)) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_createtable(L, 0, 6);
+		lua_pushinteger(L, m.move);
+		lua_setfield(L, -2, "move");
+		lua_pushinteger(L, m.previous_move);
+		lua_setfield(L, -2, "previous");
+		lua_pushinteger(L, m.physics);
+		lua_setfield(L, -2, "physics");
+		lua_createtable(L, 0, 3);
+		lua_pushnumber(L, m.velocity[0]);
+		lua_setfield(L, -2, "x");
+		lua_pushnumber(L, m.velocity[1]);
+		lua_setfield(L, -2, "y");
+		lua_pushnumber(L, m.velocity[2]);
+		lua_setfield(L, -2, "z");
+		lua_setfield(L, -2, "velocity");
+		lua_pushnumber(L, m.speed);
+		lua_setfield(L, -2, "speed");
+		self.PushObject(L, m.move_object);
+		lua_setfield(L, -2, "object");
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -1880,7 +1914,7 @@ namespace mirage::mods
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
-			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {nullptr, nullptr}};
+			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

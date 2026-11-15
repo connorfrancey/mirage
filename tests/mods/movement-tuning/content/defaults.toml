@@ -1,0 +1,16 @@
+# The jump: the standing jump's upward speed (BaseJumpZ) and the long jump's push forward (JumpAddXY)
+["TdGame.Default__TdMove_Jump"]
+BaseJumpZ = 945.0
+JumpAddXY = 300.0
+instances = true          # The move objects the player's pawn has now (TdPawn.Moves) too
+
+# The pawn's speeds
+["TdGame.Default__TdPlayerPawn"]
+SprintVelocity = 900.0
+RunVelocity = 700.0
+instances = true
+
+# Wall running: the lowest speed it starts at
+["TdGame.Default__TdMove_WallRun"]
+WallRunningMinSpeed = 150.0
+instances = true

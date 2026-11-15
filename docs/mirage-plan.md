@@ -1941,6 +1941,12 @@ with a template and docs.
 4. **The player and movement.** The survey of the 128 `TdMove_*` classes first (which constants are script
    properties, which are bytecode literals, which are native and need step 2). Then `movement_get`,
    `movement_override` through the change log, `movement.toml`, and the transition record from `PLAYER_STATE`.
+   **Status (2026-11-14): done for tuning and inspection; transitions and literal constants left.** The survey
+   (`docs/movement-survey.md`): 262 config tuning values in 44 move classes plus the pawns', all script properties, so
+   tuning is content (step 7's defaults overrides with `instances = true`), and no `movement_override` or
+   `movement.toml` was needed. ABI v1 appended `movement_get` (`MirageMovement`; Lua `mirage.movement()`, C#
+   `Mod.Movement()`). Self-test "Mirage movement tuning" passes Scenario A: five constants on, the jump 124 to 279 as
+   predicted, off, every value back exactly. Left: the transition record, and the constants in bytecode and native code.
 5. **Kismet runtime.** As step 18: read sequences, change them through the change log, nodes from mod classes
    (step 12), and sequence events delivered to mods.
 6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with

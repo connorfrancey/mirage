@@ -28,6 +28,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <atomic>
 #include <cstring>
@@ -786,6 +787,26 @@ namespace mirage::mods
 			if (!mod || !name || !*name || !fn) return 0;
 			std::lock_guard lock(g_testLock);
 			g_tests.push_back(std::make_unique<TestRecord>(TestRecord{mod, name, fn, user}));
+			return 1;
+		}
+
+		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)
+		{
+			if (!out || out->size < sizeof(MirageMovement)) return 0;
+			const uint32_t size = out->size;
+			*out = MirageMovement{};
+			out->size = size;
+			auto* pawn = static_cast<Classes::ATdPawn*>(game::Pawn());
+			if (!pawn || !pawn->IsA(Classes::ATdPawn::StaticClass())) return 0;
+			out->move = static_cast<int32_t>(pawn->MovementState.GetValue());
+			out->previous_move = static_cast<int32_t>(pawn->OldMovementState.GetValue());
+			out->physics = static_cast<int32_t>(pawn->Physics.GetValue());
+			out->velocity[0] = pawn->Velocity.X;
+			out->velocity[1] = pawn->Velocity.Y;
+			out->velocity[2] = pawn->Velocity.Z;
+			out->speed = std::sqrt(pawn->Velocity.X * pawn->Velocity.X + pawn->Velocity.Y * pawn->Velocity.Y);
+			if (out->move >= 0 && out->move < static_cast<int32_t>(pawn->Moves.Num()))
+				out->move_object = Handle(pawn->Moves[out->move]);
 			return 1;
 		}
 

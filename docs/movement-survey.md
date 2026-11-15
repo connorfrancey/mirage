@@ -23,15 +23,31 @@ part. Generated from the SDK's property flags on 2026-11-14; the per-class table
   `UTdPhysicsMove`'s native functions, reached through the engine symbols of step 2). Gravity is WorldInfo's
   (`WorldGravityZ`), already a property.
 
-## What it means for the API (step 4)
+## What step 4 made of it
 
-1. `movement_override(class, property, value)`: a recorded change (the change log of step 15) on the move class's
-   default object and on every live object of that class; refused, with the reason, for a property that isn't a
-   scalar of that class. Lua `mirage.movement.set("TdMove_Jump", "BaseJumpZ", 900)`, C# `Mod.Movement.Set(...)`.
-2. `movement.toml` in a mod: `[TdMove_Jump] BaseJumpZ = 900`: the same, as data, applied when the mod's content turns
-   on and put back when it turns off.
-3. `movement_get(MirageMovement*)`: the current move (`EMovement`), the previous one, velocity, the move's state flags.
-4. The transition record from the `PLAYER_STATE` event (from, to, tick).
+- **Tuning is content, not a new API.** A content mod's `content/*.toml` already overrides a class's defaults and, with
+  `instances = true`, the live objects, and puts both back when the mod goes off (step 7). Movement tuning is that, on
+  the move classes:
+
+  ```toml
+  ["TdGame.Default__TdMove_Jump"]
+  BaseJumpZ = 945.0         # The game's is 630
+  instances = true          # The move objects the player has now (TdPawn.Moves) too
+  ```
+
+  Self-test "Mirage movement tuning" (`tests/mods/movement-tuning`, the plan's Scenario A): five constants on the jump,
+  the wall run and the pawn; on, the live objects hold them and a standing jump goes from 124 to 279 units (the height
+  goes with the upward speed squared: 124 x (945 / 630)^2 = 279, as measured); off, every value is the game's again,
+  exactly, and so is the jump.
+- **Code that tunes** writes the same properties with `object_set` inside a transaction (`change_begin`/`change_end`,
+  Lua `mirage.transaction`), which the change log puts back.
+- **What the player is doing**: `movement_get` (Lua `mirage.movement()`, C# `Mod.Movement()`, C++ `mirage::Movement`):
+  the move (EMovement), the previous move, physics, velocity, horizontal speed, and the current move's object.
+- **A save state restores the move objects' properties too** (the menu's save states keep every value of TdMove
+  objects): loading a state saved before a tuning mod was on puts the game's values back until the mod is switched
+  again.
+- **Left for later**: the transition record from the `PLAYER_STATE` event, and the constants that are literals in
+  bytecode or native code (the decompiled-script half of this survey).
 
 ## Per class
 

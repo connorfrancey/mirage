@@ -44,6 +44,17 @@ namespace Mirage.Native
         public void* object_class;
     }
 
+    /// <summary>What the player is doing (api.h MirageMovement)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageMovement
+    {
+        public uint size;
+        public int move, previous_move, physics;
+        public fixed float velocity[3];
+        public float speed;
+        public void* move_object;
+    }
+
     /// <summary>The registers at a mid-function hook (api.h MirageRegisters): change them to change the game's.</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct MirageRegisters

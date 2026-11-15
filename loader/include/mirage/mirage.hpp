@@ -520,6 +520,14 @@ namespace mirage
 		if (MIRAGE_API_HAS(&Api(), mid_hook_remove)) Api().mid_hook_remove(h);
 	}
 
+	// ---- The player and movement (step 4) -----------------------------------------------------------------------------
+	// What the player is doing now (MirageMovement: the move, the previous one, velocity); false without a player
+	inline bool Movement(MirageMovement& out)
+	{
+		out.size = sizeof out;
+		return MIRAGE_API_HAS(&Api(), movement_get) && Api().movement_get(&out) != 0;
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

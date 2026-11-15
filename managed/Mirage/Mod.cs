@@ -159,6 +159,15 @@ namespace Mirage
             return hook;
         }
 
+        /// <summary>What the player is doing now (the move, the previous move, velocity), or null without a player. Game thread.</summary>
+        public Movement? Movement()
+        {
+            var m = new MirageMovement { size = (uint)sizeof(MirageMovement) };
+            if (Bridge.Api->movement_get(&m) == 0) return null;
+            return new Movement(m.move, m.previous_move, m.physics, m.velocity[0], m.velocity[1], m.velocity[2], m.speed,
+                                new GameObject(m.move_object));
+        }
+
         /// <summary>
         /// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on
         /// (`mirage mod test`): <paramref name="test"/> returns null when it passed, else why it failed. An exception
@@ -358,4 +367,11 @@ namespace Mirage
             _handle = null;
         }
     }
+}
+
+namespace Mirage
+{
+    /// <summary>What the player is doing (<see cref="Mod.Movement"/>): EMovement values (the SDK's TdGame enum).</summary>
+    public readonly record struct Movement(int Move, int PreviousMove, int Physics, float VelocityX, float VelocityY,
+                                           float VelocityZ, float Speed, GameObject MoveObject);
 }

@@ -33,6 +33,7 @@ namespace mirage::mods::game_api
 	MirageMidHook* MIRAGE_CALL MidHookCreate(MirageMod* mod, void* at, MirageMidHookFn callback, void* user);
 	void MIRAGE_CALL MidHookRemove(MirageMidHook* hook);
 	int32_t MIRAGE_CALL TestRegister(MirageMod* mod, const char* name, MirageTestFn fn, void* user);
+	int32_t MIRAGE_CALL MovementGet(MirageMovement* out);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

@@ -1873,6 +1873,112 @@ void TestModTests()
     End(s);
 }
 
+// Step 4 of the next ten steps, the plan's Scenario A: movement tuned from data (tests/mods/movement-tuning: five
+// constants in content/defaults.toml, on the classes' defaults and the live objects). On: the player's move objects and
+// pawn hold the mod's values and a standing jump goes as high as the faster jump makes it; off: every value is the
+// game's again, exactly, and so is the jump. movement_get reports what the player is doing.
+float StandingJump();   // Below
+
+void TestMovementTuning()
+{
+    Step& s = Begin("Mirage movement tuning");
+    Probe p(s);
+    Module* m = modules::Find("Movement Tuning (test)");
+    if (!m) {
+        p.Problem("the Movement Tuning (test) module is missing (tests/mods/movement-tuning)");
+        End(s);
+        return;
+    }
+    struct Value
+    {
+        const char* move;       // A TdMove class in the pawn's Moves, or nullptr: the pawn itself
+        const char* property;
+        float tuned;
+    };
+    const Value values[] = {{"TdMove_Jump", "BaseJumpZ", 945.f}, {"TdMove_Jump", "JumpAddXY", 300.f},
+                            {nullptr, "SprintVelocity", 900.f}, {nullptr, "RunVelocity", 700.f},
+                            {"TdMove_WallRun", "WallRunningMinSpeed", 150.f}};
+    // The live values: the player's move objects (TdPawn.Moves) and pawn
+    const auto read = [&] {
+        std::vector<float> out(std::size(values), -1.f);
+        OnGameThread([&] {
+            auto* pawn = static_cast<Classes::ATdPawn*>(game::Pawn());
+            if (!pawn) return;
+            for (std::size_t i = 0; i < std::size(values); ++i) {
+                Classes::UObject* o = pawn;
+                if (values[i].move) {
+                    o = nullptr;
+                    for (std::size_t k = 0; k < pawn->Moves.Num(); ++k)
+                        if (auto* mv = pawn->Moves[k]; mv && mv->Class && mv->Class->GetName() == values[i].move) o = mv;
+                }
+                if (o) out[i] = mirage::reflect::GetFloat(mirage::reflect::Resolve(o->Class, o, values[i].property));
+            }
+        });
+        return out;
+    };
+    const auto set = [&](bool on) {
+        OnRenderThread([m, on] { m->SetEnabled(on); });
+        return WaitFor(5.0, [&] {
+            const auto now = read();
+            return on ? now[0] == values[0].tuned : now[0] != values[0].tuned;
+        });
+    };
+    // Every jump from the same place: only the player's location put back (a save state would put the move objects'
+    // properties back too, the tuning with them)
+    Classes::FVector start{};
+    const auto jump = [&] {
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) {
+                pawn->Location = start;
+                pawn->Velocity = Classes::FVector{};
+            }
+        });
+        WaitGrounded();
+        return StandingJump();
+    };
+    set(false);
+    WaitGrounded();
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) start = pawn->Location; });
+    const std::vector<float> game = read();
+    const float normal = jump();
+
+    if (!set(true)) p.Problem("the mod's values didn't reach the player's move objects");
+    const std::vector<float> tuned = read();
+    for (std::size_t i = 0; i < std::size(values); ++i)
+        if (tuned[i] != values[i].tuned)
+            p.Problem(fmt::format("on: {}.{} is {}, not the mod's {}", values[i].move ? values[i].move : "TdPlayerPawn",
+                                  values[i].property, tuned[i], values[i].tuned));
+    MirageMovement mv{};
+    mv.size = sizeof mv;
+    int got = 0;
+    OnGameThread([&] { got = mirage::mods::game_api::MovementGet(&mv); });
+    if (!got || !mv.move_object) p.Problem("movement_get didn't report the player's move");
+    const float high = jump();
+
+    set(false);
+    const std::vector<float> back = read();
+    for (std::size_t i = 0; i < std::size(values); ++i)
+        if (back[i] != game[i])
+            p.Problem(fmt::format("off: {}.{} is {}, not the game's {}", values[i].move ? values[i].move : "TdPlayerPawn",
+                                  values[i].property, back[i], game[i]));
+    const float after = jump();
+
+    // A jump's height goes with its upward speed squared: the mod's 945 against the game's BaseJumpZ
+    const float expected = game[0] > 0.f ? normal * (values[0].tuned / game[0]) * (values[0].tuned / game[0]) : 0.f;
+    s.notes.push_back(fmt::format("standing jump: {:.0f} (BaseJumpZ {:.0f}), tuned {:.0f} (expected about {:.0f}), off again "
+                                  "{:.0f}; movement_get: move {}, previous {}, physics {}", normal, game[0], high, expected,
+                                  after, mv.move, mv.previous_move, mv.physics));
+    if (normal <= 10.f) p.Problem("the player didn't jump");
+    else {
+        if (high < expected * 0.75f || high > expected * 1.25f)
+            p.Problem(fmt::format("tuned, the jump reached {:.0f}, not about {:.0f}", high, expected));
+        if (std::fabs(after - normal) > normal * 0.1f) p.Problem(fmt::format("off again, the jump is {:.0f}, not {:.0f}", after, normal));
+    }
+    WaitGrounded();
+    p.Check(1, true);
+    End(s);
+}
+
 // The engine's symbols and hooks by symbol (step 2 of the next ten steps): every pattern of runtime/symbols.toml is
 // found, exactly once; the names the runtime's code works out are there too. tests/mods/hook-symbol detours
 // StaticLoadObject by name and counts the calls; with its Crash setting on, the next call faults in its detour: the load
@@ -4790,6 +4896,7 @@ const Named* FeatureList()
         {"Mirage lifecycle", &TestMirageLifecycle, false},
         {"Mirage hooks from mods", &TestMirageModHooks, false},
         {"Mirage engine symbols", &TestEngineSymbols, false},
+        {"Mirage movement tuning", &TestMovementTuning, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

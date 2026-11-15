@@ -202,6 +202,19 @@ typedef void(MIRAGE_CALL* MirageMidHookFn)(void* user, MirageRegisters* register
 /* test_register: 1 when the test passed; 0 when it failed, with why in `message` (capacity bytes, NUL-terminated) */
 typedef int32_t(MIRAGE_CALL* MirageTestFn)(void* user, char* message, uint32_t capacity);
 
+/* movement_get: what the player is doing (step 4 of the next ten steps). The moves are TdGame's EMovement values
+ * (MOVE_Walking 1, MOVE_Falling 2, MOVE_Jump 11, ...: the generated SDK lists them); move_object is the current move's
+ * object (TdPawn.Moves[move]: a TdMove_*, its tuning properties readable by path). */
+typedef struct MirageMovement {
+    uint32_t size;              /* sizeof(MirageMovement) */
+    int32_t move;               /* TdPawn.MovementState */
+    int32_t previous_move;      /* TdPawn.OldMovementState */
+    int32_t physics;            /* Actor.Physics (EPhysics: PHYS_Walking 1, PHYS_Falling 2, ...) */
+    float velocity[3];
+    float speed;                /* Horizontal speed (units a second) */
+    MirageObject* move_object;
+} MirageMovement;
+
 /* actors_query: which actors (every field optional; zero = any). Actors of the levels in play (the persistent level and
  * the visible streaming levels), from the runtime's per-tick actor lists: no walk of the whole object list. */
 typedef struct MirageActorQuery {
@@ -878,6 +891,13 @@ typedef struct MirageApi {
      * A fault in it fails it and stops the mod, like any crash. Removed with the mod's unload. 1, or 0 (no name or
      * function). */
     int32_t(MIRAGE_CALL* test_register)(MirageMod* mod, const char* name, MirageTestFn fn, void* user);
+
+    /* ---- The player and movement (step 4 of the next ten steps). Tuning a move is data: a content mod's
+     * content/*.toml sets the move class's defaults ("TdGame.Default__TdMove_Jump", BaseJumpZ = 945.0) and, with
+     * instances = true, the move objects the player has now; put back when the mod goes off (docs/movement-survey.md
+     * lists the 262 tuning values). Game thread. */
+    /* What the player is doing now: 1, or 0 (no player). Set out->size first. */
+    int32_t(MIRAGE_CALL* movement_get)(MirageMovement* out);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

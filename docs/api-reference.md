@@ -40,6 +40,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Reversible changes](#reversible-changes) (4)
 - [Engine symbols and hooks](#engine-symbols-and-hooks) (4)
 - [Mod tests](#mod-tests) (1)
+- [The player and movement](#the-player-and-movement) (1)
 - [Types](#types)
 
 ## Basics
@@ -1210,6 +1211,18 @@ A test the mod carries, run by the self-test's "Mod tests" step on the game thre
 int32_t(MIRAGE_CALL* test_register)(MirageMod* mod, const char* name, MirageTestFn fn, void* user);
 ```
 
+## The player and movement
+
+Tuning a move is data: a content mod's content/*.toml sets the move class's defaults ("TdGame.Default__TdMove_Jump", BaseJumpZ = 945.0) and, with instances = true, the move objects the player has now; put back when the mod goes off (docs/movement-survey.md lists the 262 tuning values). Game thread.
+
+### `movement_get`
+
+```c
+int32_t(MIRAGE_CALL* movement_get)(MirageMovement* out);
+```
+
+What the player is doing now: 1, or 0 (no player). Set out->size first.
+
 ## Types
 
 ### `MirageLogLevel`
@@ -1339,6 +1352,22 @@ typedef struct MirageRegisters {
     uint32_t eflags;
     uint32_t continue_at;
 } MirageRegisters;
+```
+
+### `MirageMovement`
+
+movement_get: what the player is doing (step 4 of the next ten steps). The moves are TdGame's EMovement values (MOVE_Walking 1, MOVE_Falling 2, MOVE_Jump 11, ...: the generated SDK lists them); move_object is the current move's object (TdPawn.Moves[move]: a TdMove_*, its tuning properties readable by path). *
+
+```c
+typedef struct MirageMovement {
+    uint32_t size;              /* sizeof(MirageMovement) */
+    int32_t move;               /* TdPawn.MovementState */
+    int32_t previous_move;      /* TdPawn.OldMovementState */
+    int32_t physics;            /* Actor.Physics (EPhysics: PHYS_Walking 1, PHYS_Falling 2, ...) */
+    float velocity[3];
+    float speed;                /* Horizontal speed (units a second) */
+    MirageObject* move_object;
+} MirageMovement;
 ```
 
 ### `MirageActorQuery`

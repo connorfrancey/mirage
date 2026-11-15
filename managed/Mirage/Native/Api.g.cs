@@ -156,6 +156,7 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, void*> mid_hook_create;
         public delegate* unmanaged[Cdecl]<void*, void> mid_hook_remove;
         public delegate* unmanaged[Cdecl]<void*, byte*, void*, void*, int> test_register;
+        public delegate* unmanaged[Cdecl]<void*, int> movement_get;
     }
 
     [StructLayout(LayoutKind.Sequential)]
