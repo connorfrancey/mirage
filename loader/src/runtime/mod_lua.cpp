@@ -213,6 +213,7 @@ namespace mirage::mods
 		static int KismetFireFn(lua_State* L);
 		static int KismetTraceFn(lua_State* L);
 		static int KismetTraceReadFn(lua_State* L);
+		static int TransitionsFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1285,6 +1286,18 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.transitions(): the player's last 256 move transitions, oldest first: {{tick, time, from, to, from_name,
+	// to_name, skipped}, ...}
+	int LuaMod::TransitionsFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, movement_transitions)) return luaL_error(L, "mirage.transitions: this runtime has no transition record");
+		std::string text(self.api_->movement_transitions(nullptr, 0) + 1, '\0');
+		text.resize((std::min)(static_cast<std::size_t>(self.api_->movement_transitions(text.data(), static_cast<uint32_t>(text.size()))), text.size() - 1));
+		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -2040,7 +2053,8 @@ namespace mirage::mods
 			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
 			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {"kismet", KismetFn},
 			{"kismet_link", KismetLinkFn}, {"kismet_unlink", KismetUnlinkFn}, {"kismet_create", KismetCreateFn},
-			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn}, {nullptr, nullptr}};
+			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
+			{"transitions", TransitionsFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

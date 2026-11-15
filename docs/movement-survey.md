@@ -46,8 +46,10 @@ part. Generated from the SDK's property flags on 2026-11-14; the per-class table
 - **A save state restores the move objects' properties too** (the menu's save states keep every value of TdMove
   objects): loading a state saved before a tuning mod was on puts the game's values back until the mod is switched
   again.
-- **Left for later**: the transition record from the `PLAYER_STATE` event, and the constants that are literals in
-  bytecode or native code (the decompiled-script half of this survey).
+- **Transitions**: `movement_transitions` (Lua `mirage.transitions()`) keeps the last 256 move changes with the tick,
+  the level's time and the moves' names; every change, whether or not a mod listens.
+- **Left for later**: the constants that are literals in bytecode or native code (the decompiled-script half of this
+  survey).
 
 ## Per class
 

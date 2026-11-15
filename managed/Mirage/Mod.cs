@@ -215,6 +215,16 @@ namespace Mirage
             }
         }
 
+        /// <summary>The player's last 256 move transitions as JSON (api.h movement_transitions has the shape). Any thread.</summary>
+        public string MovementTransitionsJson()
+        {
+            var n = Bridge.Api->movement_transitions(null, 0);
+            var buffer = new byte[n + 1];
+            uint got;
+            fixed (byte* b = buffer) got = Bridge.Api->movement_transitions(b, (uint)buffer.Length);
+            return System.Text.Encoding.UTF8.GetString(buffer, 0, (int)System.Math.Min(got, n));
+        }
+
         /// <summary>What the player is doing now (the move, the previous move, velocity), or null without a player. Game thread.</summary>
         public Movement? Movement()
         {

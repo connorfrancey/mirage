@@ -683,8 +683,10 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* objects_of_class)(const char* class_name, uint32_t flags, MirageObject** out, int32_t capacity);
 
     /* ---- The player and input (step 9) ------------------------------------------------------------------------------
-     * In a MIRAGE_EVENT_PLAYER_STATE callback: the game doesn't handle the new move state this tick (the engine's move
-     * state handler is skipped for it, so a jump made in the callback takes its place). Anywhere else: nothing. */
+     * In a MIRAGE_EVENT_PLAYER_STATE callback: the game doesn't handle the new move state this tick (the pawn's physics
+     * step is skipped for it, so a jump made in the callback takes its place). Only for a change seen in that physics
+     * step (the engine starts it over when the move changes within a tick); a change seen at the end of a tick is
+     * reported after the game handled it, and skipping it does nothing. Anywhere else: nothing. */
     void(MIRAGE_CALL* event_skip)(const MirageEvent* event);
     int32_t(MIRAGE_CALL* menu_open)(void);                /* The menu is open (it has the mouse and the keyboard) */
     /* A real key press (down 1) or release (down 0) of a virtual-key code, as the keyboard sends it: the game reads it
@@ -928,6 +930,12 @@ typedef struct MirageApi {
      * length; the entries are taken only when it all fit. Game thread. */
     void(MIRAGE_CALL* kismet_trace)(MirageMod* mod, int32_t on);
     uint32_t(MIRAGE_CALL* kismet_trace_read)(MirageMod* mod, char* buffer, uint32_t capacity);
+
+    /* The player's last 256 move transitions, oldest first, as JSON [{"tick", "time", "from", "to", "from_name",
+     * "to_name", "skipped"}]: EMovement values and their names ("MOVE_Walking"), the engine tick and the level's
+     * time (WorldInfo.TimeSeconds); skipped: a mod's PLAYER_STATE callback kept the game from handling it
+     * (event_skip). Recorded whether or not a mod listens. Copies up to capacity, returns the full length. Any thread. */
+    uint32_t(MIRAGE_CALL* movement_transitions)(char* buffer, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

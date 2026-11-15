@@ -35,6 +35,7 @@
 #include <chrono>
 #include <atomic>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <list>
 #include <map>
@@ -268,9 +269,32 @@ namespace mirage::mods
 		}
 	}
 
+	// ---- Move transitions (step 4's record): every PLAYER_STATE change, whether or not a mod listens ------------
+	namespace
+	{
+		struct Transition
+		{
+			std::uint64_t tick;
+			float time;
+			int from, to;
+			bool skipped;
+		};
+		std::mutex g_transitionLock;
+		std::deque<Transition> g_transitions;		// The last 256
+		std::atomic<std::uint64_t> g_ticks{0};
+		std::vector<std::string> g_moveNames;		// EMovement's names, from the engine's UEnum (game thread)
+
+		std::string MoveName(int move)
+		{
+			return move >= 0 && move < static_cast<int>(g_moveNames.size()) ? g_moveNames[static_cast<std::size_t>(move)] : std::string();
+		}
+	}
+
 	void DispatchTick(float seconds)
 	{
+		++g_ticks;
 		CheckHookFaults();
+		DispatchPlayerState(false);		// A move change the physics step's hook didn't see
 		MirageEvent e = Event(MIRAGE_EVENT_TICK);
 		e.number = seconds;
 		Dispatch(e);
@@ -293,19 +317,36 @@ namespace mirage::mods
 		const MirageEvent* g_skippable = nullptr;	// The player state event being dispatched (game thread)
 		bool g_skipped = false;
 	}
-	bool DispatchPlayerState()
+	namespace
 	{
-		static int previous = -1;
+		int g_lastMove = -1;		// The player's move as last dispatched (game thread)
+	}
+	// The player's move changed since the last dispatch: PLAYER_STATE and the transition record. From two places: the
+	// pawn's physics step (game::OnPlayerStateChange: only when physics starts over within a tick, but before the game
+	// acts on it, so event_skip can stop it there) and every tick (DispatchTick: every other change, after the fact).
+	bool DispatchPlayerState(bool fromHook)
+	{
 		auto* pawn = game::Pawn();
 		if (!pawn) return false;
+		const int now = static_cast<int32_t>(static_cast<std::uint8_t>(pawn->MovementState.GetValue()));
+		if (!fromHook && now == g_lastMove) return false;
 		MirageEvent e = Event(MIRAGE_EVENT_PLAYER_STATE);
-		e.value = static_cast<int32_t>(static_cast<std::uint8_t>(pawn->MovementState.GetValue()));
-		e.value2 = previous;
-		previous = e.value;
-		g_skippable = &e;
+		e.value = now;
+		e.value2 = g_lastMove;
+		g_lastMove = now;
+		g_skippable = fromHook ? &e : nullptr;
 		g_skipped = false;
 		Dispatch(e);
 		g_skippable = nullptr;
+		if (g_moveNames.empty())
+			if (auto* en = game::FindObject<Classes::UEnum>("Enum TdGame.TdPawn.EMovement"))
+				for (std::size_t i = 0; i < en->Names.Num(); ++i) g_moveNames.push_back(en->Names[i].GetName());
+		{
+			std::lock_guard lock(g_transitionLock);
+			auto* world = game::World();
+			g_transitions.push_back({g_ticks.load(), world ? world->TimeSeconds : 0.f, e.value2, e.value, g_skipped});
+			if (g_transitions.size() > 256) g_transitions.pop_front();
+		}
 		return g_skipped;
 	}
 	void DispatchStateRestored() { Dispatch(Event(MIRAGE_EVENT_STATE_RESTORED)); }
@@ -942,6 +983,18 @@ namespace mirage::mods
 		{
 			if (!mod) return 0;
 			return kismet_trace::Read(mod->id, buffer, capacity);
+		}
+
+		uint32_t MIRAGE_CALL MovementTransitions(char* buffer, uint32_t capacity)
+		{
+			nlohmann::json out = nlohmann::json::array();
+			{
+				std::lock_guard lock(g_transitionLock);
+				for (const Transition& t : g_transitions)
+					out.push_back({{"tick", t.tick}, {"time", t.time}, {"from", t.from}, {"to", t.to}, {"from_name", MoveName(t.from)},
+								   {"to_name", MoveName(t.to)}, {"skipped", t.skipped}});
+			}
+			return CopyOut(out.dump(), buffer, capacity);
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

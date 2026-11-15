@@ -901,7 +901,7 @@ namespace mirage::mods
 			game_api::SymbolFind, game_api::DetourSymbol, game_api::MidHookCreate, game_api::MidHookRemove,
 			game_api::TestRegister, game_api::MovementGet, game_api::KismetRead,
 			game_api::KismetLink, game_api::KismetUnlink, game_api::KismetCreate, game_api::KismetFire, game_api::KismetTrace,
-			game_api::KismetTraceRead,
+			game_api::KismetTraceRead, game_api::MovementTransitions,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

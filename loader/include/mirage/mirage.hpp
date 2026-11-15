@@ -575,6 +575,15 @@ namespace mirage
 		}
 	}
 
+	// The player's last 256 move transitions as JSON (api.h movement_transitions has the shape)
+	inline std::string MovementTransitionsJson()
+	{
+		if (!MIRAGE_API_HAS(&Api(), movement_transitions)) return "[]";
+		std::string out(Api().movement_transitions(nullptr, 0) + 1, '\0');
+		out.resize((std::min)(static_cast<std::size_t>(Api().movement_transitions(out.data(), static_cast<uint32_t>(out.size()))), out.size() - 1));
+		return out;
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

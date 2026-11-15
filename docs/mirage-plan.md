@@ -1941,12 +1941,16 @@ with a template and docs.
 4. **The player and movement.** The survey of the 128 `TdMove_*` classes first (which constants are script
    properties, which are bytecode literals, which are native and need step 2). Then `movement_get`,
    `movement_override` through the change log, `movement.toml`, and the transition record from `PLAYER_STATE`.
-   **Status (2026-11-14): done for tuning and inspection; transitions and literal constants left.** The survey
+   **Status (2026-11-15): done for tuning, inspection and transitions; literal constants left.** The survey
    (`docs/movement-survey.md`): 262 config tuning values in 44 move classes plus the pawns', all script properties, so
    tuning is content (step 7's defaults overrides with `instances = true`), and no `movement_override` or
    `movement.toml` was needed. ABI v1 appended `movement_get` (`MirageMovement`; Lua `mirage.movement()`, C#
    `Mod.Movement()`). Self-test "Mirage movement tuning" passes Scenario A: five constants on, the jump 124 to 279 as
-   predicted, off, every value back exactly. Left: the transition record, and the constants in bytecode and native code.
+   predicted, off, every value back exactly. The transition record: ABI v1 appended `movement_transitions` (the last
+   256, JSON with the engine's EMovement names; Lua `mirage.transitions()`, C# `Mod.MovementTransitionsJson()`).
+   Building it showed the PLAYER_STATE event fired for few changes: its hook is the pawn's physics step, whose
+   "changed" argument is set only when physics starts over within a tick. The tick now dispatches every other change
+   after the fact (event_skip still works only in the physics step's). Left: the constants in bytecode and native code.
 5. **Kismet runtime.** As step 18: read sequences, change them through the change log, nodes from mod classes
    (step 12), and sequence events delivered to mods.
    **Status (2026-11-15): done.**

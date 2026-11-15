@@ -41,6 +41,7 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL KismetFire(MirageMod* mod, MirageObject* event, const char* output, MirageObject* instigator);
 	void MIRAGE_CALL KismetTrace(MirageMod* mod, int32_t on);
 	uint32_t MIRAGE_CALL KismetTraceRead(MirageMod* mod, char* buffer, uint32_t capacity);
+	uint32_t MIRAGE_CALL MovementTransitions(char* buffer, uint32_t capacity);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
@@ -113,7 +114,7 @@ namespace mirage::mods
 	std::vector<TestResult> RunTests(const std::vector<std::string>& mods);
 	void DispatchLevelLoad(bool finished, const std::string& map);	// Game thread
 	void DispatchDeath(bool after);									// Game thread
-	bool DispatchPlayerState();										// Game thread: reads the move state itself; true: a mod
+	bool DispatchPlayerState(bool fromHook = true);										// Game thread: reads the move state itself; true: a mod
 																	// skipped it (event_skip)
 	void DispatchKey(int vk);										// The window's thread
 	void DispatchStateRestored();									// Game thread: a TAS snapshot was put back

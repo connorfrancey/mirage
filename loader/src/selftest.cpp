@@ -2522,6 +2522,28 @@ void TestMovementTuning()
         if (std::fabs(after - normal) > normal * 0.1f) p.Problem(fmt::format("off again, the jump is {:.0f}, not {:.0f}", after, normal));
     }
     WaitGrounded();
+    // The transition record (movement_transitions): the jumps above are in it, named from the engine's EMovement
+    {
+        std::string text(mirage::mods::game_api::MovementTransitions(nullptr, 0) + 1, '\0');
+        text.resize(std::min<std::size_t>(mirage::mods::game_api::MovementTransitions(text.data(), static_cast<std::uint32_t>(text.size())),
+                                          text.size() - 1));
+        const auto list = nlohmann::json::parse(text, nullptr, false);
+        int jumps = 0, named = 0;
+        std::string sample;
+        if (list.is_array())
+            for (const auto& t : list) {
+                const std::string to = t.value("to_name", "");
+                named += !to.empty();
+                if (to == "MOVE_Jump") {
+                    ++jumps;
+                    if (sample.empty()) sample = t.value("from_name", "") + " -> " + to + fmt::format(" (tick {})", t.value("tick", 0ull));
+                }
+            }
+        const std::size_t total = list.is_array() ? list.size() : 0;
+        s.notes.push_back(fmt::format("transition record: {} entries, {} named, {} into MOVE_Jump (e.g. {})", total, named, jumps, sample));
+        if (jumps < 3) p.Problem(fmt::format("the transition record has {} jumps, not the 3 jumped here", jumps));
+        if (named != static_cast<int>(total)) p.Problem("some transitions have no move name");
+    }
     p.Check(1, true);
     End(s);
 }
@@ -3281,15 +3303,11 @@ void TestMirageContent()
         OnRenderThread([m, on] { m->SetEnabled(on); });
         WaitTicks(3);       // Applied / put back on the game thread
     };
+    // A new pawn by its ObjectId, not its address: the restarted pawn can get the old one's memory
     const auto respawn = [&] {
-        void* before = nullptr;
-        float c = 0, pw = 0;
-        readSteps(c, pw, &before);
-        OnGameThread([] { levels::RestartFromLastCheckpoint(); });
-        void* after = before;
-        WaitFor(30.0, [&] { readSteps(c, pw, &after); return after && after != before; });
-        WaitTicks(10);      // Not WaitPlayerReady: after a restart the controller's bFrozen stays set (engine leftover)
-        return after != before;
+        const bool came = RestartAndWait();
+        WaitTicks(10);      // RestartAndWait doesn't need the player unfrozen (the controller's bFrozen stays set)
+        return came;
     };
 
     set(false);
