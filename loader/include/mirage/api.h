@@ -906,6 +906,16 @@ typedef struct MirageApi {
      * the class in front: "Sequence Edge_p.TheWorld:PersistentLevel.Main_Sequence"). `level`: only that level's package
      * ("Edge_p"); NULL or "": every loaded level. Copies up to capacity, returns the full length. Game thread. */
     uint32_t(MIRAGE_CALL* kismet_read)(const char* level, char* buffer, uint32_t capacity);
+    /* Kismet edits. Each is recorded in the mod's open transaction (change_begin; one is opened for the edit when none
+     * is), so change_revert and the mod's unload put the graph back. `output` / `input`: a link's description
+     * ("Touched", "In") or its index ("0"); NULL or "": the first. The two ops must be in the same sequence. 1: done
+     * (kismet_link: or linked already), 0: not (the log says why). Game thread. */
+    int32_t(MIRAGE_CALL* kismet_link)(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
+    int32_t(MIRAGE_CALL* kismet_unlink)(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
+    /* A new op in `sequence`: `class_name` a SequenceOp class ("SeqAct_Log", "Engine.SeqAct_Toggle", a mod's class from
+     * class_define extending SequenceAction, its Activated injected). Its links are the class defaults'. Taken out of the
+     * sequence again on revert. NULL when it can't (the log says why). */
+    MirageObject*(MIRAGE_CALL* kismet_create)(MirageMod* mod, MirageObject* sequence, const char* class_name);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

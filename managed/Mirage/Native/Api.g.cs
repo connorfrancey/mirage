@@ -158,6 +158,9 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, byte*, void*, void*, int> test_register;
         public delegate* unmanaged[Cdecl]<void*, int> movement_get;
         public delegate* unmanaged[Cdecl]<byte*, byte*, uint, uint> kismet_read;
+        public delegate* unmanaged[Cdecl]<void*, void*, byte*, void*, byte*, int> kismet_link;
+        public delegate* unmanaged[Cdecl]<void*, void*, byte*, void*, byte*, int> kismet_unlink;
+        public delegate* unmanaged[Cdecl]<void*, void*, byte*, void*> kismet_create;
     }
 
     [StructLayout(LayoutKind.Sequential)]

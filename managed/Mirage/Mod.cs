@@ -172,6 +172,25 @@ namespace Mirage
             return System.Text.Encoding.UTF8.GetString(buffer, 0, (int)n);
         }
 
+        /// <summary>
+        /// Links <paramref name="from"/>'s output to <paramref name="to"/>'s input (a link's description, "Touched", or
+        /// its index, "0"; null: the first). Recorded in the open transaction (or one of its own): put back on revert
+        /// and unload. Game thread.
+        /// </summary>
+        public bool KismetLink(GameObject from, string? output, GameObject to, string? input = null) =>
+            Bridge.Api->kismet_link(Handle, from.Handle, Utf8.Intern(output ?? ""), to.Handle, Utf8.Intern(input ?? "")) != 0;
+
+        /// <summary>Removes a link (see <see cref="KismetLink"/>); put back on revert and unload. Game thread.</summary>
+        public bool KismetUnlink(GameObject from, string? output, GameObject to, string? input = null) =>
+            Bridge.Api->kismet_unlink(Handle, from.Handle, Utf8.Intern(output ?? ""), to.Handle, Utf8.Intern(input ?? "")) != 0;
+
+        /// <summary>
+        /// A new op of <paramref name="className"/> (a SequenceOp class) in <paramref name="sequence"/>; taken out again on
+        /// revert and unload. Not valid when it can't (the log says why). Game thread.
+        /// </summary>
+        public GameObject KismetCreate(GameObject sequence, string className) =>
+            new GameObject(Bridge.Api->kismet_create(Handle, sequence.Handle, Utf8.Intern(className)));
+
         /// <summary>What the player is doing now (the move, the previous move, velocity), or null without a player. Game thread.</summary>
         public Movement? Movement()
         {

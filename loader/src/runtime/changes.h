@@ -15,6 +15,7 @@
 #include "mirage/api.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,9 @@ namespace mirage::changes
 	// Whether object_set should record (a transaction is open on this thread), and the record (old value before the write)
 	bool Recording();
 	void Record(MirageObject* object, const char* path, const MirageValue& old);
+	// A change that isn't a property value (a Kismet link, a new object): `undo` puts it back on revert (true when it
+	// could, false when what it changed is gone). Recorded in the open transaction; returns false if none is open.
+	bool RecordUndo(const std::string& label, std::function<bool()> undo);
 
 	struct Result
 	{

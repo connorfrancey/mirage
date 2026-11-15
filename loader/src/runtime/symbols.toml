@@ -91,3 +91,11 @@ description = "Inside the frame timing function: the time globals are the operan
 kind = "code"
 pattern = "8D 4C 24 10 E8 ?? ?? ?? ?? 8B 4C 24 14 85 C9 7C 1E 3B CF 0F 8D ?? ?? ?? ?? 8B 04 8E 8B 40 08 25 ?? ?? ?? ?? 33 D2 0B C2 75 D6 E9 ?? ?? ?? ??"
 description = "Before the death functions: PreDeath and PostDeath are found within 4 KB after it"
+
+[StaticConstructObject]
+kind = "code"
+# UObject::StaticConstructObject(Class, InOuter, Name (FName: 2 dwords), SetFlags (QWORD), Template, Error,
+# SubobjectRoot, InstanceGraph), __cdecl: found through the script VM's `new` (UObject::execNew), which calls it.
+# The tail is its check of the class's ClassFlags for CLASS_Abstract.
+pattern = "6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 51 53 55 56 57 A1 ?? ?? ?? ?? 33 C4 50 8D 44 24 18 64 A3 00 00 00 00 8B 6C 24 4C 85 ED 89 6C 24 14 75 5C 8B 44 24 28 F7 80 E4 00 00 00 00 00 80 00"
+description = "Makes a new object of a class (not an actor: Spawn does those)"

@@ -1,0 +1,6 @@
+# Self-test (step 5 of the next ten steps, Scenario C): a Kismet node of the mod's own, its Activated in Lua, wired into
+# the Prologue's Kismet in place of a touch event's links; put back on revert and on unload
+id = "kismet-edit"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): edits the Prologue's Kismet from Lua"
+mirage = "^0.1"

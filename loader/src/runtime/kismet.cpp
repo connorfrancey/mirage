@@ -1,10 +1,16 @@
 #include "runtime/kismet.h"
 
+#include "runtime/classes.h"
+#include "runtime/maps.h"
+#include "runtime/symbols.h"
 #include "sdk/SDK.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 
 namespace mirage::kismet
 {
@@ -142,5 +148,163 @@ namespace mirage::kismet
 						   {"enabled", s.enabled}, {"ops", ops}});
 		}
 		return all.dump();
+	}
+
+	// ---- Editing -------------------------------------------------------------------------------------------------------
+	namespace
+	{
+		struct RawArray
+		{
+			std::uint8_t* data;
+			std::int32_t count, max;
+		};
+		static_assert(sizeof(RawArray) == 12);
+		template <class T> RawArray& Raw(Classes::TArray<T>& a) { return reinterpret_cast<RawArray&>(a); }
+
+		// Room for one more element of `size` bytes (GMalloc's Realloc: the engine frees and grows these arrays)
+		bool Reserve(RawArray& a, std::size_t size)
+		{
+			if (a.count < a.max) return true;
+			void** var = maps::GMallocVariable();
+			if (!var || !*var) return false;
+			const std::int32_t grown = a.max < 4 ? 4 : a.max * 2;
+			void* m = *var;
+			using Fn = void*(__thiscall*)(void*, void*, std::uint32_t, std::uint32_t);
+			void* p = reinterpret_cast<Fn>((*reinterpret_cast<void***>(m))[2])(m, a.data, static_cast<std::uint32_t>(grown * size), 8);
+			if (!p) return false;
+			a.data = static_cast<std::uint8_t*>(p);
+			a.max = grown;
+			return true;
+		}
+		bool Insert(RawArray& a, std::size_t size, int at, const void* element)
+		{
+			if (!Reserve(a, size)) return false;
+			if (at < 0 || at > a.count) at = a.count;
+			std::memmove(a.data + (at + 1) * size, a.data + at * size, (a.count - at) * size);
+			std::memcpy(a.data + at * size, element, size);
+			++a.count;
+			return true;
+		}
+		void Erase(RawArray& a, std::size_t size, int at)
+		{
+			std::memmove(a.data + at * size, a.data + (at + 1) * size, (a.count - at - 1) * size);
+			--a.count;
+		}
+
+		template <class DescOf> int IndexOf(const char* which, int count, DescOf descOf)
+		{
+			if (!which || !*which) return count > 0 ? 0 : -1;
+			char* end = nullptr;
+			const long n = std::strtol(which, &end, 10);
+			if (end != which && *end == '\0') return n >= 0 && n < count ? static_cast<int>(n) : -1;
+			for (int i = 0; i < count; ++i)
+				if (_stricmp(descOf(i).c_str(), which) == 0) return i;
+			return -1;
+		}
+
+		bool Derives(const Classes::UClass* cls, const Classes::UClass* base)
+		{
+			for (const Classes::UStruct* s = cls; s; s = s->SuperField)
+				if (s == base) return true;
+			return false;
+		}
+
+		// UObject::StaticConstructObject (runtime/symbols.toml)
+		using ConstructFn = Classes::UObject*(__cdecl*)(Classes::UClass* cls, Classes::UObject* outer, int nameIndex, int nameNumber,
+														std::uint32_t flagsLo, std::uint32_t flagsHi, Classes::UObject* templ,
+														void* error, Classes::UObject* subobjectRoot, void* instanceGraph);
+	}
+
+	int OutputIndex(Classes::USequenceOp* op, const char* which)
+	{
+		return IndexOf(which, static_cast<int>(op->OutputLinks.Num()), [&](int i) { return Narrow(op->OutputLinks[i].LinkDesc); });
+	}
+	int InputIndex(Classes::USequenceOp* op, const char* which)
+	{
+		return IndexOf(which, static_cast<int>(op->InputLinks.Num()), [&](int i) { return Narrow(op->InputLinks[i].LinkDesc); });
+	}
+
+	LinkResult AddLink(Classes::USequenceOp* from, int output, Classes::USequenceOp* to, int input, int at, std::string* error)
+	{
+		auto fail = [&](std::string why) {
+			if (error) *error = std::move(why);
+			return LinkResult::Failed;
+		};
+		if (!from || !to) return fail("no op");
+		if (from->ParentSequence != to->ParentSequence) return fail("the ops are in different sequences");
+		if (output < 0 || output >= static_cast<int>(from->OutputLinks.Num())) return fail("no such output");
+		if (input < 0 || input >= static_cast<int>(to->InputLinks.Num())) return fail("no such input");
+		auto& links = from->OutputLinks[output].Links;
+		for (std::size_t i = 0; i < links.Num(); ++i)
+			if (links[i].LinkedOp == to && links[i].InputLinkIdx == input) return LinkResult::Exists;
+		const Classes::FSeqOpOutputInputLink link{to, input};
+		if (!Insert(Raw(links), sizeof link, at, &link)) return fail("the engine's allocator isn't known");
+		return LinkResult::Added;
+	}
+
+	int RemoveLink(Classes::USequenceOp* from, int output, Classes::USequenceOp* to, int input)
+	{
+		if (!from || output < 0 || output >= static_cast<int>(from->OutputLinks.Num())) return -1;
+		auto& links = from->OutputLinks[output].Links;
+		for (int i = 0; i < static_cast<int>(links.Num()); ++i)
+			if (links[i].LinkedOp == to && links[i].InputLinkIdx == input) {
+				Erase(Raw(links), sizeof(Classes::FSeqOpOutputInputLink), i);
+				return i;
+			}
+		return -1;
+	}
+
+	Classes::USequenceOp* Construct(Classes::USequence* sequence, Classes::UClass* cls, std::string* error)
+	{
+		auto fail = [&](std::string why) -> Classes::USequenceOp* {
+			if (error) *error = std::move(why);
+			return nullptr;
+		};
+		if (!sequence || !cls) return fail("no sequence or class");
+		if (!Derives(cls, Classes::USequenceOp::StaticClass())) return fail(cls->GetName() + " isn't a SequenceOp class");
+		if (classes::ClassFlags(cls) & 0x1) return fail(cls->GetName() + " is abstract");
+		auto construct = reinterpret_cast<ConstructFn>(symbols::Find("StaticConstructObject"));
+		if (!construct) return fail("StaticConstructObject wasn't found");
+		auto* op = static_cast<Classes::USequenceOp*>(construct(cls, sequence, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr));
+		if (!op) return fail("the engine didn't construct it");
+		op->ParentSequence = sequence;
+		Classes::USequenceObject* object = op;
+		if (!Insert(Raw(sequence->SequenceObjects), sizeof object, -1, &object)) return fail("the engine's allocator isn't known");
+		return op;
+	}
+
+	bool RemoveOp(Classes::USequence* sequence, Classes::USequenceObject* op)
+	{
+		if (!sequence || !op) return false;
+		bool found = false;
+		RawArray& objects = Raw(sequence->SequenceObjects);
+		for (int i = objects.count - 1; i >= 0; --i)
+			if (sequence->SequenceObjects[i] == op) {
+				Erase(objects, sizeof(void*), i);
+				found = true;
+			}
+		RawArray& active = Raw(sequence->ActiveSequenceOps);
+		for (int i = active.count - 1; i >= 0; --i)
+			if (static_cast<Classes::USequenceObject*>(sequence->ActiveSequenceOps[i]) == op) Erase(active, sizeof(void*), i);
+		RawArray& delayed = Raw(sequence->DelayedActivatedOps);
+		for (int i = delayed.count - 1; i >= 0; --i) {
+			const auto& d = sequence->DelayedActivatedOps[i];
+			if (static_cast<Classes::USequenceObject*>(d.Op) == op || static_cast<Classes::USequenceObject*>(d.ActivatorOp) == op)
+				Erase(delayed, sizeof(Classes::FActivateOp), i);
+		}
+		for (std::size_t k = 0; k < sequence->SequenceObjects.Num(); ++k) {
+			auto* so = sequence->SequenceObjects[k];
+			if (!so || !so->IsA(Classes::USequenceOp::StaticClass())) continue;
+			auto* other = static_cast<Classes::USequenceOp*>(so);
+			for (std::size_t o = 0; o < other->OutputLinks.Num(); ++o) {
+				auto& links = other->OutputLinks[o].Links;
+				RawArray& raw = Raw(links);
+				for (int i = raw.count - 1; i >= 0; --i)
+					if (static_cast<Classes::USequenceObject*>(links[i].LinkedOp) == op)
+						Erase(raw, sizeof(Classes::FSeqOpOutputInputLink), i);
+			}
+		}
+		if (found) op->ParentSequence = nullptr;
+		return found;
 	}
 }

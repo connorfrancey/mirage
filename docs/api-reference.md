@@ -41,7 +41,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Engine symbols and hooks](#engine-symbols-and-hooks) (4)
 - [Mod tests](#mod-tests) (1)
 - [The player and movement](#the-player-and-movement) (1)
-- [Kismet](#kismet) (1)
+- [Kismet](#kismet) (4)
 - [Types](#types)
 
 ## Basics
@@ -1233,6 +1233,28 @@ Objects by path (object_find with the class in front: "Sequence Edge_p.TheWorld:
 ```c
 uint32_t(MIRAGE_CALL* kismet_read)(const char* level, char* buffer, uint32_t capacity);
 ```
+
+### `kismet_link`
+
+```c
+int32_t(MIRAGE_CALL* kismet_link)(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
+```
+
+Kismet edits. Each is recorded in the mod's open transaction (change_begin; one is opened for the edit when none is), so change_revert and the mod's unload put the graph back. `output` / `input`: a link's description ("Touched", "In") or its index ("0"); NULL or "": the first. The two ops must be in the same sequence. 1: done (kismet_link: or linked already), 0: not (the log says why). Game thread.
+
+### `kismet_unlink`
+
+```c
+int32_t(MIRAGE_CALL* kismet_unlink)(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
+```
+
+### `kismet_create`
+
+```c
+MirageObject*(MIRAGE_CALL* kismet_create)(MirageMod* mod, MirageObject* sequence, const char* class_name);
+```
+
+A new op in `sequence`: `class_name` a SequenceOp class ("SeqAct_Log", "Engine.SeqAct_Toggle", a mod's class from class_define extending SequenceAction, its Activated injected). Its links are the class defaults'. Taken out of the sequence again on revert. NULL when it can't (the log says why).
 
 ## Types
 

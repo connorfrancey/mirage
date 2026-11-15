@@ -207,6 +207,9 @@ namespace mirage::mods
 		static int TestFn(lua_State* L);
 		static int MovementFn(lua_State* L);
 		static int KismetFn(lua_State* L);
+		static int KismetLinkFn(lua_State* L);
+		static int KismetUnlinkFn(lua_State* L);
+		static int KismetCreateFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1207,6 +1210,40 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.kismet_link(from, output, to, input) / mirage.kismet_unlink(...): `output` and `input` a link's description
+	// ("Touched", "In") or its index (0-based); nil: the first. True when done; recorded in the open transaction (or one
+	// of its own), so the graph is put back on revert and unload.
+	int LuaMod::KismetLinkFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_link)) return luaL_error(L, "mirage.kismet_link: this runtime can't edit Kismet");
+		MirageObject* from = CheckObject(L, 1);
+		MirageObject* to = CheckObject(L, 3);
+		lua_pushboolean(L, self.api_->kismet_link(self.mod_, from, luaL_optstring(L, 2, ""), to, luaL_optstring(L, 4, "")) != 0);
+		return 1;
+	}
+	int LuaMod::KismetUnlinkFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_unlink)) return luaL_error(L, "mirage.kismet_unlink: this runtime can't edit Kismet");
+		MirageObject* from = CheckObject(L, 1);
+		MirageObject* to = CheckObject(L, 3);
+		lua_pushboolean(L, self.api_->kismet_unlink(self.mod_, from, luaL_optstring(L, 2, ""), to, luaL_optstring(L, 4, "")) != 0);
+		return 1;
+	}
+	// mirage.kismet_create(sequence, class): a new op of `class` (a SequenceOp class name or path, a mod's defined class)
+	// in `sequence`, or nil (the log says why)
+	int LuaMod::KismetCreateFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_create)) return luaL_error(L, "mirage.kismet_create: this runtime can't edit Kismet");
+		MirageObject* sequence = CheckObject(L, 1);
+		MirageObject* op = self.api_->kismet_create(self.mod_, sequence, luaL_checkstring(L, 2));
+		if (op) PushObject(L, op);
+		else lua_pushnil(L);
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -1960,7 +1997,8 @@ namespace mirage::mods
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
-			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {"kismet", KismetFn}, {nullptr, nullptr}};
+			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {"kismet", KismetFn},
+			{"kismet_link", KismetLinkFn}, {"kismet_unlink", KismetUnlinkFn}, {"kismet_create", KismetCreateFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

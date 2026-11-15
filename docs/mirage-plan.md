@@ -1949,16 +1949,25 @@ with a template and docs.
    predicted, off, every value back exactly. Left: the transition record, and the constants in bytecode and native code.
 5. **Kismet runtime.** As step 18: read sequences, change them through the change log, nodes from mod classes
    (step 12), and sequence events delivered to mods.
-   **Status (2026-11-14): the read side and the investigation are done; the write side is next.** `runtime/kismet`
-   reads every sequence of the loaded levels from memory (ops, inputs, outputs and their links, variable links,
-   runtime state); ABI v1 appended `kismet_read` (JSON; Lua `mirage.kismet()` as tables, C# `Mod.KismetJson()`). The
-   investigation (self-test "Mirage Kismet (read)", the Prologue): 131 sequences (one root, 130 nested), 2,077 objects
-   (305 events, 928 actions, 605 variables), 1,247 links, read in 7.8 ms in release (target 20); cooking kept every
-   object's editor title (data can name nodes as the editor shows them); every link leads to an op that was read; a
-   checkpoint restart keeps the same sequence objects, so a runtime edit survives it and a Kismet layer is applied at
-   level loads only. The write side needs: link arrays grown through the engine's allocator (GMalloc, a symbol since
-   step 2), change log records for structural edits (not only property values), and new ops made by the engine's object
-   constructor (a symbol to add).
+   **Status (2026-11-14): Scenario C passes; Kismet layers, firing events from mods and the trace are left.**
+   `runtime/kismet` reads every sequence of the loaded levels from memory (ops, inputs, outputs and their links,
+   variable links, runtime state) and edits them: links added (the engine's arrays grown through GMalloc) and removed,
+   new ops made by the engine's own constructor (`StaticConstructObject`, a symbol found through the script VM's `new`;
+   the op's links come from its class defaults) and taken out again (from `SequenceObjects`, the active and delayed
+   lists, every link to it). ABI v1 appended `kismet_read` (JSON; Lua `mirage.kismet()` as tables, C#
+   `Mod.KismetJson()`), `kismet_link`, `kismet_unlink` and `kismet_create` (links by description or index; Lua, C#,
+   C++). Each edit's undo goes in the change log (`changes::RecordUndo`, new: structural edits next to property
+   values), in the mod's open transaction or one of its own, so revert and unload put the graph back. A mod's node is
+   a class from step 12 (`define_class` extending `SequenceAction`, `Activated` in Lua). The investigation (self-test
+   "Mirage Kismet (read)", the Prologue): 131 sequences (one root, 130 nested), 2,077 objects (305 events, 928
+   actions, 605 variables), 1,247 links, read in 7.8 ms in release (target 20); cooking kept every object's editor
+   title; every link leads to an op that was read; a checkpoint restart keeps the same sequence objects. Self-test
+   "Mirage Kismet (edit)" (tests/mods/kismet-edit) is Scenario C: the mod takes a Prologue touch event's links (a
+   `Trigger`'s), wires it to its own Ping action, the player walks in and the Lua runs once (the op's own counter
+   agrees); the edit survives a checkpoint restart; a hot reload puts the graph back and the reloaded mod edits it
+   again (one Ping op, a new one); the module off (`mirage.revert`) leaves the graph exactly as read before (ops and
+   links compared). Left: Kismet layers (`kismet/<map>.toml`), firing an event from a mod, the execution trace, and
+   the offline comparison with UnrealLib's read of the package.
 6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with
    native-only queries through step 2.
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.

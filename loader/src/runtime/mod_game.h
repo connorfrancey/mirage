@@ -35,6 +35,9 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL TestRegister(MirageMod* mod, const char* name, MirageTestFn fn, void* user);
 	int32_t MIRAGE_CALL MovementGet(MirageMovement* out);
 	uint32_t MIRAGE_CALL KismetRead(const char* level, char* buffer, uint32_t capacity);
+	int32_t MIRAGE_CALL KismetLink(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
+	int32_t MIRAGE_CALL KismetUnlink(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
+	MirageObject* MIRAGE_CALL KismetCreate(MirageMod* mod, MirageObject* sequence, const char* class_name);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

@@ -2,13 +2,22 @@
 // The levels' Kismet, read (step 5 of the next ten steps; the plan's step 18). Everything Kismet is is UObjects already in
 // the engine: a level's sequences (USequence, nested ones inside), their objects (SequenceObjects: events, actions,
 // conditions, variables), each op's input, output and variable links, and its runtime state. This reads them as they
-// are in memory; changing them (links, new nodes, through the change log) is the next part of the step.
+// are in memory. The edit primitives below change them; the mod API (kismet_link, kismet_unlink, kismet_create) records
+// each edit's undo in the change log, so a mod's edits go when it unloads.
 //
 // Objects are named by their path ("Edge_p.TheWorld:PersistentLevel.Main_Sequence.SeqEvent_Touch_3"), the same name
 // object_find takes. Game thread.
 
 #include <string>
 #include <vector>
+
+namespace Classes
+{
+	class UClass;
+	class USequence;
+	class USequenceObject;
+	class USequenceOp;
+}
 
 namespace mirage::kismet
 {
@@ -55,4 +64,21 @@ namespace mirage::kismet
 	// "variables": [{"desc", "linked": [...]}], "originator"}]}]
 	std::string ToJson(const std::vector<Sequence>& sequences);
 	const char* KindName(Op::Kind kind);
+
+	// ---- Editing (game thread; the callers check the objects are alive) ----------------------------------------------
+	// An output's (input's) index from its description ("Touched") or a decimal index ("0"); NULL or "": 0. -1: none such
+	int OutputIndex(Classes::USequenceOp* op, const char* which);
+	int InputIndex(Classes::USequenceOp* op, const char* which);
+
+	enum class LinkResult { Added, Exists, Failed };
+	// from.OutputLinks[output] -> to.InputLinks[input], both ops in the same sequence. `at`: where in the output's list
+	// (-1: the end). Engine arrays grow through GMalloc.
+	LinkResult AddLink(Classes::USequenceOp* from, int output, Classes::USequenceOp* to, int input, int at, std::string* error);
+	// Removes that link; returns where it was in the output's list, -1 if it wasn't there
+	int RemoveLink(Classes::USequenceOp* from, int output, Classes::USequenceOp* to, int input);
+	// A new op of `cls` (a SequenceOp class, not abstract) in `sequence`: constructed by the engine
+	// (StaticConstructObject: its links come from the class defaults), its ParentSequence set, added to SequenceObjects
+	Classes::USequenceOp* Construct(Classes::USequence* sequence, Classes::UClass* cls, std::string* error);
+	// Takes `op` out of `sequence`: SequenceObjects, the active and delayed lists, every link to it. The GC frees it.
+	bool RemoveOp(Classes::USequence* sequence, Classes::USequenceObject* op);
 }

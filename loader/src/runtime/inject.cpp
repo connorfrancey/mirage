@@ -1,4 +1,5 @@
 #include "runtime/inject.h"
+#include "runtime/symbols.h"
 
 #include "core/clock.h"
 #include "runtime/call.h"
@@ -283,6 +284,11 @@ namespace mirage::inject
 								static_cast<LONG>(reinterpret_cast<std::uintptr_t>(reinterpret_cast<void*>(&Stub))));
 			spdlog::info("Script injection: native table at {:#x} ({} of {} natives matched), stub in slot {} ({} free entries)",
 						 found, natives.size(), natives.size(), g_slot, counts[undefined]);
+			// The VM's own opcodes by name (runtime/symbols.h): `new` makes objects through the engine's constructor
+			symbols::Provide("GNatives", found, "data", "The script VM's native function table (one entry per opcode)");
+			if (const std::uint8_t op = OpcodeOf(TokenKind::New); op != 0xFF)
+				symbols::Provide("UObject::execNew", reinterpret_cast<std::uintptr_t>(table[op]), "code",
+								 "The script VM's `new`: constructs an object of a class (StaticConstructObject)");
 			return true;
 		}
 

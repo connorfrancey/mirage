@@ -15,6 +15,7 @@ namespace mirage::changes
 			MirageHandle object{};
 			std::string path, label;		// label: "<object name>.<path>"
 			MirageValue old{};
+			std::function<bool()> undo;		// A structural change (RecordUndo): put back by this instead of a value
 		};
 		struct Transaction
 		{
@@ -38,6 +39,11 @@ namespace mirage::changes
 			if (t.reverted) return r;
 			t_reverting = true;
 			for (auto e = t.entries.rbegin(); e != t.entries.rend(); ++e) {
+				if (e->undo) {
+					if (e->undo()) ++r.restored;
+					else ++r.gone;
+					continue;
+				}
 				MirageObject* o = g_writer.resolve ? g_writer.resolve(&e->object) : nullptr;
 				if (o && g_writer.set && g_writer.set(o, e->path.c_str(), &e->old)) ++r.restored;
 				else ++r.gone;
@@ -89,6 +95,17 @@ namespace mirage::changes
 		e.label = std::string(name) + "." + path;
 		e.old = old;
 		t_open->entries.push_back(std::move(e));
+	}
+
+	bool RecordUndo(const std::string& label, std::function<bool()> undo)
+	{
+		if (!Recording() || !undo) return false;
+		std::lock_guard lock(g_lock);
+		Entry e;
+		e.label = label;
+		e.undo = std::move(undo);
+		t_open->entries.push_back(std::move(e));
+		return true;
 	}
 
 	Result Revert(const std::string& modId, int id)

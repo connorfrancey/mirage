@@ -1874,6 +1874,27 @@ void TestModTests()
     End(s);
 }
 
+// A checkpoint restart, waited out: the restart runs on a later tick, so the pawn there now is the old one until a new
+// one (another ObjectId: a new pawn can take the old one's memory) is in and ready. False if none came.
+bool RestartAndWait(double timeout = 30.0)
+{
+    game::ObjectId before{};
+    OnGameThread([&] {
+        before = game::IdOf(game::Pawn());
+        levels::RestartFromLastCheckpoint();
+    });
+    const bool came = WaitFor(timeout, [&] {
+        bool fresh = false;
+        OnGameThread([&] {
+            const auto* now = game::Pawn();
+            fresh = now && !game::IsLoading() && !(game::IdOf(now) == before);
+        }, 1.0);
+        return fresh;
+    });
+    WaitPlayerReady(5.0);		// Frozen a while after a Prologue restart: what's checked next doesn't need it moving
+    return came;
+}
+
 // Step 5 of the next ten steps (the plan's step 18), the read side and its investigation: the loaded level's Kismet as
 // the engine holds it (runtime/kismet.h). Every link leads to an op the read found; the read is timed (the target is
 // under 20 ms for a level's whole graph); what cooking kept (the editor's titles) and whether a checkpoint restart keeps
@@ -1943,17 +1964,7 @@ sampled:
     const std::string before = rootOf(seqs);
     void* rootBefore = nullptr;
     OnGameThread([&] { rootBefore = game::FindObject<Classes::UObject>(("Sequence " + seqs.front().path).c_str()); });
-    const void* pawnBefore = nullptr;
-    OnGameThread([&] {
-        pawnBefore = game::Pawn();
-        levels::RestartFromLastCheckpoint();
-    });
-    WaitFor(30.0, [&] {
-        const void* now = nullptr;
-        OnGameThread([&] { now = game::Pawn(); }, 1.0);
-        return now && !game::IsLoading();
-    });
-    WaitPlayerReady(10.0);
+    if (!RestartAndWait()) p.Problem("no new player came after the checkpoint restart");
     std::vector<ki::Sequence> again;
     void* rootAfter = nullptr;
     OnGameThread([&] {
@@ -1963,6 +1974,214 @@ sampled:
     if (!rootBefore) p.Problem("the root sequence wasn't found by its name (object_find) before the restart");
     s.notes.push_back(fmt::format("after a checkpoint restart: {} sequence(s), root \"{}\" -> \"{}\", the same object: {}",
                                   again.size(), before, rootOf(again), rootBefore && rootBefore == rootAfter ? "yes" : "no"));
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 5 of the next ten steps, the plan's Scenario C: tests/mods/kismet-edit takes over a Prologue touch event (its
+// links out removed, one added to a new op of the mod's own SequenceAction class, its Activated in Lua). The player
+// walks into the event's trigger and the Lua runs; a checkpoint restart keeps the edit (the same sequence objects); a
+// hot reload puts the graph back and the reloaded mod edits it again (a new op, the old one gone); the module off
+// (mirage.revert) leaves the graph exactly as it was read before.
+std::string KismetEditShared(const char* key)
+{
+    char v[512]{};
+    mirage::mods::game_api::ShareGet("kismet-edit", key, v, sizeof v);
+    return v;
+}
+
+// The graph's structure as text (each sequence's ops and every link, sorted): what an edit changes and a revert puts back
+std::string KismetGraph(const std::vector<mirage::kismet::Sequence>& seqs)
+{
+    std::vector<std::string> lines;
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops) {
+            lines.push_back(q.path + " has " + op.path + " (" + op.cls + ")");
+            for (std::size_t o = 0; o < op.outputs.size(); ++o)
+                for (const auto& l : op.outputs[o].links)
+                    lines.push_back(fmt::format("{}[{}] -> {}[{}]", op.path, o, l.op, l.input));
+        }
+    std::sort(lines.begin(), lines.end());
+    std::string out;
+    for (const auto& l : lines) out += l + "\n";
+    return out;
+}
+
+// Where `event`'s Touched output leads now ("" if nowhere; "+" between several)
+std::string KismetTouchedTargets(const std::vector<mirage::kismet::Sequence>& seqs, const std::string& event, std::string* cls)
+{
+    std::map<std::string, std::string> classes;
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops) classes[op.path] = op.cls;
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops)
+            if (op.path == event && !op.outputs.empty()) {
+                std::string out;
+                for (const auto& l : op.outputs[0].links) {
+                    out += (out.empty() ? "" : "+") + l.op;
+                    if (cls) *cls = classes[l.op];
+                }
+                return out;
+            }
+    return {};
+}
+
+int KismetCount(const std::vector<mirage::kismet::Sequence>& seqs, const std::string& cls)
+{
+    int n = 0;
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops) n += op.cls == cls;
+    return n;
+}
+
+void TestKismetEdit()
+{
+    Step& s = Begin("Mirage Kismet (edit)");
+    Probe p(s);
+    namespace ki = mirage::kismet;
+    Module* m = modules::Find("Kismet edit (Lua)");
+    if (!m) {
+        p.Problem("the Kismet edit (Lua) module is missing (tests/mods/kismet-edit)");
+        End(s);
+        return;
+    }
+    const auto read = [] {
+        std::vector<ki::Sequence> v;
+        OnGameThread([&] { v = ki::Read(); }, 10.0);
+        return v;
+    };
+    // A player to walk in (frozen is fine: after the read step's checkpoint restart the Prologue holds it a while)
+    WaitFor(15.0, [] {
+        bool there = false;
+        OnGameThread([&] { there = game::Pawn() && !game::IsLoading(); }, 1.0);
+        return there;
+    });
+    const std::string original = KismetGraph(read());
+    const auto firstDifference = [&](const std::string& now) {
+        std::istringstream a(original), b(now);
+        std::string x, y;
+        while (true) {
+            const bool ha = static_cast<bool>(std::getline(a, x)), hb = static_cast<bool>(std::getline(b, y));
+            if (!ha && !hb) return std::string();
+            if (x != y || ha != hb) return "was \"" + (ha ? x : "") + "\", now \"" + (hb ? y : "") + "\"";
+        }
+    };
+    const auto finish = [&] {
+        OnRenderThread([m] { m->SetEnabled(false); });
+        WaitTicks(5);
+        End(s);
+    };
+
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitFor(20.0, [] { return !KismetEditShared("applied").empty() || !KismetEditShared("problem").empty(); });
+    if (const std::string why = KismetEditShared("problem"); !why.empty() || KismetEditShared("applied").empty()) {
+        p.Problem("the mod didn't edit the graph: " + (why.empty() ? std::string("it never said so") : why));
+        finish();
+        return;
+    }
+    const std::string event = KismetEditShared("event");
+    std::string cls;
+    const std::string ping = KismetTouchedTargets(read(), event, &cls);
+    s.notes.push_back(fmt::format("{}: {} link(s) out removed, Touched -> {} ({})", event, KismetEditShared("unlinked"), ping, cls));
+    if (ping.empty() || ping.find('+') != std::string::npos || cls != "MirageSeqAct_Ping") {
+        p.Problem("the event's Touched doesn't lead to one MirageSeqAct_Ping op");
+        finish();
+        return;
+    }
+
+    // Walking in: the player put at the event's trigger, nudged until it touches
+    // (Out of it first: a player already inside the trigger, at a checkpoint in it, gets no new touch moving into it)
+    int triggerCount = 0;
+    Classes::FVector home{}, target{};
+    std::string state = "no event, trigger or player";
+    OnGameThread([&] {
+        auto* ev = game::FindObject<Classes::USequenceEvent>(("SeqEvent_Touch " + event).c_str());
+        auto* pawn = game::Pawn();
+        if (!ev || !ev->Originator || !pawn) {
+            state = fmt::format("event {}, its trigger {}, the player {}", ev ? "found" : "not found",
+                                ev && ev->Originator ? "found" : "not found", pawn ? "found" : "not found");
+            return;
+        }
+        triggerCount = ev->TriggerCount;
+        home = pawn->Location;
+        target = ev->Originator->Location;
+        Classes::FVector above = target;
+        above.Z += 600.f;
+        const bool out = pawn->SetLocation(above);
+        state = fmt::format("{} ({}), enabled {}, fired {}/{}, retrigger delay {:.1f}, lifted out: {}", ev->Originator->GetName(),
+                            ev->Originator->Class->GetName(), ev->bEnabled ? 1 : 0, ev->TriggerCount, ev->MaxTriggerCount,
+                            ev->ReTriggerDelay, out ? "yes" : "no");
+    });
+    WaitTicks(2);
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        const bool in = pawn->SetLocation(target);
+        const float dx = pawn->Location.X - target.X, dy = pawn->Location.Y - target.Y, dz = pawn->Location.Z - target.Z;
+        state += fmt::format(", put in: {} ({:.0f} units from its center)", in ? "yes" : "no", std::sqrt(dx * dx + dy * dy + dz * dz));
+    });
+    s.notes.push_back("the trigger: " + state);
+    int pings = 0;
+    const clk::Ticks walkStart = clk::Now();
+    for (int i = 0; pings == 0 && clk::SecondsSince(walkStart) < 6.0; ++i) {
+        WaitTicks(1);
+        pings = static_cast<int>(util::ParseFloatOr(KismetEditShared("pings").c_str(), 0.f));
+        if (pings == 0 && i % 4 == 3)
+            OnGameThread([&] {
+                if (auto* pawn = game::Pawn()) {
+                    Classes::FVector at = pawn->Location;
+                    at.Z += (i % 8 == 3) ? -1.f : 1.f;
+                    pawn->SetLocation(at);
+                }
+            });
+    }
+    int opPings = -1, activations = -1, fired = -1;
+    OnGameThread([&] {
+        if (auto* op = game::FindObject<Classes::UObject>(("MirageSeqAct_Ping " + ping).c_str())) {
+            opPings = mirage::reflect::GetInt(mirage::reflect::Resolve(op->Class, op, "Pings"));
+            activations = static_cast<Classes::USequenceOp*>(op)->ActivateCount;
+        }
+        if (auto* ev = game::FindObject<Classes::USequenceEvent>(("SeqEvent_Touch " + event).c_str())) fired = ev->TriggerCount - triggerCount;
+        // The event as it was: walking in again must fire it (the reloaded mod picks the same one)
+        if (auto* ev = game::FindObject<Classes::USequenceEvent>(("SeqEvent_Touch " + event).c_str())) ev->TriggerCount = triggerCount;
+        if (auto* pawn = game::Pawn()) pawn->SetLocation(home);
+    });
+    s.notes.push_back(fmt::format("walking in: the event fired {} time(s), the op activated {} time(s), the Lua Activated ran {} "
+                                  "time(s), the op's Pings is {}", fired, activations, pings, opPings));
+    if (pings == 0) p.Problem("walking into the trigger didn't run the mod's Activated");
+    else if (opPings != pings) p.Problem(fmt::format("the op's Pings is {}, the mod counted {}", opPings, pings));
+
+    // A checkpoint restart: the same sequence objects, so the edit stays
+    if (!RestartAndWait()) p.Problem("no new player came after the checkpoint restart");
+    const std::string afterRestart = KismetTouchedTargets(read(), event, nullptr);
+    s.notes.push_back("after a checkpoint restart, Touched -> " + afterRestart);
+    if (afterRestart != ping) p.Problem("a checkpoint restart lost the edit (Touched -> " + afterRestart + ")");
+
+    // A hot reload: the unload puts the graph back, the reloaded mod edits it again with a new op
+    std::string reload = "not run";
+    OnGameThread([&] { reload = mirage::mods::Reload("kismet-edit"); }, 10.0);
+    if (!reload.empty()) p.Problem("the hot reload failed: " + reload);
+    std::string again, againCls;
+    int pingOps = 0;
+    WaitFor(20.0, [&] {
+        const auto now = read();
+        again = KismetTouchedTargets(now, event, &againCls);
+        pingOps = KismetCount(now, "MirageSeqAct_Ping");
+        return !again.empty() && again != ping && againCls == "MirageSeqAct_Ping";
+    });
+    s.notes.push_back(fmt::format("after a hot reload, Touched -> {} ({} Ping op(s) in the level)", again, pingOps));
+    if (again == ping || againCls != "MirageSeqAct_Ping") p.Problem("the reloaded mod's edit isn't there (Touched -> " + again + ")");
+    if (pingOps != 1) p.Problem(fmt::format("{} Ping ops in the level after the reload: the unload didn't take the old one out", pingOps));
+
+    // Off: mirage.revert() puts everything back
+    OnRenderThread([m] { m->SetEnabled(false); });
+    std::string diff;
+    WaitFor(10.0, [&] {
+        diff = firstDifference(KismetGraph(read()));
+        return diff.empty();
+    });
+    s.notes.push_back("module off: reverted " + KismetEditShared("reverted") + (diff.empty() ? ", the graph is as it was" : ""));
+    if (!diff.empty()) p.Problem("the graph isn't as it was after the revert: " + diff);
     p.Check(1, true);
     End(s);
 }
@@ -2096,6 +2315,8 @@ void TestEngineSymbols()
     for (const char* name : {"FrameTiming", "PreDeath", "PostDeath", "GConfig", "GMalloc"})
         if (!mirage::symbols::Find(name)) p.Problem(std::string("the runtime's code didn't provide ") + name);
     s.notes.push_back(fmt::format("{} symbols from symbols.toml, {} provided by the runtime's code", fromToml, provided));
+    if (const std::uintptr_t n = mirage::symbols::Find("UObject::execNew"))
+        s.notes.push_back(fmt::format("UObject::execNew at MirrorsEdge.exe+{:#x}", n - reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr))));
 
     Module* m = modules::Find("Hook (symbol)");
     if (!m) {
@@ -4992,6 +5213,7 @@ const Named* FeatureList()
         {"Mirage engine symbols", &TestEngineSymbols, false},
         {"Mirage movement tuning", &TestMovementTuning, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},
+        {"Mirage Kismet (edit)", &TestKismetEdit, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

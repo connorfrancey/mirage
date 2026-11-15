@@ -900,6 +900,7 @@ namespace mirage::mods
 			game_api::ChangeBegin, game_api::ChangeEnd, game_api::ChangeRevert, game_api::ChangeList,
 			game_api::SymbolFind, game_api::DetourSymbol, game_api::MidHookCreate, game_api::MidHookRemove,
 			game_api::TestRegister, game_api::MovementGet, game_api::KismetRead,
+			game_api::KismetLink, game_api::KismetUnlink, game_api::KismetCreate,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

@@ -33,6 +33,7 @@
 #include <chrono>
 #include <atomic>
 #include <cstring>
+#include <functional>
 #include <list>
 #include <map>
 #include <memory>
@@ -797,6 +798,109 @@ namespace mirage::mods
 			if (level && *level)
 				std::erase_if(all, [&](const kismet::Sequence& s) { return _stricmp(s.level.c_str(), level) != 0; });
 			return CopyOut(kismet::ToJson(all), buffer, capacity);
+		}
+
+		// ---- Kismet edits (step 5) ----------------------------------------------------------------------------------
+		int32_t KismetFail(MirageMod* mod, const char* what, const std::string& why)
+		{
+			spdlog::error("[mod {}] {}: {}", mod ? mod->id : "?", what, why);
+			return 0;
+		}
+		// The edit's undo, in the open transaction, or in one of its own
+		void RecordEdit(MirageMod* mod, const std::string& label, std::function<bool()> undo)
+		{
+			if (changes::Recording()) {
+				changes::RecordUndo(label, std::move(undo));
+				return;
+			}
+			changes::Begin(mod->id, label);
+			changes::RecordUndo(label, std::move(undo));
+			changes::End();
+		}
+		MirageHandle HandleOf(MirageObject* o)
+		{
+			MirageHandle h{};
+			h.size = sizeof h;
+			ObjectHandle(o, &h);
+			return h;
+		}
+		Classes::USequenceOp* OpOf(MirageObject* o)
+		{
+			Classes::UObject* u = Obj(o);
+			return u && Alive(u) && u->IsA(Classes::USequenceOp::StaticClass()) ? static_cast<Classes::USequenceOp*>(u) : nullptr;
+		}
+		std::string LinkLabel(Classes::USequenceOp* from, int output, Classes::USequenceOp* to, int input)
+		{
+			return fmt::format("{}[{}] -> {}[{}]", from->GetName(), output, to->GetName(), input);
+		}
+
+		int32_t MIRAGE_CALL KismetLink(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input)
+		{
+			if (!mod) return 0;
+			if (!game::IsGameThread()) return KismetFail(mod, "kismet_link", "only on the game thread");
+			Classes::USequenceOp* a = OpOf(from);
+			Classes::USequenceOp* b = OpOf(to);
+			if (!a || !b) return KismetFail(mod, "kismet_link", "both ends must be sequence ops that exist");
+			const int out = kismet::OutputIndex(a, output);
+			const int in = kismet::InputIndex(b, input);
+			if (out < 0) return KismetFail(mod, "kismet_link", fmt::format("{} has no output {}", a->GetName(), output ? output : ""));
+			if (in < 0) return KismetFail(mod, "kismet_link", fmt::format("{} has no input {}", b->GetName(), input ? input : ""));
+			std::string why;
+			switch (kismet::AddLink(a, out, b, in, -1, &why)) {
+				case kismet::LinkResult::Exists: return 1;
+				case kismet::LinkResult::Failed: return KismetFail(mod, "kismet_link", why);
+				case kismet::LinkResult::Added: break;
+			}
+			RecordEdit(mod, "link " + LinkLabel(a, out, b, in), [ha = HandleOf(from), hb = HandleOf(to), out, in] {
+				auto* x = OpOf(HandleObject(&ha));
+				auto* y = OpOf(HandleObject(&hb));
+				return x && y && kismet::RemoveLink(x, out, y, in) >= 0;
+			});
+			return 1;
+		}
+
+		int32_t MIRAGE_CALL KismetUnlink(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input)
+		{
+			if (!mod) return 0;
+			if (!game::IsGameThread()) return KismetFail(mod, "kismet_unlink", "only on the game thread");
+			Classes::USequenceOp* a = OpOf(from);
+			Classes::USequenceOp* b = OpOf(to);
+			if (!a || !b) return KismetFail(mod, "kismet_unlink", "both ends must be sequence ops that exist");
+			const int out = kismet::OutputIndex(a, output);
+			const int in = kismet::InputIndex(b, input);
+			const int at = out < 0 || in < 0 ? -1 : kismet::RemoveLink(a, out, b, in);
+			if (at < 0) return KismetFail(mod, "kismet_unlink", "no such link " + (out < 0 || in < 0 ? std::string() : LinkLabel(a, out, b, in)));
+			RecordEdit(mod, "unlink " + LinkLabel(a, out, b, in), [ha = HandleOf(from), hb = HandleOf(to), out, in, at] {
+				auto* x = OpOf(HandleObject(&ha));
+				auto* y = OpOf(HandleObject(&hb));
+				return x && y && kismet::AddLink(x, out, y, in, at, nullptr) != kismet::LinkResult::Failed;
+			});
+			return 1;
+		}
+
+		MirageObject* MIRAGE_CALL KismetCreate(MirageMod* mod, MirageObject* sequence, const char* class_name)
+		{
+			if (!mod) return nullptr;
+			auto fail = [&](const std::string& why) {
+				KismetFail(mod, "kismet_create", why);
+				return nullptr;
+			};
+			if (!game::IsGameThread()) return fail("only on the game thread");
+			Classes::UObject* s = Obj(sequence);
+			if (!s || !Alive(s) || !s->IsA(Classes::USequence::StaticClass())) return fail("not a sequence");
+			if (!class_name || !*class_name) return fail("no class");
+			Classes::UClass* cls = game::FindClass(class_name, game::Freshness::Exact);
+			if (!cls) return fail(fmt::format("no class {} is loaded", class_name));
+			std::string why;
+			Classes::USequenceOp* op = kismet::Construct(static_cast<Classes::USequence*>(s), cls, &why);
+			if (!op) return fail(why);
+			MirageObject* h = Handle(op);
+			RecordEdit(mod, fmt::format("create {} in {}", op->GetName(), s->GetName()), [hs = HandleOf(sequence), ho = HandleOf(h)] {
+				auto* seq = Obj(HandleObject(&hs));
+				auto* o = Obj(HandleObject(&ho));
+				return seq && o && kismet::RemoveOp(static_cast<Classes::USequence*>(seq), static_cast<Classes::USequenceObject*>(o));
+			});
+			return h;
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

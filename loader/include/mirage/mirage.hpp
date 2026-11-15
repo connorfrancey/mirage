@@ -538,6 +538,20 @@ namespace mirage
 		return out;
 	}
 
+	// Kismet edits (api.h kismet_link): recorded in the open transaction (or one of their own), put back on revert and unload
+	inline bool KismetLink(MirageObject* from, const char* output, MirageObject* to, const char* input = nullptr)
+	{
+		return MIRAGE_API_HAS(&Api(), kismet_link) && Api().kismet_link(Mod(), from, output, to, input) != 0;
+	}
+	inline bool KismetUnlink(MirageObject* from, const char* output, MirageObject* to, const char* input = nullptr)
+	{
+		return MIRAGE_API_HAS(&Api(), kismet_unlink) && Api().kismet_unlink(Mod(), from, output, to, input) != 0;
+	}
+	inline MirageObject* KismetCreate(MirageObject* sequence, const char* className)
+	{
+		return MIRAGE_API_HAS(&Api(), kismet_create) ? Api().kismet_create(Mod(), sequence, className) : nullptr;
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.
