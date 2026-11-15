@@ -224,6 +224,9 @@ namespace mirage::mods
 		static int TraceFn(lua_State* L);
 		static int OverlapFn(lua_State* L);
 		static int JointFn(lua_State* L);
+		static int TriggerFn(lua_State* L);
+		static int TriggerCountFn(lua_State* L);
+		static void MIRAGE_CALL OnTrigger(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1641,6 +1644,86 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.trigger{location = {x, y, z}, radius = 100, height = 100, class = "Pawn", tag = "", stay = false,
+	// on_enter = function(trigger, other) end, on_leave = ..., on_stay = ...}: a trigger the engine checks (a cylinder),
+	// or nil (the log says why). Removed on revert and unload.
+	int LuaMod::TriggerFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, trigger_create)) return luaL_error(L, "mirage.trigger: this runtime has no triggers");
+		luaL_checktype(L, 1, LUA_TTABLE);
+		MirageTriggerDesc d{};
+		d.size = sizeof d;
+		d.shape = MIRAGE_SHAPE_CYLINDER;
+		lua_getfield(L, 1, "shape");
+		if (const char* shape = lua_tostring(L, -1); shape && std::strcmp(shape, "cylinder") != 0) d.shape = -1;
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "location");
+		if (!ReadVec(L, -1, d.location)) return luaL_error(L, "mirage.trigger: location = {x, y, z} is needed");
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "radius");
+		d.radius = static_cast<float>(luaL_optnumber(L, -1, 100.0));
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "height");
+		d.height = static_cast<float>(luaL_optnumber(L, -1, 100.0));
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "stay");
+		d.stay = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "class");
+		const std::string cls = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "tag");
+		const std::string tag = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		d.class_name = cls.c_str();
+		d.tag = tag.c_str();
+		auto c = std::make_unique<Callback>();
+		c->owner = &self;
+		c->what = "trigger";
+		lua_pushvalue(L, 1);
+		c->fn = luaL_ref(L, LUA_REGISTRYINDEX);		// The table: its on_enter / on_leave / on_stay, looked up per call
+		MirageObject* t = self.api_->trigger_create(self.mod_, &d, &OnTrigger, c.get());
+		if (!t) {
+			luaL_unref(L, LUA_REGISTRYINDEX, c->fn);
+			lua_pushnil(L);
+			return 1;
+		}
+		self.callbacks_.push_back(std::move(c));
+		PushObject(L, t);
+		return 1;
+	}
+
+	void MIRAGE_CALL LuaMod::OnTrigger(void* user, MirageObject* trigger, MirageObject* other, int32_t kind)
+	{
+		auto* c = static_cast<Callback*>(user);
+		if (c->failed) return;
+		LuaMod& self = *c->owner;
+		std::lock_guard lock(self.lock_);
+		lua_State* L = self.state_.Get();
+		const int top = lua_gettop(L);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, c->fn);
+		lua_getfield(L, -1, kind == MIRAGE_TRIGGER_ENTER ? "on_enter" : kind == MIRAGE_TRIGGER_LEAVE ? "on_leave" : "on_stay");
+		if (!lua_isfunction(L, -1)) {
+			lua_settop(L, top);
+			return;
+		}
+		PushObject(L, trigger);
+		PushObject(L, other);
+		const lua::Result r = self.state_.Call(2, 0);
+		lua_settop(L, top);
+		if (!r.ok) self.Fail(*c, r.error);
+	}
+
+	// mirage.trigger_count(trigger): actors inside now
+	int LuaMod::TriggerCountFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, trigger_count)) return luaL_error(L, "mirage.trigger_count: this runtime has no triggers");
+		lua_pushinteger(L, self.api_->trigger_count(CheckObject(L, 1)));
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -2399,7 +2482,7 @@ namespace mirage::mods
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
-			{"overlap", OverlapFn}, {"joint", JointFn}, {nullptr, nullptr}};
+			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

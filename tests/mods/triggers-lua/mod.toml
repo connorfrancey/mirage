@@ -1,0 +1,6 @@
+# Self-test (step 7 of the next ten steps, the plan's Scenario F, its trigger half): triggers from Lua, the engine's own
+# Trigger actor checking them; on entering, the mod's logic pushes a prop
+id = "triggers-lua"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): triggers from Lua"
+mirage = "^0.1"

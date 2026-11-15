@@ -621,6 +621,23 @@ namespace mirage
 		return MIRAGE_API_HAS(&Api(), world_trace) && Api().world_trace(Mod(), start, end, extent, flags, ignore, &out) == 1;
 	}
 
+	// ---- Triggers (step 7) ---------------------------------------------------------------------------------------------
+	// A cylinder trigger (api.h trigger_create); `fn` gets MIRAGE_TRIGGER_ENTER / _LEAVE / _STAY
+	inline MirageObject* Trigger(const float (&location)[3], float radius, float height, MirageTriggerFn fn, void* user = nullptr,
+								 const char* className = nullptr, bool stay = false)
+	{
+		if (!MIRAGE_API_HAS(&Api(), trigger_create)) return nullptr;
+		MirageTriggerDesc d{};
+		d.size = sizeof d;
+		d.shape = MIRAGE_SHAPE_CYLINDER;
+		for (int i = 0; i < 3; ++i) d.location[i] = location[i];
+		d.radius = radius;
+		d.height = height;
+		d.class_name = className;
+		d.stay = stay ? 1 : 0;
+		return Api().trigger_create(Mod(), &d, fn, user);
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

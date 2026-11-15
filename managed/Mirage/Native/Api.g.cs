@@ -175,6 +175,8 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, uint, void*, void*, int> world_trace;
         public delegate* unmanaged[Cdecl]<void*, float, byte*, void**, int, int> world_overlap;
         public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, void*, int, float, void*> physics_joint;
+        public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, void*> trigger_create;
+        public delegate* unmanaged[Cdecl]<void*, int> trigger_count;
     }
 
     [StructLayout(LayoutKind.Sequential)]

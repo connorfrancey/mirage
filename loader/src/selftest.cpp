@@ -2437,6 +2437,35 @@ void TestKismetLayer()
 // (a KActor's, else a small one with collision from the level), lets it fall, pushes it at 1x and 4x mass, turns its
 // gravity off, changes its collision, and finds it with an overlap and a trace. This step checks what the mod shares,
 // times 500 traces in one tick (the plan's target: under 1 ms), and checks the revert takes the prop away.
+// A static mesh for a physics prop, shared as "selftest" "mesh" for the test mods (physics-lua, triggers-lua): a
+// KActor's (made to be a prop), else the smallest-but-not-tiny one with collision in the level. "" if none.
+std::string PropMesh()
+{
+    std::string mesh;
+    OnGameThread([&] {
+        float best = 1e9f;
+        auto& objects = Classes::UObject::GetGlobalObjects();
+        for (std::size_t i = 0; i < objects.Num(); ++i) {
+            auto* o = objects.GetByIndex(i);
+            if (!o || !o->IsA(Classes::UStaticMeshComponent::StaticClass())) continue;
+            auto* c = static_cast<Classes::UStaticMeshComponent*>(o);
+            if (!c->StaticMesh || !c->StaticMesh->BodySetup || !c->Owner || !game::IsA(c->Owner, Classes::AActor::StaticClass())) continue;
+            const bool kactor = c->Owner->IsA(Classes::AKActor::StaticClass());
+            const float r = c->Bounds.SphereRadius;
+            const float score = kactor ? 0.f : (r >= 20.f && r <= 80.f ? r : 1e8f);
+            if (score < best) {
+                best = score;
+                mesh = c->StaticMesh->GetPathName();
+            }
+        }
+        if (best >= 1e8f) mesh.clear();
+    });
+    static MirageMod self;      // The self-test's shares
+    self.id = "selftest";
+    mirage::mods::game_api::ShareSet(&self, "mesh", mesh.c_str());
+    return mesh;
+}
+
 std::string PhysicsShared(const char* key)
 {
     char v[512]{};
@@ -2468,26 +2497,7 @@ void TestPhysics()
         WaitGrounded();
     }
 
-    // The mesh: a KActor's (made to be a prop), else the smallest-but-not-tiny one with collision in the level
-    std::string mesh;
-    OnGameThread([&] {
-        float best = 1e9f;
-        auto& objects = Classes::UObject::GetGlobalObjects();
-        for (std::size_t i = 0; i < objects.Num(); ++i) {
-            auto* o = objects.GetByIndex(i);
-            if (!o || !o->IsA(Classes::UStaticMeshComponent::StaticClass())) continue;
-            auto* c = static_cast<Classes::UStaticMeshComponent*>(o);
-            if (!c->StaticMesh || !c->StaticMesh->BodySetup || !c->Owner || !game::IsA(c->Owner, Classes::AActor::StaticClass())) continue;
-            const bool kactor = c->Owner->IsA(Classes::AKActor::StaticClass());
-            const float r = c->Bounds.SphereRadius;
-            const float score = kactor ? 0.f : (r >= 20.f && r <= 80.f ? r : 1e8f);
-            if (score < best) {
-                best = score;
-                mesh = c->StaticMesh->GetPathName();
-            }
-        }
-        if (best >= 1e8f) mesh.clear();
-    });
+    const std::string mesh = PropMesh();
     if (mesh.empty()) {
         p.Problem("no static mesh with collision for a prop in the level");
         End(s);
@@ -2495,9 +2505,6 @@ void TestPhysics()
     }
     p.Expect("a live body's mass can't be changed");     // The mod checks that the refusal is clean
     p.Expect("over the engine's cap");                   // ... and asks for more than the cap
-    MirageMod self;     // The self-test shares the mesh as "selftest"
-    self.id = "selftest";
-    mirage::mods::game_api::ShareSet(&self, "mesh", mesh.c_str());
 
     int before = -1;
     OnGameThread([&] { before = static_cast<int>(game::ActorsOf(Classes::AKActorSpawnable::StaticClass()).size()); });
@@ -2586,6 +2593,108 @@ void TestPhysics()
     OnGameThread([&] { left = static_cast<int>(game::ActorsOf(Classes::AKActorSpawnable::StaticClass()).size()); });
     s.notes.push_back(fmt::format("module off: reverted {}, KActorSpawnables in play {} (before the mod: {})", PhysicsShared("reverted"), left, before));
     if (left != before) p.Problem("the prop is still in play after the revert");
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 7 of the next ten steps, the plan's Scenario F (its trigger half): tests/mods/triggers-lua puts a pawn trigger (with
+// stay) and a KActor-only trigger at one spot in front of the player. The player is put inside: enter (the player), stay
+// every tick, the mod's logic pushing its prop; the KActor trigger stays quiet; out again: leave. A box shape is refused.
+// The module off: the revert takes the triggers away.
+std::string TriggersShared(const char* key)
+{
+    char v[256]{};
+    mirage::mods::game_api::ShareGet("triggers-lua", key, v, sizeof v);
+    return v;
+}
+
+void TestTriggers()
+{
+    Step& s = Begin("Mirage triggers");
+    Probe p(s);
+    p.Expect("only cylinders");     // The mod asks for a box on purpose
+    Module* m = modules::Find("Triggers (Lua)");
+    if (!m) {
+        p.Problem("the Triggers (Lua) module is missing (tests/mods/triggers-lua)");
+        End(s);
+        return;
+    }
+    if (g_haveLevelStart) {         // Room in front of the player: where the level started
+        OnGameThread([] {
+            if (auto* pawn = game::Pawn()) {
+                pawn->SetLocation(g_levelStart);
+                pawn->Velocity = Classes::FVector{};
+            }
+        });
+        WaitGrounded();
+    }
+    const auto num = [](const char* key) { return static_cast<int>(util::ParseFloatOr(TriggersShared(key).c_str(), 0.f)); };
+    PropMesh();                     // The prop the mod pushes on entering
+    int before = -1;
+    OnGameThread([&] { before = static_cast<int>(game::ActorsOf(Classes::ATrigger::StaticClass()).size()); });
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitFor(10.0, [] { return !TriggersShared("made").empty(); });
+    if (TriggersShared("made") != "2") {
+        p.Problem("the mod made " + TriggersShared("made") + " of its 2 triggers (the log says why)");
+        OnRenderThread([m] { m->SetEnabled(false); });
+        End(s);
+        return;
+    }
+    if (TriggersShared("box_refused") != "true") p.Problem("a box trigger wasn't refused");
+    float sx = 0, sy = 0, sz = 0;
+    sscanf_s(TriggersShared("spot").c_str(), "%f %f %f", &sx, &sy, &sz);
+
+    // In: the player stands in the trigger
+    Classes::FVector home{};
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) {
+            home = pawn->Location;
+            pawn->SetLocation(Classes::FVector{sx, sy, sz});
+        }
+    });
+    // A teleport isn't always a touch: small moves until the engine sees it (as the Kismet edit step does)
+    for (int i = 0; i < 120 && num("enter") < 1; ++i) {
+        WaitTicks(1);
+        if (i % 4 == 3)
+            OnGameThread([&] {
+                if (auto* pawn = game::Pawn()) {
+                    Classes::FVector at = pawn->Location;
+                    at.Z += (i % 8 == 3) ? -1.f : 1.f;
+                    pawn->SetLocation(at);
+                }
+            });
+    }
+    const int stayStart = num("stay");
+    WaitTicks(20);
+    const int enter = num("enter"), stayIn = num("stay") - stayStart, inside = num("inside"), launched = num("launched");
+    // Out again
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) pawn->SetLocation(home);
+    });
+    WaitFor(5.0, [&] { return num("leave") >= 1; });
+    WaitTicks(10);
+    const int leave = num("leave"), stayAfter = num("stay") - stayStart, filtered = num("filtered");
+    s.notes.push_back(fmt::format("trigger {} at {:.0f} {:.0f} {:.0f}: entered {} ({}), {} stay calls in 20 ticks, {} inside, left {}; "
+                                  "the prop launched {} time(s); the KActor-only trigger fired {} time(s); stay after leaving: {} more",
+                                  TriggersShared("trigger"), sx, sy, sz, enter, TriggersShared("who"), stayIn, inside, leave, launched,
+                                  filtered, stayAfter - stayIn));
+    if (enter != 1) p.Problem(fmt::format("entering the trigger was reported {} times, not once", enter));
+    if (stayIn < 10) p.Problem(fmt::format("{} stay calls in 20 ticks inside", stayIn));
+    if (inside != 1) p.Problem(fmt::format("trigger_count said {} inside, not 1", inside));
+    if (leave != 1) p.Problem(fmt::format("leaving was reported {} times, not once", leave));
+    if (stayAfter - stayIn > 2) p.Problem(fmt::format("{} stay calls after leaving", stayAfter - stayIn));
+    if (filtered != 0) p.Problem(fmt::format("the KActor-only trigger fired {} times for the player", filtered));
+    if (!TriggersShared("who").starts_with("TdPlayerPawn")) p.Problem("the trigger's other actor wasn't the player: " + TriggersShared("who"));
+    if (launched != 1) p.Problem(fmt::format("the mod's logic ran {} times on entering, not once", launched));
+
+    // Off: taken away
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitFor(10.0, [] { return !TriggersShared("reverted").empty(); });
+    WaitTicks(3);
+    int left = -1;
+    OnGameThread([&] { left = static_cast<int>(game::ActorsOf(Classes::ATrigger::StaticClass()).size()); });
+    s.notes.push_back(fmt::format("module off: reverted {}, Trigger actors in play {} (before the mod: {})", TriggersShared("reverted"), left, before));
+    if (left != before) p.Problem("the mod's triggers are still in play after the revert");
     p.Check(1, true);
     End(s);
 }
@@ -5642,6 +5751,7 @@ const Named* FeatureList()
         {"Mirage Kismet (edit)", &TestKismetEdit, false},
         {"Mirage Kismet (layer)", &TestKismetLayer, false},
         {"Mirage physics", &TestPhysics, false},
+        {"Mirage triggers", &TestTriggers, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

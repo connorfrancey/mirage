@@ -30,6 +30,7 @@
 #include "runtime/classes.h"
 #include "runtime/kismet_layers.h"
 #include "runtime/kismet_trace.h"
+#include "runtime/triggers.h"
 #include "runtime/layers.h"
 #include "runtime/world_events.h"
 #include "runtime/maps.h"
@@ -165,6 +166,7 @@ static void Run(HMODULE module)
                 mirage::layers::Tick();          // Mods' level additions: spawned, respawned at restarts, removed
                 mirage::kismet_layers::Tick();   // Mods' Kismet layers: applied at level loads, undone at unload
                 mirage::kismet_trace::Tick();    // The Kismet execution trace (nothing while no mod has it on)
+                mirage::triggers::Tick();        // Mods' triggers: stay callbacks, gone ones dropped
                 mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
                 mirage::routes::Tick(seconds);   // Time-trial routes: the run in progress
                 modules::Tick();

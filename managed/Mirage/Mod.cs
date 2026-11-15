@@ -275,6 +275,42 @@ namespace Mirage
         }
 
         /// <summary>
+        /// A trigger the engine checks (its Trigger actor, a cylinder of <paramref name="radius"/> and half height
+        /// <paramref name="height"/>): <paramref name="onEnter"/> / <paramref name="onLeave"/> / <paramref name="onStay"/>
+        /// (each tick, only when given) get the trigger and the actor. Only actors of <paramref name="className"/> or with
+        /// <paramref name="tag"/> when given. Removed on revert and unload. Game thread.
+        /// </summary>
+        public GameObject Trigger(Vec3 location, float radius, float height, Action<GameObject, GameObject>? onEnter = null,
+                                  Action<GameObject, GameObject>? onLeave = null, Action<GameObject, GameObject>? onStay = null,
+                                  string? className = null, string? tag = null)
+        {
+            var callbacks = new TriggerCallbacks(this, onEnter, onLeave, onStay);
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(callbacks);      // Lives as long as the mod
+            Owned.Add(new TestHandle(handle));
+            var d = new MirageTriggerDesc { size = (uint)sizeof(MirageTriggerDesc), radius = radius, height = height, stay = onStay is null ? 0 : 1,
+                                            class_name = Utf8.Intern(className ?? ""), tag = Utf8.Intern(tag ?? "") };
+            d.location[0] = location.X; d.location[1] = location.Y; d.location[2] = location.Z;
+            return new GameObject(Bridge.Api->trigger_create(Handle, &d,
+                (void*)(delegate* unmanaged[Cdecl]<void*, void*, void*, int, void>)&OnTrigger,
+                (void*)System.Runtime.InteropServices.GCHandle.ToIntPtr(handle)));
+        }
+
+        /// <summary>Actors inside a trigger of a mod now (-1: not one). Game thread.</summary>
+        public int TriggerCount(GameObject trigger) => Bridge.Api->trigger_count(trigger.Handle);
+
+        private sealed record TriggerCallbacks(Mod Owner, Action<GameObject, GameObject>? Enter, Action<GameObject, GameObject>? Leave,
+                                               Action<GameObject, GameObject>? Stay);
+
+        [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+        private static void OnTrigger(void* user, void* trigger, void* other, int kind)
+        {
+            var cb = (TriggerCallbacks)System.Runtime.InteropServices.GCHandle.FromIntPtr((IntPtr)user).Target!;
+            var action = kind == 0 ? cb.Enter : kind == 1 ? cb.Leave : cb.Stay;
+            try { action?.Invoke(new GameObject(trigger), new GameObject(other)); }
+            catch (Exception e) { Bridge.Report(cb.Owner, "trigger", e); }
+        }
+
+        /// <summary>
         /// Actors in play whose collision bounds touch the sphere (bounds, not shapes), of <paramref name="className"/> or
         /// a subclass (null: any). Game thread.
         /// </summary>

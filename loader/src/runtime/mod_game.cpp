@@ -22,6 +22,7 @@
 #include "runtime/kismet_layers.h"
 #include "runtime/kismet_trace.h"
 #include "runtime/physics.h"
+#include "runtime/triggers.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -251,6 +252,7 @@ namespace mirage::mods
 			layers::Remove(mod.id);			// Its level additions (else the next tick sees it unloaded)
 			kismet_layers::Remove(mod.id);	// Its Kismet layer's edits
 			kismet_trace::Forget(mod.id);
+			triggers::RemoveAll(mod.id);	// Its callbacks stop before its code goes (the change log removes them too)
 		}
 		// Its transactions put back (step 15), on the game thread where the objects are
 		if (game::IsGameThread()) changes::RevertAndForget(mod.id);
@@ -1231,6 +1233,66 @@ namespace mirage::mods
 			const auto found = physics::Overlap(VecOf(center), radius, cls);
 			for (int32_t i = 0; out && i < capacity && i < static_cast<int32_t>(found.size()); ++i) out[i] = Handle(found[static_cast<std::size_t>(i)]);
 			return static_cast<int32_t>(found.size());
+		}
+
+		// ---- Triggers (step 7) --------------------------------------------------------------------------------------
+		struct TriggerCall
+		{
+			MirageTriggerFn fn;
+			void* user;
+			MirageObject* trigger;
+			MirageObject* other;
+			int32_t kind;
+		};
+		void RunTrigger(void* arg)
+		{
+			auto* c = static_cast<TriggerCall*>(arg);
+			c->fn(c->user, c->trigger, c->other, c->kind);
+		}
+		const char* TriggerKindName(int32_t kind) { return kind == MIRAGE_TRIGGER_ENTER ? "enter" : kind == MIRAGE_TRIGGER_LEAVE ? "leave" : "stay"; }
+
+		MirageObject* MIRAGE_CALL TriggerCreate(MirageMod* mod, const MirageTriggerDesc* desc, MirageTriggerFn fn, void* user)
+		{
+			auto fail = [&](const std::string& why) -> MirageObject* {
+				spdlog::error("[mod {}] trigger_create: {}", mod ? mod->id : "?", why);
+				return nullptr;
+			};
+			if (!mod || !fn) return fail("no mod or callback");
+			if (!desc || desc->size < sizeof(MirageTriggerDesc)) return fail("no description, or its size isn't set");
+			if (!game::IsGameThread()) return fail("only on the game thread");
+			if (desc->shape != MIRAGE_SHAPE_CYLINDER)
+				return fail("only cylinders: a box or sphere trigger needs a volume's brush model, which isn't made at runtime");
+			triggers::Desc d;
+			d.x = desc->location[0];
+			d.y = desc->location[1];
+			d.z = desc->location[2];
+			d.radius = desc->radius;
+			d.height = desc->height;
+			d.stay = desc->stay != 0;
+			if (desc->tag) d.tag = desc->tag;
+			if (desc->class_name && *desc->class_name && !(d.filterClass = game::FindClass(desc->class_name)))
+				return fail(std::string("no class ") + desc->class_name);
+			std::string why;
+			Classes::AActor* t = triggers::Create(mod->id, d, [mod, fn, user](Classes::AActor* trig, Classes::AActor* other, triggers::Kind kind) {
+				if (mod->state.load() != State::Active) return;
+				TriggerCall c{fn, user, Handle(trig), Handle(other), static_cast<int32_t>(kind)};
+				detail::Enter(*mod, "trigger", std::string("trigger ") + TriggerKindName(c.kind), &RunTrigger, &c);
+			}, &why);
+			if (!t) return fail(why);
+			MirageObject* h = Handle(t);
+			RecordEdit(mod, "trigger " + t->GetName(), [ht = HandleOf(h)] {
+				Classes::AActor* x = ActorOf(HandleObject(&ht));
+				if (x) triggers::Remove(x);
+				return x != nullptr;
+			});
+			return h;
+		}
+
+		int32_t MIRAGE_CALL TriggerCount(MirageObject* trigger)
+		{
+			if (!game::IsGameThread()) return -1;
+			Classes::AActor* a = ActorOf(trigger);
+			return a ? triggers::Count(a) : -1;
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

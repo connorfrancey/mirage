@@ -54,6 +54,8 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL WorldOverlap(const float* center, float radius, const char* className, MirageObject** out, int32_t capacity);
 	MirageObject* MIRAGE_CALL PhysicsJoint(MirageMod* mod, MirageObject* a, MirageObject* b, const float* location, const int32_t* rotation,
 										   int32_t kind, float breakThreshold);
+	MirageObject* MIRAGE_CALL TriggerCreate(MirageMod* mod, const MirageTriggerDesc* desc, MirageTriggerFn fn, void* user);
+	int32_t MIRAGE_CALL TriggerCount(MirageObject* trigger);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

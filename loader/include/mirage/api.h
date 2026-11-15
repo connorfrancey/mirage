@@ -260,6 +260,24 @@ typedef struct MirageHit {
 #define MIRAGE_BLOCK_ACTORS 2u       /* bBlockActors: blocks pawns and actors */
 #define MIRAGE_BLOCK_RIGID_BODY 4u   /* The collision component's BlockRigidBody: rigid bodies collide with it */
 
+/* trigger_create (step 7 of the next ten steps): a trigger the engine checks (its own Trigger actor, a cylinder) */
+#define MIRAGE_SHAPE_CYLINDER 0     /* The only shape: a box or sphere would need a volume's brush model, not made at runtime */
+#define MIRAGE_TRIGGER_ENTER 0
+#define MIRAGE_TRIGGER_LEAVE 1
+#define MIRAGE_TRIGGER_STAY 2       /* Once a tick for each actor inside (only with `stay` set) */
+typedef struct MirageTriggerDesc {
+    uint32_t size;              /* sizeof(MirageTriggerDesc) */
+    int32_t shape;              /* MIRAGE_SHAPE_CYLINDER */
+    float location[3];
+    float radius;               /* The cylinder's radius */
+    float height;               /* Half its height (as the engine's CylinderComponent has it) */
+    const char* class_name;     /* Only actors of this class or a subclass ("Pawn"); NULL or "": any */
+    const char* tag;            /* Only actors with this Tag; NULL or "": any */
+    int32_t stay;               /* 1: MIRAGE_TRIGGER_STAY callbacks too */
+} MirageTriggerDesc;
+/* `kind`: MIRAGE_TRIGGER_*; `other`: the actor that came in, went out or is inside. Game thread. */
+typedef void(MIRAGE_CALL* MirageTriggerFn)(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
+
 /* actors_query: which actors (every field optional; zero = any). Actors of the levels in play (the persistent level and
  * the visible streaming levels), from the runtime's per-tick actor lists: no walk of the whole object list. */
 typedef struct MirageActorQuery {
@@ -1021,6 +1039,15 @@ typedef struct MirageApi {
      * says why). */
     MirageObject*(MIRAGE_CALL* physics_joint)(MirageMod* mod, MirageObject* a, MirageObject* b, const float* location,
                                               const int32_t* rotation, int32_t kind, float break_threshold);
+
+    /* ---- Triggers (step 7 of the next ten steps). The engine's own Trigger actor, sized as asked: the engine finds what
+     * touches it (its Touching list) and the runtime reports the changes each tick (the engine doesn't send its Touch
+     * event to a Trigger spawned at runtime). `fn` runs on the game thread for each actor that passes the filters.
+     * Removed (and the callbacks stopped) on revert and unload. NULL when it can't (the log says why: a box or sphere
+     * shape is refused). */
+    MirageObject*(MIRAGE_CALL* trigger_create)(MirageMod* mod, const MirageTriggerDesc* desc, MirageTriggerFn fn, void* user);
+    /* Actors inside the trigger now; -1: not a trigger of a mod */
+    int32_t(MIRAGE_CALL* trigger_count)(MirageObject* trigger);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

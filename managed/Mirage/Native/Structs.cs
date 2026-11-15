@@ -44,6 +44,19 @@ namespace Mirage.Native
         public void* object_class;
     }
 
+    /// <summary>A trigger (api.h MirageTriggerDesc)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageTriggerDesc
+    {
+        public uint size;
+        public int shape;
+        public fixed float location[3];
+        public float radius, height;
+        public byte* class_name;
+        public byte* tag;
+        public int stay;
+    }
+
     /// <summary>A rigid body (api.h MirageBody)</summary>
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct MirageBody

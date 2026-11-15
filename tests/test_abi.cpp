@@ -177,6 +177,9 @@ MIRAGE_AT(physics_collision_set, 656);
 MIRAGE_AT(world_trace, 660);
 MIRAGE_AT(world_overlap, 664);
 MIRAGE_AT(physics_joint, 668);
+MIRAGE_AT(trigger_create, 672);
+MIRAGE_AT(trigger_count, 676);
+static_assert(sizeof(MirageTriggerDesc) == 40 && offsetof(MirageTriggerDesc, stay) == 36);
 static_assert(sizeof(MirageBody) == 68 && offsetof(MirageBody, mass_scale) == 52);  // mass_scale: read only
 static_assert(sizeof(MirageHit) == 116 && offsetof(MirageHit, bone) == 44 && offsetof(MirageHit, phys_material) == 112);
 static_assert(sizeof(MirageMovement) == 36 && offsetof(MirageMovement, move_object) == 32);

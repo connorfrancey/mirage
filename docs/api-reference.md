@@ -43,6 +43,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [The player and movement](#the-player-and-movement) (1)
 - [Kismet](#kismet) (8)
 - [Physics and world queries](#physics-and-world-queries) (10)
+- [Triggers](#triggers) (2)
 - [Types](#types)
 
 ## Basics
@@ -1367,6 +1368,24 @@ MirageObject*(MIRAGE_CALL* physics_joint)(MirageMod* mod, MirageObject* a, Mirag
 
 A joint between two bodies (`b` NULL: `a` held to the world) at `location`, `rotation` 3 ints (NULL: none; a hinge turns about its X axis), MIRAGE_JOINT_BALL or _HINGE, breaking under `break_threshold` (0: never): the engine's RB_ConstraintActorSpawnable and InitConstraint. Removed on revert and unload. NULL when it can't (the log says why).
 
+## Triggers
+
+The engine's own Trigger actor, sized as asked: the engine finds what touches it (its Touching list) and the runtime reports the changes each tick (the engine doesn't send its Touch event to a Trigger spawned at runtime). `fn` runs on the game thread for each actor that passes the filters. Removed (and the callbacks stopped) on revert and unload. NULL when it can't (the log says why: a box or sphere shape is refused).
+
+### `trigger_create`
+
+```c
+MirageObject*(MIRAGE_CALL* trigger_create)(MirageMod* mod, const MirageTriggerDesc* desc, MirageTriggerFn fn, void* user);
+```
+
+### `trigger_count`
+
+```c
+int32_t(MIRAGE_CALL* trigger_count)(MirageObject* trigger);
+```
+
+Actors inside the trigger now; -1: not a trigger of a mod
+
 ## Types
 
 ### `MirageLogLevel`
@@ -1550,6 +1569,23 @@ typedef struct MirageHit {
                                    reports one (BSP; static meshes often don't), else NULL */
     MirageObject* phys_material; /* ... and the PhysicalMaterial hit (the hit's, else the material's), else NULL */
 } MirageHit;
+```
+
+### `MirageTriggerDesc`
+
+Once a tick for each actor inside (only with `stay` set) *
+
+```c
+typedef struct MirageTriggerDesc {
+    uint32_t size;              /* sizeof(MirageTriggerDesc) */
+    int32_t shape;              /* MIRAGE_SHAPE_CYLINDER */
+    float location[3];
+    float radius;               /* The cylinder's radius */
+    float height;               /* Half its height (as the engine's CylinderComponent has it) */
+    const char* class_name;     /* Only actors of this class or a subclass ("Pawn"); NULL or "": any */
+    const char* tag;            /* Only actors with this Tag; NULL or "": any */
+    int32_t stay;               /* 1: MIRAGE_TRIGGER_STAY callbacks too */
+} MirageTriggerDesc;
 ```
 
 ### `MirageActorQuery`
@@ -1736,6 +1772,14 @@ test_register: 1 when the test passed; 0 when it failed, with why in `message` (
 
 ```c
 typedef int32_t(MIRAGE_CALL* MirageTestFn)(void* user, char* message, uint32_t capacity);
+```
+
+### `MirageTriggerFn`
+
+`kind`: MIRAGE_TRIGGER_*; `other`: the actor that came in, went out or is inside. Game thread. *
+
+```c
+typedef void(MIRAGE_CALL* MirageTriggerFn)(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 ```
 
 ### `MirageModAbiFn`
