@@ -153,6 +153,12 @@ MIRAGE_AT(change_begin, 560);
 MIRAGE_AT(change_end, 564);
 MIRAGE_AT(change_revert, 568);
 MIRAGE_AT(change_list, 572);
+MIRAGE_AT(symbol_find, 576);
+MIRAGE_AT(detour_symbol, 580);
+MIRAGE_AT(mid_hook_create, 584);
+MIRAGE_AT(mid_hook_remove, 588);
+MIRAGE_AT(test_register, 592);
+static_assert(sizeof(MirageRegisters) == 44 && offsetof(MirageRegisters, continue_at) == 40);
 // managed/Mirage/Native/Structs.cs mirrors these by hand (Bridge.Initialize checks the same sizes in the game)
 static_assert(sizeof(MirageModuleDesc) == 56 && sizeof(MirageEvent) == 28 && sizeof(MirageValue) == 272);
 static_assert(sizeof(MirageMemoryStats) == 56 && offsetof(MirageMemoryStats, process_private) == 8);

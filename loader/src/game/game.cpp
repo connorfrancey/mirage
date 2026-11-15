@@ -12,6 +12,10 @@
 #include <Windows.h>
 
 #include "core/hooking.h"
+#include "runtime/symbols.h"
+
+#include <MirageHook/scanner/PatternScanner.hpp>
+#include <MirageHook/utilities/BytePattern.hpp>
 #include <spdlog/spdlog.h>
 #include "sdk/SDK.hpp"
 
@@ -21,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
+#include <span>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -84,7 +89,8 @@ namespace {
     int (__thiscall *oLevelLoad)(void*, void*, unsigned long long) = nullptr;
 
     // ---- Pattern scan over the main executable's image --------------------------------------------------------------
-    // Pattern/mask as used by mmultiplayer: 'x' = byte must match, '?' = wildcard.
+    // Pattern/mask as used by mmultiplayer: 'x' = byte must match, '?' = wildcard. Scanned with MirageHook's scanner
+    // (SIMD, chosen at runtime), region by region.
     // Within [from, to) of the image (offsets from its base), clamped to the image. The scan itself: FindPatternRange
     // goes through the signature cache first.
     void* ScanRange(std::size_t from, std::size_t to, const char* pattern, const char* mask)
@@ -94,6 +100,9 @@ namespace {
         const auto* nt  = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
         const std::size_t imageSize = std::min<std::size_t>(nt->OptionalHeader.SizeOfImage, to);
         const std::size_t len = std::strlen(mask);
+        const auto bytes = MirageHook::BytePattern::from_mask(
+            std::span(reinterpret_cast<const std::uint8_t*>(pattern), len), std::string_view(mask, len));
+        if (!bytes) return nullptr;
 
         for (std::size_t off = from; off + len <= imageSize;) {
             MEMORY_BASIC_INFORMATION mbi{};
@@ -105,11 +114,9 @@ namespace {
 
             if (readable) {
                 const std::size_t end = std::min(regionEnd, imageSize);
-                for (std::size_t i = off; i + len <= end; ++i) {
-                    bool match = true;
-                    for (std::size_t j = 0; j < len && match; ++j)
-                        match = mask[j] != 'x' || base[i + j] == static_cast<std::uint8_t>(pattern[j]);
-                    if (match) return base + i;
+                if (end > off) {
+                    const std::size_t at = MirageHook::scan::find_first(std::span(base + off, end - off), *bytes);
+                    if (at != MirageHook::scan::npos) return base + off + at;
                 }
             }
             off = regionEnd;
@@ -219,7 +226,7 @@ namespace {
     {
         if (g_processEventHooked) return true;
         // mmultiplayer's pattern for UObject::ProcessEvent; the SDK calls it as virtual function 61, the fallback.
-        void* target = FindPattern("\x56\x8B\xF1\x8B\x0D\x00\x00\x00\x00\x85\xC9\x74\x09", "xxxxx????xxxx");
+        void* target = mirage::symbols::Find<void>("ProcessEvent");
         void* fromVtable = nullptr;
         const auto& objects = Classes::UObject::GetGlobalObjects();
         for (std::size_t i = 0; i < objects.Num() && !fromVtable; ++i)
@@ -228,7 +235,8 @@ namespace {
             spdlog::warn("ProcessEvent: the pattern ({}) and the vtable ({}) disagree, using the pattern", target, fromVtable);
         if (!target) target = fromVtable;
         if (!target) { spdlog::error("ProcessEvent not found: script events (speedrun auto splits) won't work"); return false; }
-        addr::Game().Set("ProcessEvent", reinterpret_cast<std::uintptr_t>(target));
+        mirage::symbols::Provide("ProcessEvent", reinterpret_cast<std::uintptr_t>(target), "code",
+                                 "UObject::ProcessEvent: script events called from native code");
         if (const hooking::Status st = hooking::Install(target, &ProcessEventHook, &oProcessEvent, "UObject::ProcessEvent"); !st) {
             spdlog::error("Could not hook ProcessEvent ({}): script events (speedrun auto splits) won't work", st.error);
             return false;
@@ -425,10 +433,7 @@ namespace {
     void HookExtras()
     {
         // mmultiplayer trainer's pattern. `movzx edx, byte [ecx+68h]` in it reads Actor.Physics: ecx is the pawn.
-        if (void* p = FindPattern("\xF3\x0F\x10\x05\x00\x00\x00\x00\x83\xEC\x0C\x0F\x2F\x44\x24\x00\x56"
-                                  "\x0F\x87\x00\x00\x00\x00\x8B\x44\x24\x18\x83\xF8\x07\x0F\x8F\x00\x00"
-                                  "\x00\x00\x0F\xB6\x51\x68\x81\xA1\x00\x00\x00\x00\x00\x00\x00\x00",
-                                  "xxxx????xxxxxxx?xxx????xxxxxxxxx????xxxxxx????????")) {
+        if (void* p = mirage::symbols::Find<void>("PlayerStateHandler")) {
             g_stateHooked = HookAt(p, reinterpret_cast<void*>(&StateHandlerHook), reinterpret_cast<void**>(&oStateHandler),
                                    "the player state handler");
         } else {
@@ -436,10 +441,7 @@ namespace {
         }
 
         // mmultiplayer's death hooks: an anchor, then the two small functions within 4 KB after it
-        void* anchor = FindPattern("\x8D\x4C\x24\x10\xE8\x00\x00\x00\x00\x8B\x4C\x24\x14\x85\xC9\x7C"
-                                   "\x1E\x3B\xCF\x0F\x8D\x00\x00\x00\x00\x8B\x04\x8E\x8B\x40\x08\x25"
-                                   "\x00\x00\x00\x00\x33\xD2\x0B\xC2\x75\xD6\xE9\x00\x00\x00\x00",
-                                   "xxxxx????xxxxxxxxxxxx????xxxxxxx????xxxxxxx????");
+        void* anchor = mirage::symbols::Find<void>("DeathAnchor");
         void* pre = anchor ? game::FindPatternIn(anchor, 0x1000,
                                                  "\xC7\x05\x00\x00\x00\x00\x00\x00\x00\x00\xB8\x00\x00\x00\x00\xC3"
                                                  "\xB8\x00\x00\x00\x00\xC3",
@@ -451,6 +453,8 @@ namespace {
                                                "\x8B\xC1\xC7\x00\x00\x00\x00\x00\xC3",
                                                "??????xx????????xxxx????xxx????xxxxx????x")
                          : nullptr;
+        mirage::symbols::Provide("PreDeath", reinterpret_cast<std::uintptr_t>(pre), "code", "Called as the player dies");
+        mirage::symbols::Provide("PostDeath", reinterpret_cast<std::uintptr_t>(post), "code", "Called after the player died");
         if (pre && post) {
             g_deathHooked = HookAt(pre, reinterpret_cast<void*>(&PreDeathHook), reinterpret_cast<void**>(&oPreDeath),
                                    "PreDeath") &&
@@ -575,24 +579,13 @@ bool game::Init()
     void* ptr = nullptr;
     BindSignatureCache();
 
-    // These byte patterns identify the game's own code, so they only match the game version they were made for
-    // (copied verbatim from mmultiplayer's engine.cpp).
-    ptr = FindPattern(
-        "\x8B\x0D\x00\x00\x00\x00\x8B\x84\x24\x00"
-        "\x00\x00\x00\x8B\x04\x81",
-        "xx????xxx????xxx");
-    if (!ptr) { spdlog::error("GNames pattern not found: unsupported game version?"); return false; }
-    Classes::FName::GNames = reinterpret_cast<decltype(Classes::FName::GNames)>(
-        *reinterpret_cast<void**>(static_cast<std::uint8_t*>(ptr) + 2));
-    addr::Game().Set("GNames", reinterpret_cast<std::uintptr_t>(Classes::FName::GNames));
-
-    ptr = FindPattern(
-        "\x8B\x15\x00\x00\x00\x00\x8B\x0C\xB2\x8D\x44\x24\x30",
-        "xx????xxxxxxx");
-    if (!ptr) { spdlog::error("GObjects pattern not found: unsupported game version?"); return false; }
-    Classes::UObject::GObjects = reinterpret_cast<decltype(Classes::UObject::GObjects)>(
-        *reinterpret_cast<void**>(static_cast<std::uint8_t*>(ptr) + 2));
-    addr::Game().Set("GObjects", reinterpret_cast<std::uintptr_t>(Classes::UObject::GObjects));
+    // Where the engine is: every pattern of runtime/symbols.toml, looked for once (the patterns identify the game's own
+    // code, so they only match the game version they were made for; many come from mmultiplayer's engine.cpp)
+    mirage::symbols::Resolve();
+    Classes::FName::GNames = reinterpret_cast<decltype(Classes::FName::GNames)>(mirage::symbols::Find("GNames"));
+    if (!Classes::FName::GNames) { spdlog::error("GNames not found: unsupported game version?"); return false; }
+    Classes::UObject::GObjects = reinterpret_cast<decltype(Classes::UObject::GObjects)>(mirage::symbols::Find("GObjects"));
+    if (!Classes::UObject::GObjects) { spdlog::error("GObjects not found: unsupported game version?"); return false; }
 
     spdlog::info("SDK globals: GNames={} entries, GObjects={} objects",
                  Classes::FName::GetGlobalNames().Num(), Classes::UObject::GetGlobalObjects().Num());
@@ -600,22 +593,12 @@ bool game::Init()
     if (!WaitForScriptClasses()) return false;
     CheckObjectLayout();   // Only logs: the menu and most features work without class reflection
 
-    ptr = FindPattern(
-        "\x6A\xFF\x68\x00\x00\x00\x00\x64\xA1\x00\x00\x00\x00\x50\x81\xEC"
-        "\x00\x00\x00\x00\x53\x55\x56\x57\xA1\x00\x00\x00\x00\x33\xC4\x50"
-        "\x8D\x84\x24\x00\x00\x00\x00\x64\xA3\x00\x00\x00\x00\x8B\xE9\x89"
-        "\x6C\x24\x00\x00\xFF\x89",
-        "???????xxxxxxxxx?xxxxxxxx????xxxxxx?xxxxxxxxxxxxxx??xx");
-    if (!ptr) { spdlog::error("LevelLoad pattern not found"); return false; }
-    addr::Game().Set("LevelLoad", reinterpret_cast<std::uintptr_t>(ptr));
+    ptr = mirage::symbols::Find<void>("LevelLoad");
+    if (!ptr) { spdlog::error("LevelLoad not found"); return false; }
     if (!HookAt(ptr, reinterpret_cast<void*>(&LevelLoadHook), reinterpret_cast<void**>(&oLevelLoad), "LevelLoad")) return false;
 
-    ptr = FindPattern(
-        "\x83\xEC\x48\x53\x55\x56\x57\x8B\xF9\xE8\x00\x00\x00\x00\x8B\x0D"
-        "\x00\x00\x00\x00\x8B\x15\x00\x00\x00\x00\x8B\xE8",
-        "xxxxxxxxxx????xx????xx????xx");
-    if (!ptr) { spdlog::error("Tick pattern not found"); return false; }
-    addr::Game().Set("Tick", reinterpret_cast<std::uintptr_t>(ptr));
+    ptr = mirage::symbols::Find<void>("Tick");
+    if (!ptr) { spdlog::error("Tick not found"); return false; }
     if (!HookAt(ptr, reinterpret_cast<void*>(&TickHook), reinterpret_cast<void**>(&oTick), "Tick")) return false;
 
     HookExtras();
@@ -850,6 +833,12 @@ void game::OnTick(TickCallback callback)
 
 bool game::IsGameThread() { return g_gameThread.load(std::memory_order_relaxed) == GetCurrentThreadId(); }
 unsigned long game::GameThreadId() { return g_gameThread.load(std::memory_order_relaxed); }
+
+game::ObjectId game::IdOf(const Classes::UObject* object)
+{
+    if (!object) return {};
+    return {object, object->Name.Index, object->Name.Number};
+}
 
 void game::RunOnGameThread(std::function<void()> fn)
 {

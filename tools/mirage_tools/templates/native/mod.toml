@@ -1,0 +1,18 @@
+id = "{{id}}"
+name = "{{name}}"
+version = "0.1.0"
+description = "{{description}}"
+authors = ["{{author}}"]
+mirage = "^0.1"
+entry = "{{id}}.dll"
+hot_reload = true          # Rebuilt while the game runs (`mirage mod install`), it is reloaded
+
+# Settings, shown in the module's panel and kept by the menu: the code reads them by key, mirage::Get<float>("speed")
+[settings.speed]
+type = "float"
+name = "Speed"
+description = "An example setting"
+default = 1.0
+min = 0.0
+max = 10.0
+format = "%.1f"

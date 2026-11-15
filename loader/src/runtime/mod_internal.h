@@ -67,6 +67,7 @@ struct MirageMod
 	// its unload. UClass* / UObject*.
 	std::vector<void*> classes, kept;
 	std::vector<int> detours;							// mirage::detours ids, removed with its hooks
+	std::vector<void*> midHooks;						// Where its mid-function hooks are (mid_hook_create)
 	std::vector<std::unique_ptr<mirage::mods::NativeRecord>> natives;	// Its natives (step 11): records live as long as the menu
 	// Its content (step 7): what its content folders change, and the module that turns it on and off
 	std::shared_ptr<mirage::content::Set> content;
@@ -115,6 +116,9 @@ namespace mirage::mods::detail
 	bool Enter(MirageMod& mod, const std::string& what, const std::string& where, void (*fn)(void*), void* arg);
 	// Its hooks and subscriptions off (unload, reload, crash): mod_game.cpp
 	void RemoveGameHooks(MirageMod& mod);
+	// A hook of the mod's (a detour, a mid-function hook) faulted in its code: stopped and named like a crash in any of
+	// its callbacks, "in `what` of `of`" ("in its detour of StaticLoadObject"). Game thread.
+	void HookCrashed(const std::string& modId, const std::string& what, const std::string& of, unsigned long code, const void* address);
 	void ReleaseScripts(MirageMod& mod);	// Its script patches undone, its open scripts closed (mod_script.cpp)
 }
 

@@ -151,6 +151,11 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, void> change_end;
         public delegate* unmanaged[Cdecl]<void*, int, int> change_revert;
         public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint> change_list;
+        public delegate* unmanaged[Cdecl]<byte*, void*> symbol_find;
+        public delegate* unmanaged[Cdecl]<void*, byte*, void*, int, void**, void*> detour_symbol;
+        public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, void*> mid_hook_create;
+        public delegate* unmanaged[Cdecl]<void*, void> mid_hook_remove;
+        public delegate* unmanaged[Cdecl]<void*, byte*, void*, void*, int> test_register;
     }
 
     [StructLayout(LayoutKind.Sequential)]

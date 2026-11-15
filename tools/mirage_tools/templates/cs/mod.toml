@@ -1,0 +1,9 @@
+# A C# script mod: no project, no build. Every .cs file in this folder is compiled when the game loads the mod.
+# Save a file while the game runs: it recompiles and reloads.
+id = "{{id}}"
+name = "{{name}}"
+version = "0.1.0"
+description = "{{description}}"
+authors = ["{{author}}"]
+mirage = "^0.1"
+hot_reload = true

@@ -128,3 +128,50 @@ TEST(Hooking, InstallAndShutdownPutTheFunctionBack)
 	EXPECT_FALSE(hooking::Hooked(a));
 	EXPECT_FALSE(hooking::Install(nullptr, &DetourA, &g_origA, "nothing"));
 }
+
+// The guard (runtime/detour_guard.h): a detour that faults in its own code is skipped, the call goes on in the function
+// it would have called, and the fault is reported once
+namespace
+{
+	extern "C" __declspec(noinline) int __cdecl MirageGuardTarget(int x) { return x + 1; }
+	int (*volatile g_guardCall)(int) = &MirageGuardTarget;
+	int(__cdecl* g_origFaulty)(int) = nullptr;
+	int(__cdecl* g_origAbove)(int) = nullptr;
+	volatile bool g_faultNow = false;
+	volatile int* volatile g_nowhere = nullptr;
+	__declspec(noinline) int __cdecl Faulty(int x)
+	{
+		if (g_faultNow) *g_nowhere = x;		// An access violation in the detour's own code
+		return g_origFaulty(x) + 5;
+	}
+	int __cdecl Above(int x) { return g_origAbove(x) * 2; }		// Calls the faulty one: goes on with what it gets
+}
+
+TEST(Detours, AFaultInADetourIsSkippedAndReported)
+{
+	HooksDown down;
+	void* target = reinterpret_cast<void*>(&MirageGuardTarget);
+	mirage::detours::TakeFaults();		// Nothing left over from another test
+	const int id = mirage::detours::Add(target, reinterpret_cast<void*>(&Faulty), 10, reinterpret_cast<void**>(&g_origFaulty), "faulty");
+	ASSERT_GT(id, 0);
+	const int above = mirage::detours::Add(target, reinterpret_cast<void*>(&Above), 20, reinterpret_cast<void**>(&g_origAbove), "above");
+	ASSERT_GT(above, 0);
+	EXPECT_EQ(g_guardCall(1), 14);		// Above -> Faulty -> real: (1 + 1 + 5) * 2
+
+	g_faultNow = true;
+	EXPECT_EQ(g_guardCall(1), 4);		// Faulty faulted: the call went on in the real function, Above got 2
+	g_faultNow = false;
+	EXPECT_EQ(g_guardCall(1), 4);		// And it is skipped from then on
+	const auto faults = mirage::detours::TakeFaults();
+	ASSERT_EQ(faults.size(), 1u);
+	EXPECT_EQ(faults[0].id, id);
+	EXPECT_EQ(faults[0].owner, "faulty");
+	EXPECT_EQ(faults[0].target, target);
+	EXPECT_EQ(faults[0].code, 0xC0000005ul);
+	EXPECT_TRUE(mirage::detours::TakeFaults().empty());
+
+	mirage::detours::Remove(id);
+	EXPECT_EQ(g_guardCall(1), 4);		// Above -> real
+	mirage::detours::Remove(above);
+	EXPECT_EQ(g_guardCall(1), 2);
+}

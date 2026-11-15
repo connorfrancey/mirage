@@ -19,6 +19,7 @@ add_executable(mirage_tests
         test_resolve.cpp
         test_detours.cpp
         test_crashhandler.cpp
+        test_symbols.cpp
         test_memory.cpp
         # The memory manager's parts without the game (runtime/mem): the test exe keeps the CRT's own operator new
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/analysis.cpp
@@ -35,6 +36,8 @@ add_executable(mirage_tests
         ${CMAKE_SOURCE_DIR}/loader/src/core/resource_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/config_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/detours.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/detour_guard.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/symbols.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/hooking.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/crashhandler/analysis_text.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/crashhandler/memory_text.cpp
@@ -62,7 +65,8 @@ add_executable(mirage_tests
         ${CMAKE_SOURCE_DIR}/loader/src/core/string_cache.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/hardware.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/core/shell.cpp)
-target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src ${CMAKE_SOURCE_DIR}/loader/include ${CMAKE_SOURCE_DIR}/mods)
+target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src ${CMAKE_SOURCE_DIR}/loader/include ${CMAKE_SOURCE_DIR}/mods
+        ${CMAKE_BINARY_DIR}/generated)   # symbols_toml.inc
 target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
 target_link_libraries(mirage_tests PRIVATE GTest::gtest_main nlohmann_json::nlohmann_json imgui spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
@@ -73,6 +77,12 @@ endif()
 # One CTest test per TEST(); listed when ctest runs (not at build time, so a build never runs the exe)
 include(GoogleTest)
 gtest_discover_tests(mirage_tests DISCOVERY_MODE PRE_TEST)
+
+# docs/api-reference.md is generated from loader/include/mirage/api.h (`mirage docs api`): out of date fails here
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME ApiReference.UpToDate COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/gen_api_docs.py --check)
+endif()
 
 # The installer's work on a game folder, on a fake one (tests/installer/test_install.cpp): stand-in DLLs embedded the
 # way the real installer embeds the built ones, as RCDATA resources (written with absolute paths for the resource

@@ -898,6 +898,8 @@ namespace mirage::mods
 			game_api::NativeSelf, game_api::ClassLoad, game_api::ClassDefine, game_api::ObjectPath, game_api::ObjectKeep,
 			game_api::LayerActor, game_api::ObjectHandle, game_api::HandleObject, game_api::ActorsQuery,
 			game_api::ChangeBegin, game_api::ChangeEnd, game_api::ChangeRevert, game_api::ChangeList,
+			game_api::SymbolFind, game_api::DetourSymbol, game_api::MidHookCreate, game_api::MidHookRemove,
+			game_api::TestRegister,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -1576,5 +1578,21 @@ namespace mirage::mods
 		}
 		spdlog::info("Mods: {} will be tried again at the next start", id);
 		return true;
+	}
+
+	void detail::HookCrashed(const std::string& modId, const std::string& what, const std::string& of, unsigned long code, const void* address)
+	{
+		for (auto& m : g_mods) {
+			if (m->id != modId) continue;
+			if (!Running(*m)) return;		// Stopped already (a second fault of the same mod)
+			Fault f;
+			f.code = code;
+			f.address = address;
+			Crashed(*m, of, what, f);
+			for (ModModule* mm : m->modules)
+				if (mm->Enabled()) mm->SetEnabled(false);
+			RemoveGameHooks(*m);
+			return;
+		}
 	}
 }

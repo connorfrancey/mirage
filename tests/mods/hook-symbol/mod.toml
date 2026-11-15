@@ -1,0 +1,26 @@
+id = "hook-symbol"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): detours the engine's StaticLoadObject by symbol name; can fault in its detour on purpose"
+entry = "hook-symbol.dll"
+
+[settings.calls]
+type = "int"
+name = "Calls"
+description = "StaticLoadObject calls seen by the detour"
+default = 0
+min = 0
+max = 1000000000
+
+[settings.mid_calls]
+type = "int"
+name = "Mid calls"
+description = "Loads of Engine.Actor seen by the mid-function hook inside StaticLoadObject"
+default = 0
+min = 0
+max = 1000000000
+
+[settings.crash]
+type = "bool"
+name = "Crash"
+description = "The next call faults inside the detour (the guard must survive it and stop the mod)"
+default = false

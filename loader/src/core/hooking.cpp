@@ -107,6 +107,22 @@ namespace hooking
 		return why;
 	}
 
+	Status CreateMid(void* at, void (*callback)(void* context), void* user, std::string_view name)
+	{
+		std::lock_guard lock(g_lock);
+		if (!at || !callback) return {"an address and a callback are needed"};
+		if (g_hooks.contains(at)) return {"the place is hooked already", true};
+		MirageHook::MidHookOptions options;
+		options.name = std::string(name);
+		options.user_data = user;
+		auto hook = Manager().create_mid(MirageHook::Address(at), reinterpret_cast<MirageHook::MidHookCallback>(callback),
+										 std::move(options));
+		if (!hook) return Failed(hook.error());
+		if (auto enabled = hook->enable(); !enabled) return Failed(enabled.error());
+		g_hooks.emplace(at, std::move(*hook));
+		return {};
+	}
+
 	bool Hooked(void* target)
 	{
 		std::lock_guard lock(g_lock);

@@ -1,0 +1,93 @@
+# The engine's functions and globals that Mirage finds by pattern (runtime/symbols.h). Built into Mirage.dll; every
+# entry is looked for at start and must match exactly once in MirrorsEdge.exe's code. Mods find them by name
+# (symbol_find, detour_symbol), as do the runtime's own hooks.
+#
+#   [Name]
+#   kind = "code" | "data"      # a function, or a global (the address of the variable)
+#   pattern = "8B 0D ?? ..."    # IDA style: bytes in hex, ?? for any byte
+#   resolve = ["offset 2", "deref", "rel32 1"]   # from the match: move by n bytes; read the dword there; follow a
+#                                                # call's or jump's rel32 whose displacement is n bytes in
+#   description = "..."
+#   matches = 2                 # how many places the pattern is known to match (1 if left out): the first is used
+#
+# Other names come from the runtime's code rather than from here (found relative to these, or worked out from the
+# engine's objects): FrameTiming, PreDeath, PostDeath, GConfig, GMalloc, ProcessInternal.
+
+[GNames]
+kind = "data"
+pattern = "8B 0D ?? ?? ?? ?? 8B 84 24 ?? ?? ?? ?? 8B 04 81"
+resolve = ["offset 2", "deref"]
+description = "FName's name table (TArray<FNameEntry*>)"
+
+[GObjects]
+kind = "data"
+pattern = "8B 15 ?? ?? ?? ?? 8B 0C B2 8D 44 24 30"
+resolve = ["offset 2", "deref"]
+description = "UObject's object table (TArray<UObject*>)"
+
+[LevelLoad]
+kind = "code"
+# Its first 7 bytes vary (push -1; push <handler>): the pattern starts after them, and the function 7 bytes before
+pattern = "64 A1 00 00 00 00 50 81 EC ?? 00 00 00 53 55 56 57 A1 ?? ?? ?? ?? 33 C4 50 8D 84 24 ?? 00 00 00 64 A3 00 00 00 00 8B E9 89 6C 24 ?? ?? FF 89"
+resolve = ["offset -7"]
+description = "Loads a map (the game layer's level load hook)"
+
+[Tick]
+kind = "code"
+pattern = "83 EC 48 53 55 56 57 8B F9 E8 ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? 8B 15 ?? ?? ?? ?? 8B E8"
+description = "The engine's world tick (the game thread's heartbeat)"
+
+[ProcessEvent]
+kind = "code"
+pattern = "56 8B F1 8B 0D ?? ?? ?? ?? 85 C9 74 09"
+description = "UObject::ProcessEvent: script events called from native code"
+
+[PlayerStateHandler]
+kind = "code"
+pattern = "F3 0F 10 05 ?? ?? ?? ?? 83 EC 0C 0F 2F 44 24 ?? 56 0F 87 ?? ?? ?? ?? 8B 44 24 18 83 F8 07 0F 8F ?? ?? ?? ?? 0F B6 51 68 81 A1 ?? ?? ?? ?? ?? ?? ?? ??"
+description = "The player's move state handler (ecx: the pawn)"
+
+[StaticLoadObject]
+kind = "code"
+pattern = "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 68 53 56 57 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 89 65 F0 8B 45 10 33 FF"
+description = "UObject::StaticLoadObject(Class, InOuter, Name, Filename, LoadFlags, Sandbox, bAllowObjectReconciliation)"
+
+[GPackageFileCache]
+kind = "data"
+pattern = "8B 0D ?? ?? ?? ?? 8B 11 8B 52 08 53 8D 45 AC 50 8B 45 C4 50 57 FF D2"
+resolve = ["offset 2", "deref"]
+description = "The package file cache (FPackageFileCache*): where the engine finds packages by name"
+
+[InitializeListElementProviders]
+kind = "code"
+# The same function twice, for two data store classes (they differ only in the addresses they use): the first is the
+# one the level select's map list comes from (the self-test "Mirage maps" proves it)
+matches = 2
+pattern = "55 8B EC 83 E4 F8 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 7C 53 55 56 57 A1 ?? ?? ?? ?? 33 C4 50 8D 84 24 90 00 00 00 64 A3 00 00 00 00 8B E9 89 6C 24 18 33 DB 8D 8D 88 00 00 00 53 E8"
+description = "The UI data store's InitializeListElementProviders (the level select's map list)"
+
+[InputKey]
+kind = "code"
+pattern = "51 53 8B 5C 24 24 55 8B 6C 24 20"
+description = "UGameViewportClient::InputKey"
+
+[InputAxis]
+kind = "code"
+pattern = "53 55 56 57 8B D9 33 FF 39 BB B0"
+description = "UGameViewportClient::InputAxis"
+
+[InputGlobal]
+kind = "data"
+pattern = "A3 ?? ?? ?? ?? 57 53 FF"
+resolve = ["offset 1", "deref"]
+description = "The variable holding the game viewport's input (the input service injects through it)"
+
+[FrameTimingAnchor]
+kind = "code"
+pattern = "DD 05 ?? ?? ?? ?? 5E DD 15"
+description = "Inside the frame timing function: the time globals are the operands after it (FrameTiming is 78 bytes before)"
+
+[DeathAnchor]
+kind = "code"
+pattern = "8D 4C 24 10 E8 ?? ?? ?? ?? 8B 4C 24 14 85 C9 7C 1E 3B CF 0F 8D ?? ?? ?? ?? 8B 04 8E 8B 40 08 25 ?? ?? ?? ?? 33 D2 0B C2 75 D6 E9 ?? ?? ?? ??"
+description = "Before the death functions: PreDeath and PostDeath are found within 4 KB after it"

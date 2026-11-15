@@ -144,6 +144,9 @@ endforeach()
 
 if(MSVC)
 target_compile_options(${PROJECT_NAME} PRIVATE /W4 /permissive- /utf-8)
+# Frame pointers kept in optimized builds too (x86 /O2 drops them): the crash window's and the memory manager's call
+# stacks walk them, so a release crash report has its real call stack. About 1% of speed.
+target_compile_options(${PROJECT_NAME} PRIVATE $<$<NOT:$<CONFIG:Debug>>:/Oy->)
 else()
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 target_link_options(${PROJECT_NAME} PRIVATE -static -static-libgcc -static-libstdc++)
@@ -179,6 +182,15 @@ if(MIRAGE_GAME)
     enable_language(RC)
   endif()
   mirage_native_mods(${PROJECT_NAME} _firstparty_bins)
+  # The engine's symbols (runtime/symbols.toml), built in as a string: configure again when the file changes
+  set(_symbols_toml ${CMAKE_SOURCE_DIR}/loader/src/runtime/symbols.toml)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_symbols_toml})
+  file(READ ${_symbols_toml} _symbols_text)
+  file(WRITE ${CMAKE_BINARY_DIR}/generated/symbols_toml.inc.tmp "R\"symbols(${_symbols_text})symbols\"
+")
+  file(COPY_FILE ${CMAKE_BINARY_DIR}/generated/symbols_toml.inc.tmp ${CMAKE_BINARY_DIR}/generated/symbols_toml.inc ONLY_IF_DIFFERENT)
+  file(REMOVE ${CMAKE_BINARY_DIR}/generated/symbols_toml.inc.tmp)
+  target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR}/generated)
   # The minidump helper (loader/crashdump/), embedded as resource 900: the crash reporter writes it next to the DLL
   add_subdirectory(loader/crashdump)
   set(_crashdump_exe ${CMAKE_BINARY_DIR}/crashdump/mirage_crashdump.exe)

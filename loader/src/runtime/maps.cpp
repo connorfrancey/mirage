@@ -1,4 +1,5 @@
 #include "runtime/maps.h"
+#include "runtime/symbols.h"
 
 #include "game/game.h"
 #include "game/levels.h"
@@ -263,11 +264,7 @@ namespace mirage::maps
 	bool Install()
 	{
 		// InitializeListElementProviders: its prologue up to `lea ecx, [ebp+88h]; push ebx; call Empty`
-		auto* init = static_cast<std::uint8_t*>(game::FindPattern(
-			"\x55\x8B\xEC\x83\xE4\xF8\x6A\xFF\x68\x00\x00\x00\x00\x64\xA1\x00\x00\x00\x00\x50\x83\xEC\x7C\x53\x55\x56\x57\xA1"
-			"\x00\x00\x00\x00\x33\xC4\x50\x8D\x84\x24\x90\x00\x00\x00\x64\xA3\x00\x00\x00\x00\x8B\xE9\x89\x6C\x24\x18\x33\xDB"
-			"\x8D\x8D\x88\x00\x00\x00\x53\xE8",
-			"xxxxxxxxx????xxxxxxxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+		auto* init = symbols::Find<std::uint8_t>("InitializeListElementProviders");		// runtime/symbols.toml
 		if (!init) {
 			spdlog::error("Maps: the data store's InitializeListElementProviders wasn't found: mod maps won't be in the level select");
 			return false;
@@ -284,6 +281,8 @@ namespace mirage::maps
 		}
 		void** configVar = *reinterpret_cast<void***>(config + 2);
 		g_mallocVar = *reinterpret_cast<void***>(malloc + 2);
+		symbols::Provide("GConfig", reinterpret_cast<std::uintptr_t>(configVar), "data", "The engine's config cache (FConfigCacheIni*)");
+		symbols::Provide("GMalloc", reinterpret_cast<std::uintptr_t>(g_mallocVar), "data", "The engine's allocator (FMalloc*)");
 		if (!*configVar || !*g_mallocVar) {
 			spdlog::error("Maps: GConfig or GMalloc isn't set yet");
 			return false;

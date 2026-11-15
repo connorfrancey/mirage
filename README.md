@@ -39,6 +39,17 @@ changed).
 
 ## Writing a mod
 
+[docs/getting-started.md](docs/getting-started.md) takes one from nothing to the game:
+
+```
+uv run mirage new my-mod --lang lua      # or cs (a C# script), native (C++)
+uv run mirage mod install my-mod         # checked, built if native, copied into the game
+uv run mirage mod test my-mod            # its own tests (mirage.test), run in the game
+```
+
+Every function a mod can call is in [docs/api-reference.md](docs/api-reference.md), generated from
+`loader/include/mirage/api.h`.
+
 A mod is a folder in `mirage\mods\` with a `mod.toml`:
 
 ```toml

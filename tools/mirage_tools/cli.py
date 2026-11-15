@@ -1076,10 +1076,12 @@ def dev_test(ctx: click.Context, config: str, stage: str | None, no_build: bool,
               help="Test the game as players run it: the 62 fps cap stays on and TAS playbacks are paced (slower).")
 @click.option("--retries", default=1, show_default=True,
               help="Run again when the game itself didn't get going (Steam error, no frame drawn): not for failures.")
+@click.option("--mod-tests", default="", metavar="ID,ID",
+              help="The step \"Mod tests\" runs only these mods' own tests (default: every installed mod's).")
 @click.pass_context
 def game_test(ctx: click.Context, config: str, no_build: bool, build_dir: Path | None, game_dir: Path | None,
               map_name: str, checkpoint: int, ticks: int, only: str, skip: str, late_s: float, timeout: float,
-              keep_open: bool, minimized: bool, real_speed: bool, retries: int) -> None:
+              keep_open: bool, minimized: bool, real_speed: bool, retries: int, mod_tests: str = "") -> None:
     """Run the in-game self-test in Mirror's Edge and report every step (see tools/mirage_tools/gametest.py).
 
     \b
@@ -1150,7 +1152,7 @@ def game_test(ctx: click.Context, config: str, no_build: bool, build_dir: Path |
         gt.install(game_dir, dll, loader)
         em.install_for_test(game_dir, test_mods)
         gt.write_options(game_dir, {"map": map_name, "checkpoint": str(checkpoint), "ticks": str(ticks), "only": only,
-                                    "skip": skip, "fast": "0" if real_speed else "1",
+                                    "skip": skip, "fast": "0" if real_speed else "1", "modtests": mod_tests,
                                     # The menu never closes the game itself: gt.run does, once the menu has unloaded
                                     "quit": "0"}, int(late_s * 1000))
         try:
@@ -1351,6 +1353,17 @@ def _third_party_notices(config: str) -> str:
 from . import devmode as _devmode   # noqa: E402 - registers `mirage dev ...` on the group above
 
 _devmode.register(cli, console)
+
+from . import modtools as _modtools   # noqa: E402 - registers `mirage new`, `mirage mod ...`, `mirage docs ...`
+
+
+
+def _find_game_dir():
+    from . import gametest as _gt
+    return _gt.find_game_dir()
+
+
+_modtools.register(cli, console, _toolchain, _find_game_dir)
 
 
 def _early_dev_flag(argv: list[str]) -> None:

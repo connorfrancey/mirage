@@ -1,6 +1,7 @@
 #include "runtime/detours.h"
 
 #include "core/hooking.h"
+#include "runtime/detour_guard.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -19,6 +20,7 @@ namespace mirage::detours
 			int order;
 			void** original;
 			std::string owner;
+			void* thunk;					// The guard in front of the detour (detour_guard.h): what the chain calls
 		};
 		struct Target
 		{
@@ -28,6 +30,7 @@ namespace mirage::detours
 
 		std::mutex g_lock;
 		std::map<void*, Target> g_targets;
+		std::map<int, std::pair<std::string, void*>> g_owners;		// Every detour's owner and target, by id
 		int g_nextId = 1, g_order = 0;
 
 		std::string Describe(const Target& t)
@@ -48,11 +51,11 @@ namespace mirage::detours
 			}
 			if (t.chain.empty()) return {};
 			void* trampoline = nullptr;
-			const hooking::Status created = hooking::Create(target, t.chain.front().detour, &trampoline, "mod detour");
+			const hooking::Status created = hooking::Create(target, t.chain.front().thunk, &trampoline, "mod detour");
 			if (!created) return created.alreadyHooked ? "the loader hooks this function itself" : created.error;
 			t.trampoline = trampoline;
 			for (std::size_t i = 0; i < t.chain.size(); ++i)
-				*t.chain[i].original = i + 1 < t.chain.size() ? t.chain[i + 1].detour : trampoline;
+				*t.chain[i].original = i + 1 < t.chain.size() ? t.chain[i + 1].thunk : trampoline;
 			if (const hooking::Status enabled = hooking::Enable(target); !enabled) {
 				hooking::Remove(target);
 				t.trampoline = nullptr;
@@ -76,7 +79,14 @@ namespace mirage::detours
 		}
 		const Target before = t;
 		const int id = g_nextId++;
-		t.chain.push_back({id, detour, priority, g_order++, original, owner});
+		void* thunk = guard::Make(detour, original, id);
+		if (!thunk) {
+			if (error) *error = "no memory for the detour's guard";
+			if (t.chain.empty()) g_targets.erase(target);
+			return 0;
+		}
+		t.chain.push_back({id, detour, priority, g_order++, original, owner, thunk});
+		g_owners[id] = {owner, target};
 		std::stable_sort(t.chain.begin(), t.chain.end(), [](const Entry& a, const Entry& b) {
 			return a.priority != b.priority ? a.priority > b.priority : a.order < b.order;
 		});
@@ -103,6 +113,7 @@ namespace mirage::detours
 			const auto e = std::find_if(t.chain.begin(), t.chain.end(), [&](const Entry& x) { return x.id == id; });
 			if (e == t.chain.end()) continue;
 			spdlog::info("Detours: {} removed its detour of {}", e->owner, it->first);
+			guard::Disable(e->thunk);
 			*e->original = nullptr;
 			t.chain.erase(e);
 			if (const std::string why = Relink(it->first, t); !why.empty())
@@ -128,6 +139,26 @@ namespace mirage::detours
 		std::vector<std::string> out;
 		if (const auto it = g_targets.find(target); it != g_targets.end())
 			for (const Entry& e : it->second.chain) out.push_back(e.owner + " (" + std::to_string(e.priority) + ")");
+		return out;
+	}
+
+	std::vector<Fault> TakeFaults()
+	{
+		std::vector<Fault> out;
+		const auto faults = guard::TakeFaults();
+		if (faults.empty()) return out;
+		std::lock_guard lock(g_lock);
+		for (const guard::Fault& f : faults) {
+			Fault x;
+			x.id = f.id;
+			x.address = f.address;
+			x.code = f.code;
+			if (const auto it = g_owners.find(f.id); it != g_owners.end()) {
+				x.owner = it->second.first;
+				x.target = it->second.second;
+			}
+			out.push_back(std::move(x));
+		}
 		return out;
 	}
 }

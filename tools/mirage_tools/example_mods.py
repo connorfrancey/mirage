@@ -88,7 +88,7 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
         return None, how
     native = [hello]
     built = [how]
-    for name in ("crasher", "hook-native"):
+    for name in ("crasher", "hook-native", "hook-symbol"):
         folder, what = build_native(tc, name, source=TEST_MODS / name)
         if folder is None:
             return None, what

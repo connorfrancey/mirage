@@ -33,6 +33,10 @@ namespace hooking
 	Status Install(void* target, void* detour, void** original, std::string_view name);
 	bool Hooked(void* target);
 
+	// A mid-function hook at `at`: `callback(context)` runs there with the registers (MirageHook's MidHookContext,
+	// passed as void*: core doesn't need its header), enabled at once. Removed with Remove(at).
+	Status CreateMid(void* at, void (*callback)(void* context), void* user, std::string_view name);
+
 	// Every hook disabled (at unload, before in-flight calls drain), then all of them removed with the manager.
 	Status DisableAll();
 	void Shutdown();

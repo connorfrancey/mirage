@@ -1,4 +1,5 @@
 #include "runtime/classes.h"
+#include "runtime/symbols.h"
 
 #include "game/game.h"
 #include "sdk/SDK.hpp"
@@ -29,15 +30,10 @@ namespace mirage::classes
 		void Look()
 		{
 			// Its prologue: SEH frame, a 0x68-byte stack frame, the security cookie, `mov eax, [ebp+10h]` (Name)
-			g_load = reinterpret_cast<StaticLoadObjectFn>(game::FindPattern(
-				"\x55\x8B\xEC\x6A\xFF\x68\x00\x00\x00\x00\x64\xA1\x00\x00\x00\x00\x50\x83\xEC\x68\x53\x56\x57\xA1\x00\x00\x00\x00"
-				"\x33\xC5\x50\x8D\x45\xF4\x64\xA3\x00\x00\x00\x00\x89\x65\xF0\x8B\x45\x10\x33\xFF",
-				"xxxxxx????xxxxxxxxxxxxxx????xxxxxxxxxxxxxxxxxxxx"));
-			// GPackageFileCache: `mov ecx, [GPackageFileCache]` before its FindPackageFile call in GetPackageLinker
-			if (auto* at = static_cast<std::uint8_t*>(game::FindPattern(
-					"\x8B\x0D\x00\x00\x00\x00\x8B\x11\x8B\x52\x08\x53\x8D\x45\xAC\x50\x8B\x45\xC4\x50\x57\xFF\xD2",
-					"xx????xxxxxxxxxxxxxxxxx")))
-				g_cacheVar = *reinterpret_cast<void***>(at + 2);
+			// Both from runtime/symbols.toml: StaticLoadObject's prologue, and GPackageFileCache from `mov ecx,
+			// [GPackageFileCache]` before its FindPackageFile call in GetPackageLinker
+			g_load = reinterpret_cast<StaticLoadObjectFn>(symbols::Find("StaticLoadObject"));
+			g_cacheVar = symbols::Find<void*>("GPackageFileCache");
 			if (g_load && g_cacheVar)
 				spdlog::info("Classes: StaticLoadObject at {}, GPackageFileCache at {}", reinterpret_cast<void*>(g_load), static_cast<void*>(g_cacheVar));
 			else

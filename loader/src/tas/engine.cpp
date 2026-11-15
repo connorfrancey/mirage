@@ -1,4 +1,5 @@
 #include "tas/engine.h"
+#include "runtime/symbols.h"
 #include "game/game.h"
 #include "game/object_ref.h"
 
@@ -255,7 +256,7 @@ bool Init()
 {
     // Frame timing and the time globals, located exactly as in mtas (MainHooks): the pattern sits inside the timing
     // function, the globals are operands of the instructions that follow it.
-    auto* p = static_cast<std::uint8_t*>(game::FindPattern("\xDD\x05\x00\x00\x00\x00\x5E\xDD\x15", "xx????xxx"));
+    auto* p = mirage::symbols::Find<std::uint8_t>("FrameTimingAnchor");     // runtime/symbols.toml
     if (!p) {
         spdlog::error("TAS: frame timing pattern not found: TAS/replays are unavailable");
         return false;
@@ -271,18 +272,20 @@ bool Init()
         return false;
     }
     g_realSecondsPerCycle = *g_secondsPerCycle;
+    mirage::symbols::Provide("FrameTiming", reinterpret_cast<std::uintptr_t>(timeFn), "code",
+                             "The frame timing function (the frame's delta time)");
     spdlog::info("TAS: timing at {}, delta {} current {} last {} seconds/cycle {} ({:.3g})", timeFn,
                  static_cast<void*>(g_delta), static_cast<void*>(g_current), static_cast<void*>(g_last),
                  static_cast<void*>(g_secondsPerCycle), g_realSecondsPerCycle);
 
-    void* inputKey = game::FindPattern("\x51\x53\x8B\x5C\x24\x24\x55\x8B\x6C\x24\x20", "xxxxxxxxxxx");
-    void* inputAxis = game::FindPattern("\x53\x55\x56\x57\x8B\xD9\x33\xFF\x39\xBB\xB0", "xxxxxxxxxxx");
+    void* inputKey = mirage::symbols::Find<void>("InputKey");
+    void* inputAxis = mirage::symbols::Find<void>("InputAxis");
     if (!inputKey || !inputAxis) {
         spdlog::error("TAS: input patterns not found: TAS/replays are unavailable");
         return false;
     }
-    if (auto* ig = static_cast<std::uint8_t*>(game::FindPattern("\xA3\x00\x00\x00\x00\x57\x53\xFF", "x????xxx")))
-        g_inputGlobal = *reinterpret_cast<std::uintptr_t*>(ig + 1);
+    if (const std::uintptr_t ig = mirage::symbols::Find("InputGlobal"))
+        g_inputGlobal = ig;
     else
         spdlog::warn("TAS: input base pattern not found, injecting through the last real input's viewport");
 

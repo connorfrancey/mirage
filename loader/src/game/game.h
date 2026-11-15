@@ -66,6 +66,17 @@ namespace game {
 	bool IsGameThread();				// The calling thread is the one the engine ticks on (known after the first tick)
 	unsigned long GameThreadId();		// That thread's id (0 before the first tick)
 
+	// An object's identity: its address and its name. The engine names objects uniquely (Class_N, counting up), and a
+	// new object can get a freed one's memory: comparing addresses alone takes the new pawn of a checkpoint restart for
+	// the old one. Game thread (reads the object's name).
+	struct ObjectId
+	{
+		const void* address = nullptr;
+		int nameIndex = 0, nameNumber = 0;
+		bool operator==(const ObjectId&) const = default;
+	};
+	ObjectId IdOf(const Classes::UObject* object);
+
 	// The local player's move state handler, on the tick its state has just changed (the hook mmultiplayer's trainer uses
 	// for its "strang" tool). Game thread. Return true to skip the engine's handler for this call.
 	using StateChangeCallback = bool(*)();

@@ -44,6 +44,16 @@ namespace Mirage.Native
         public void* object_class;
     }
 
+    /// <summary>The registers at a mid-function hook (api.h MirageRegisters): change them to change the game's.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MirageRegisters
+    {
+        public uint size;
+        public uint eax, ecx, edx, ebx, esp, ebp, esi, edi;
+        public uint eflags;
+        public uint continue_at;    // 0: the replaced instructions run and the code goes on after them; else jump there
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct MirageActorQuery
     {

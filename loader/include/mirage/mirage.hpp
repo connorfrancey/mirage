@@ -495,6 +495,57 @@ namespace mirage
 	}
 	inline void RemoveDetour(MirageDetour* d) { Api().detour_remove(d); }
 
+	// ---- Engine symbols and hooks (the next ten steps' step 2) ------------------------------------------------------
+	// The game's functions and globals by name ("ProcessEvent", "StaticLoadObject", "GMalloc"), nullptr if unknown or
+	// not found on this game (or on a runtime without the table).
+	inline void* Symbol(const char* name)
+	{
+		return MIRAGE_API_HAS(&Api(), symbol_find) ? Api().symbol_find(name) : nullptr;
+	}
+	// Detour(Symbol(name), ...) in one call: nullptr if the symbol isn't known. A fault in the detour's own code is
+	// survived (the call goes on in `original`), and the mod is stopped and named.
+	template <class F, class G>
+	MirageDetour* DetourSymbol(const char* symbol, F* detour, int32_t priority, G** original)
+	{
+		if (!MIRAGE_API_HAS(&Api(), detour_symbol)) return nullptr;
+		return Api().detour_symbol(Mod(), symbol, reinterpret_cast<void*>(detour), priority, reinterpret_cast<void**>(original));
+	}
+	// A hook at any instruction: `callback(user, registers)` runs there and may change the registers (MirageRegisters).
+	inline MirageMidHook* MidHook(void* at, MirageMidHookFn callback, void* user = nullptr)
+	{
+		return MIRAGE_API_HAS(&Api(), mid_hook_create) ? Api().mid_hook_create(Mod(), at, callback, user) : nullptr;
+	}
+	inline void RemoveMidHook(MirageMidHook* h)
+	{
+		if (MIRAGE_API_HAS(&Api(), mid_hook_remove)) Api().mid_hook_remove(h);
+	}
+
+	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
+	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
+	// "" when it passed, else why it failed.
+	//     mirage::Test("jumps higher", [] { return JumpHeight() > 600.f ? "" : "the jump is normal"; });
+	namespace detail
+	{
+		inline std::vector<std::unique_ptr<std::function<std::string()>>>& Tests()
+		{
+			static std::vector<std::unique_ptr<std::function<std::string()>>> t;
+			return t;
+		}
+	}
+	inline bool Test(const std::string& name, std::function<std::string()> test)
+	{
+		if (!MIRAGE_API_HAS(&Api(), test_register)) return false;
+		detail::Tests().push_back(std::make_unique<std::function<std::string()>>(std::move(test)));
+		return Api().test_register(Mod(), name.c_str(), [](void* user, char* message, uint32_t capacity) -> int32_t {
+			const std::string why = (*static_cast<std::function<std::string()>*>(user))();
+			if (why.empty()) return 1;
+			const std::size_t n = why.size() < capacity ? why.size() : capacity - 1;
+			for (std::size_t i = 0; i < n; ++i) message[i] = why[i];
+			message[n] = 0;
+			return 0;
+		}, detail::Tests().back().get()) != 0;
+	}
+
 	// ---- Registration ----------------------------------------------------------------------------------------------
 	namespace detail
 	{

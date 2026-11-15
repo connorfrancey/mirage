@@ -69,7 +69,7 @@ namespace mirage::layers
 		std::vector<mods::Info> g_mods;				// The mods as last checked (layers waiting on a build use it)
 		std::string g_map;							// The level they were spawned in
 		bool g_levelChanged = true;					// A level finished loading since (MapName is read then only)
-		void* g_pawn = nullptr;						// The player's pawn then (a new one: a checkpoint restart)
+		game::ObjectId g_pawn;						// The player's pawn then (a new one, even at its address: a restart)
 		int g_generation = 0;
 		bool g_check = false;						// Look at the mods' layers on the next tick (the editor saved one)
 		unsigned g_ticks = 0;
@@ -496,10 +496,11 @@ namespace mirage::layers
 
 	void Tick()
 	{
-		void* pawn = game::Pawn();
+		auto* pawn = game::Pawn();
 		if (!pawn) return;
+		const game::ObjectId pawnId = game::IdOf(pawn);
 		const bool newLevel = g_levelChanged;									// A level loaded (even the same one again)
-		const bool restart = !newLevel && g_pawn && pawn != g_pawn;			// A new pawn in the same level
+		const bool restart = !newLevel && g_pawn.address && pawnId != g_pawn;	// A new pawn in the same level
 		if (newLevel || restart) {
 			// A loaded level took the old actors with it; at a restart ours are destroyed for a fresh start
 			if (restart) DestroyAll();		// Sublevels stay, like the level's own
@@ -512,7 +513,7 @@ namespace mirage::layers
 			++g_generation;
 			g_ticks = 0;
 		}
-		g_pawn = pawn;
+		g_pawn = pawnId;
 		if (g_map.empty()) return;
 		// Layers waiting for a class to compile: tried again every tick until it is there
 		for (auto& [id, layer] : g_layers)

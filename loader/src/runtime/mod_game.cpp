@@ -13,7 +13,9 @@
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/layers.h"
+#include "core/hooking.h"
 #include "runtime/detours.h"
+#include "runtime/symbols.h"
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
 #include "runtime/natives.h"
@@ -26,6 +28,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <chrono>
 #include <atomic>
 #include <cstring>
 #include <list>
@@ -209,6 +212,13 @@ namespace mirage::mods
 		}
 	}
 
+	namespace
+	{
+		void RemoveMidHooks(MirageMod& mod);	// Below: they use game_api's records
+		void CheckHookFaults();
+		void ForgetTests(MirageMod& mod);
+	}
+
 	void detail::RemoveGameHooks(MirageMod& mod)
 	{
 		for (auto& r : mod.hooks)
@@ -225,6 +235,8 @@ namespace mirage::mods
 		mod.subscriptions.clear();
 		for (int id : mod.detours) detours::Remove(id);
 		mod.detours.clear();
+		RemoveMidHooks(mod);
+		ForgetTests(mod);
 		ReleaseScripts(mod);
 		for (auto& n : mod.natives) n->live = false;		// Its natives return zero from here (their index stays)
 		natives::Release(mod.id);
@@ -249,6 +261,7 @@ namespace mirage::mods
 
 	void DispatchTick(float seconds)
 	{
+		CheckHookFaults();
 		MirageEvent e = Event(MIRAGE_EVENT_TICK);
 		e.number = seconds;
 		Dispatch(e);
@@ -655,6 +668,71 @@ namespace mirage::mods
 			return CopyOut(object && Alive(Obj(object)) ? reflect::ClassNameOf(Obj(object)) : std::string(), buffer, capacity);
 		}
 
+		// A mid-function hook of a mod's: its callback runs behind an SEH guard (it has a known signature, unlike a
+		// detour). A fault skips it from then on and is kept for CheckHookFaults (the game thread names the mod).
+		struct MidRecord
+		{
+			std::string mod;
+			MirageMidHookFn callback;
+			void* user;
+			void* at;
+			std::atomic<bool> off{false};
+		};
+		struct MidFault
+		{
+			MidRecord* rec;
+			unsigned long code;
+			const void* address;
+		};
+		std::mutex g_midFaultLock;
+		std::vector<MidFault> g_midFaults;
+
+		bool CallGuarded(MidRecord* rec, MirageRegisters* r, unsigned long* code, const void** address)
+		{
+			__try {
+				rec->callback(rec->user, r);
+				return true;
+			} __except (*code = GetExceptionCode(), *address = GetExceptionInformation()->ExceptionRecord->ExceptionAddress,
+						EXCEPTION_EXECUTE_HANDLER) {
+				return false;
+			}
+		}
+
+		// MirageHook's MidHookContext: user_data, fpu, then edi esi ebp esp ebx edx ecx eax eflags continue_at
+		struct MidContext
+		{
+			void* user;
+			void* fpu;
+			std::uint32_t edi, esi, ebp, esp, ebx, edx, ecx, eax, eflags, continueAt;
+		};
+		void __cdecl MidEntry(void* context)
+		{
+			auto* c = static_cast<MidContext*>(context);
+			auto* rec = static_cast<MidRecord*>(c->user);
+			if (rec->off.load(std::memory_order_acquire)) return;
+			MirageRegisters r{sizeof(MirageRegisters), c->eax, c->ecx, c->edx, c->ebx, c->esp, c->ebp, c->esi, c->edi, c->eflags, 0};
+			unsigned long code = 0;
+			const void* address = nullptr;
+			if (!CallGuarded(rec, &r, &code, &address)) {
+				rec->off = true;
+				std::lock_guard lock(g_midFaultLock);
+				g_midFaults.push_back({rec, code, address});
+				return;
+			}
+			c->eax = r.eax; c->ecx = r.ecx; c->edx = r.edx; c->ebx = r.ebx; c->ebp = r.ebp; c->esi = r.esi; c->edi = r.edi;
+			c->eflags = r.eflags;
+			c->continueAt = r.continue_at;
+		}
+
+		std::string MidPlace(void* at)
+		{
+			// A symbol a little before it names the place ("StaticLoadObject+0x12"), when one is that close
+			for (const auto& s : symbols::List())
+				if (s.address && reinterpret_cast<std::uintptr_t>(at) >= s.address && reinterpret_cast<std::uintptr_t>(at) - s.address < 0x400)
+					return fmt::format(" ({}+0x{:X})", s.name, reinterpret_cast<std::uintptr_t>(at) - s.address);
+			return {};
+		}
+
 		// A detour's handle is its id (never 0), as a pointer
 		MirageDetour* MIRAGE_CALL DetourCreate(MirageMod* mod, void* target, void* detour, int32_t priority, void** original)
 		{
@@ -672,6 +750,65 @@ namespace mirage::mods
 		void MIRAGE_CALL DetourRemove(MirageDetour* detour)
 		{
 			if (detour) detours::Remove(static_cast<int>(reinterpret_cast<std::uintptr_t>(detour)));
+		}
+
+		void* MIRAGE_CALL SymbolFind(const char* name)
+		{
+			return name ? symbols::Find<void>(name) : nullptr;
+		}
+
+		MirageDetour* MIRAGE_CALL DetourSymbol(MirageMod* mod, const char* symbol, void* detour, int32_t priority, void** original)
+		{
+			if (!mod || !symbol) return nullptr;
+			void* target = symbols::Find<void>(symbol);
+			if (!target) {
+				spdlog::error("[mod {}] detour_symbol: no symbol \"{}\" (not in the runtime's table, or not found on this game)",
+							  mod->id, symbol);
+				return nullptr;
+			}
+			return DetourCreate(mod, target, detour, priority, original);
+		}
+
+		// The mods' tests: records kept for the menu's life (a test may be running when its mod unloads)
+		struct TestRecord
+		{
+			MirageMod* mod;
+			std::string name;
+			MirageTestFn fn;
+			void* user;
+			bool live = true;
+		};
+		std::mutex g_testLock;
+		std::vector<std::unique_ptr<TestRecord>> g_tests;
+
+		int32_t MIRAGE_CALL TestRegister(MirageMod* mod, const char* name, MirageTestFn fn, void* user)
+		{
+			if (!mod || !name || !*name || !fn) return 0;
+			std::lock_guard lock(g_testLock);
+			g_tests.push_back(std::make_unique<TestRecord>(TestRecord{mod, name, fn, user}));
+			return 1;
+		}
+
+		MirageMidHook* MIRAGE_CALL MidHookCreate(MirageMod* mod, void* at, MirageMidHookFn callback, void* user)
+		{
+			if (!mod || !at || !callback) return nullptr;
+			auto* rec = new MidRecord{mod->id, callback, user, at};	// Never freed: a thread may be in its callback
+			const std::string name = "mid hook of " + mod->id;
+			if (const hooking::Status st = hooking::CreateMid(at, &MidEntry, rec, name); !st) {
+				spdlog::error("[mod {}] mid_hook_create at {}: {}", mod->id, at, st.error);
+				return nullptr;
+			}
+			mod->midHooks.push_back(at);
+			spdlog::info("[mod {}] mid-function hook at {}{}", mod->id, at, MidPlace(at));
+			return reinterpret_cast<MirageMidHook*>(rec);
+		}
+
+		void MIRAGE_CALL MidHookRemove(MirageMidHook* hook)
+		{
+			if (!hook) return;
+			auto* rec = reinterpret_cast<MidRecord*>(hook);
+			rec->off = true;
+			hooking::Remove(rec->at);
 		}
 
 		void* MIRAGE_CALL FindPattern(const char* pattern, const char* mask)
@@ -865,4 +1002,87 @@ namespace mirage::mods
 namespace mirage::mods::ui
 {
 	bool MenuVisible() { return gui::visible; }
+}
+
+namespace mirage::mods
+{
+	namespace
+	{
+		void RemoveMidHooks(MirageMod& mod)
+		{
+			for (void* at : mod.midHooks) hooking::Remove(at);
+			mod.midHooks.clear();
+		}
+
+		// Faults the hooks' guards caught since the last tick (detours: runtime/detour_guard.h; mid-function hooks:
+		// game_api::MidEntry): the mod is stopped and named. Game thread.
+		void CheckHookFaults()
+		{
+			for (const detours::Fault& f : detours::TakeFaults()) {
+				const std::string target = symbols::NameOf(reinterpret_cast<std::uintptr_t>(f.target));
+				detail::HookCrashed(f.owner, "its detour", target.empty() ? fmt::format("{}", f.target) : target, f.code,
+									reinterpret_cast<const void*>(f.address));
+			}
+			std::vector<game_api::MidFault> mids;
+			{
+				std::lock_guard lock(game_api::g_midFaultLock);
+				mids.swap(game_api::g_midFaults);
+			}
+			for (const auto& f : mids)
+				detail::HookCrashed(f.rec->mod, "its mid-function hook", fmt::format("{}{}", f.rec->at, game_api::MidPlace(f.rec->at)),
+									f.code, f.address);
+		}
+	}
+}
+
+namespace mirage::mods
+{
+	std::vector<TestResult> RunTests(const std::vector<std::string>& mods)
+	{
+		std::vector<game_api::TestRecord*> tests;
+		{
+			std::lock_guard lock(game_api::g_testLock);
+			for (auto& t : game_api::g_tests)
+				if (t->live && (mods.empty() || std::find(mods.begin(), mods.end(), t->mod->id) != mods.end()))
+					tests.push_back(t.get());
+		}
+		std::vector<TestResult> out;
+		for (game_api::TestRecord* t : tests) {
+			struct Run
+			{
+				game_api::TestRecord* t;
+				char message[1024];
+				int32_t result;
+			} run{t, {}, 0};
+			TestResult r;
+			r.mod = t->mod->id;
+			r.name = t->name;
+			const auto start = std::chrono::steady_clock::now();
+			const bool ran = detail::Enter(*t->mod, "its test \"" + t->name + "\"", "its tests", [](void* p) {
+				auto* x = static_cast<Run*>(p);
+				x->result = x->t->fn(x->t->user, x->message, sizeof x->message);
+			}, &run);
+			r.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			run.message[sizeof run.message - 1] = 0;
+			r.ok = ran && run.result == 1;
+			r.message = !ran ? std::string("it didn't run (the mod isn't running, or it crashed: see the log)")
+							 : r.ok ? std::string() : (run.message[0] ? std::string(run.message) : std::string("it failed (no message)"));
+			out.push_back(std::move(r));
+		}
+		return out;
+	}
+}
+
+namespace mirage::mods
+{
+	namespace
+	{
+		// Its tests aren't run any more (the records stay: one may be running)
+		void ForgetTests(MirageMod& mod)
+		{
+			std::lock_guard lock(game_api::g_testLock);
+			for (auto& t : game_api::g_tests)
+				if (t->mod == &mod) t->live = false;
+		}
+	}
 }

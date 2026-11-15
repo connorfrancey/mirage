@@ -1898,9 +1898,34 @@ with a template and docs.
    `symbols.toml` verified at start. Append to ABI v1: hook by symbol (before / after / replace, chained by priority
    through `runtime/detours`) and mid-function hooks. Detours are SEH-wrapped and attributed. The rest of step 32 (a
    symbol database from the Ghidra work, typed arguments) waits for its first user.
+
+   **Status (2026-11-14): done.** `runtime/symbols.toml` (built into the DLL) names 14 patterns; `symbols::Resolve`
+   scans them at start with MirageHook's scanner (26 ms in release) and checks each matches the number of places the
+   table says (InitializeListElementProviders is one function compiled twice: `matches = 2`, the first used); the
+   runtime's code provides 7 more names (FrameTiming, PreDeath, PostDeath, GConfig, GMalloc, ProcessEvent,
+   ProcessInternal). `game::FindPattern` scans with MirageHook too. ABI v1 appended `symbol_find`, `detour_symbol`,
+   `mid_hook_create`/`mid_hook_remove` (`MirageRegisters`), mirrored in C++ (`mirage::Symbol`, `DetourSymbol`,
+   `MidHook`), C# (`Mod.Symbol`, `Detour`, `DetourSymbol`, `MidHook`) and Lua (`mirage.symbol`: Lua can't detour
+   native code). Every detour runs behind a guard (`runtime/detour_guard`): a thunk records the registers and the stack
+   at the entry, and when the detour faults in its own module a vectored handler puts them back and goes on in the
+   function it would have called; the mod is stopped and named like any crash. Mid-function hooks call the mod behind
+   SEH. Self-test "Mirage engine symbols" (`tests/mods/hook-symbol`): every symbol found, a detour of StaticLoadObject
+   by name counts a load, a mid-function hook inside it reads the Name argument from the registers, and a fault in
+   the detour lets the load finish, stops and names the mod, and the game goes on. Unit tests: the built-in table, and a
+   faulting detour skipped in the middle of a chain.
 3. **Tooling for mod authors.** `mirage new <id> --lang lua|cs|native` from templates; `mirage mod build`,
    `package`, `install`; `mirage mod test` runs a mod's own in-game tests through the self-test harness. The API
    reference is generated from `api.h`, plus a getting-started page. Docs grow with each later step.
+
+   **Status (2026-11-14): done, but nobody new has tried the docs yet.** `mirage new <id> --lang lua|cs|native` makes a
+   mod from `tools/mirage_tools/templates/` (a module with a declared setting, one made in code, a tick and a test);
+   `mirage mod check|build|package|install|test` work on any kind (native through its CMake project with clang-cl or
+   MSVC, C# projects through dotnet; Lua, C# scripts and content need no build); installing keeps the settings the game
+   saved. Mods carry their own in-game tests: ABI v1 appended `test_register` (`mirage.test` in Lua, `mirage::Test`,
+   `Mod.Test`), the self-test step "Mod tests" runs them on the game thread with the mod's modules on, and
+   `mirage mod test <folder>` installs the mod and runs that step for it alone (verified: a new mod of each language
+   from `mirage new` passes its test in the game). `docs/api-reference.md` is generated from `api.h` (`mirage docs
+   api`; a unit test fails when it is out of date), and `docs/getting-started.md` takes a mod from nothing to the game.
 4. **The player and movement.** The survey of the 128 `TdMove_*` classes first (which constants are script
    properties, which are bytecode literals, which are native and need step 2). Then `movement_get`,
    `movement_override` through the change log, `movement.toml`, and the transition record from `PLAYER_STATE`.

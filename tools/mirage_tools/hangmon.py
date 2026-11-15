@@ -15,6 +15,7 @@ stacks the menu logged. Windows only for the dialog and the dump; elsewhere the 
 from __future__ import annotations
 
 import ctypes
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -139,7 +140,9 @@ class HangWatch:
         if WINDOWS:
             self.dumps.mkdir(parents=True, exist_ok=True)
             path = self.dumps / f"hang-{datetime.now():%Y%m%d-%H%M%S}.dmp"
-            if _minidump(self.pid, path):
+            # Mirage's own 32-bit dumper first (the menu writes it next to Mirage.dll): its dump has the game's 32-bit
+            # stacks, where one written from this 64-bit Python holds only the WOW64 side of each thread
+            if _minidump_32(self.dumps.parent / "mirage_crashdump.exe", self.pid, path) or _minidump(self.pid, path):
                 hang.dump = path
         return hang
 
@@ -313,6 +316,17 @@ def _dialog_text(pid: int) -> str:
 
     _user32.EnumWindows(top, 0)
     return found[0] if found else ""
+
+
+def _minidump_32(helper: Path, pid: int, path: Path) -> bool:
+    """The dump through mirage_crashdump.exe (loader/crashdump/): False if it isn't there or failed."""
+    if not helper.is_file():
+        return False
+    try:
+        r = subprocess.run([str(helper), str(pid), "0", "0", str(path)], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and path.is_file()
 
 
 def _minidump(pid: int, path: Path) -> bool:

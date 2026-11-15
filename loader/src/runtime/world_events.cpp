@@ -17,7 +17,7 @@ namespace mirage::world_events
 	{
 		Stats g_stats;
 		bool g_newLevel = true;							// The next tick takes the world as it is, silently
-		void* g_pawn = nullptr;							// The player's pawn last tick
+		game::ObjectId g_pawn;							// The player's pawn last tick
 		std::vector<Classes::AActor*> g_raw;				// In play last tick, as the levels list them
 		std::vector<Classes::AActor*> g_actors;			// The same, sorted by address
 		bool g_tracking = false;						// g_actors is current (actor events were subscribed last tick)
@@ -25,13 +25,14 @@ namespace mirage::world_events
 
 		void Restarts()
 		{
-			void* pawn = game::Pawn();
+			auto* pawn = game::Pawn();
 			if (!pawn) return;
-			if (!g_newLevel && g_pawn && pawn != g_pawn) {
+			const game::ObjectId id = game::IdOf(pawn);
+			if (!g_newLevel && g_pawn.address && id != g_pawn) {	// A new pawn, even at the old one's address
 				++g_stats.restarts;
 				mods::DispatchRestart();
 			}
-			g_pawn = pawn;
+			g_pawn = id;
 		}
 
 		void Streaming()
@@ -111,7 +112,7 @@ namespace mirage::world_events
 	void OnLevelLoaded()
 	{
 		g_newLevel = true;
-		g_pawn = nullptr;
+		g_pawn = {};
 	}
 
 	void Tick()

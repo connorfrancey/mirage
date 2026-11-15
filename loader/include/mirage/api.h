@@ -109,6 +109,7 @@ typedef struct MirageCall MirageCall;               /* A call of a game function
 typedef struct MirageHook MirageHook;               /* A function hook */
 typedef struct MirageSubscription MirageSubscription;   /* An event subscription */
 typedef struct MirageDetour MirageDetour;           /* A detour of native code */
+typedef struct MirageMidHook MirageMidHook;         /* A hook in the middle of native code (mid_hook_create) */
 typedef struct MirageNativeCall MirageNativeCall;   /* One call of a mod native from the game's bytecode */
 
 /* A value read from or written to a game object or a call, by dotted path ("Location.Z", "NewLocation", "ReturnValue") */
@@ -187,6 +188,19 @@ typedef struct MirageHandle {
     int32_t name_index, name_number;    /* Its name (an FName) */
     MirageObject* object_class;
 } MirageHandle;
+
+/* mid_hook_create: the registers at the hooked instruction, given to the callback, which may change them (esp is
+ * read-only). continue_at: 0 runs the instructions the hook replaced and goes on after them; an address skips them and
+ * goes on there with the registers as left. */
+typedef struct MirageRegisters {
+    uint32_t size;              /* sizeof(MirageRegisters), set by the runtime */
+    uint32_t eax, ecx, edx, ebx, esp, ebp, esi, edi;
+    uint32_t eflags;
+    uint32_t continue_at;
+} MirageRegisters;
+typedef void(MIRAGE_CALL* MirageMidHookFn)(void* user, MirageRegisters* registers);
+/* test_register: 1 when the test passed; 0 when it failed, with why in `message` (capacity bytes, NUL-terminated) */
+typedef int32_t(MIRAGE_CALL* MirageTestFn)(void* user, char* message, uint32_t capacity);
 
 /* actors_query: which actors (every field optional; zero = any). Actors of the levels in play (the persistent level and
  * the visible streaming levels), from the runtime's per-tick actor lists: no walk of the whole object list. */
@@ -843,6 +857,27 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* change_revert)(MirageMod* mod, int32_t id);
     /* The mod's transactions as JSON: [{"id", "name", "values": ["Object.Path", ...], "reverted"}]; its full length */
     uint32_t(MIRAGE_CALL* change_list)(MirageMod* mod, char* buffer, uint32_t capacity);
+
+    /* ---- Engine symbols and hooks (the plan's next ten steps, step 2). The game's functions and globals by name, the
+     * runtime's table of them (its symbols.toml, found by pattern at start, and what its own code works out):
+     * "ProcessEvent", "Tick", "StaticLoadObject", "GMalloc", ... Any thread. */
+    /* The address (a function, or a global's variable); NULL if the name isn't known or wasn't found on this game */
+    void*(MIRAGE_CALL* symbol_find)(const char* name);
+    /* detour_create on a symbol: NULL (and the reason in the log) if it isn't known. Every detour (detour_create's too)
+     * runs behind a guard: when it faults in the mod's own code, the call goes on in its *original as if it weren't
+     * there, and the mod is stopped and named like a crash in any of its callbacks (its hooks and detours removed). */
+    MirageDetour*(MIRAGE_CALL* detour_symbol)(MirageMod* mod, const char* symbol, void* detour, int32_t priority, void** original);
+    /* A hook at an instruction (not only a function's start): `callback` runs there on the thread that runs that code,
+     * with the registers. A fault in it skips it from then on and stops the mod. NULL if the place can't be hooked
+     * (the reason in the log). Removed with mid_hook_remove, or the mod's unload. */
+    MirageMidHook*(MIRAGE_CALL* mid_hook_create)(MirageMod* mod, void* at, MirageMidHookFn callback, void* user);
+    void(MIRAGE_CALL* mid_hook_remove)(MirageMidHook* hook);
+
+    /* ---- Mod tests (the next ten steps' step 3: `mirage mod test`). A test the mod carries, run by the self-test's
+     * "Mod tests" step on the game thread with a level loaded and the mod on: it checks what the mod does in the game.
+     * A fault in it fails it and stops the mod, like any crash. Removed with the mod's unload. 1, or 0 (no name or
+     * function). */
+    int32_t(MIRAGE_CALL* test_register)(MirageMod* mod, const char* name, MirageTestFn fn, void* user);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

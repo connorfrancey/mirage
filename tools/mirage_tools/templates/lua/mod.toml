@@ -1,0 +1,18 @@
+id = "{{id}}"
+name = "{{name}}"
+version = "0.1.0"
+description = "{{description}}"
+authors = ["{{author}}"]
+mirage = "^0.1"
+hot_reload = true          # Save main.lua while the game runs: the mod reloads
+# lua = "main.lua" is the default
+
+# Settings, shown in the module's panel and kept by the menu: main.lua reads them with mirage.setting("speed")
+[settings.speed]
+type = "float"
+name = "Speed"
+description = "An example setting"
+default = 1.0
+min = 0.0
+max = 10.0
+format = "%.1f"

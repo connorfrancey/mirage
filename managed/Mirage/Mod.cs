@@ -131,6 +131,76 @@ namespace Mirage
         }
 
         /// <summary>
+        /// The game's function or global named <paramref name="name"/> ("ProcessEvent", "StaticLoadObject", "GMalloc"):
+        /// its address, 0 if the runtime doesn't know it or didn't find it on this game. Any thread.
+        /// </summary>
+        public nint Symbol(string name) => (nint)Bridge.Api->symbol_find(Utf8.Intern(name));
+
+        /// <summary>
+        /// Detours native code: the game calls <paramref name="detour"/> (an [UnmanagedCallersOnly] function's address,
+        /// with the target's calling convention) instead of <paramref name="target"/>; it goes on through
+        /// <see cref="NativeDetour.Original"/>. Higher priority runs first. A fault in it is survived (the call goes on in
+        /// the original) and stops the mod. Removed when disposed or when the mod unloads. Null if it failed (the log says why).
+        /// </summary>
+        public NativeDetour? Detour(nint target, nint detour, int priority = 0) => NativeDetour.Create(this, target, null, detour, priority);
+        /// <summary><see cref="Detour"/> of a symbol (<see cref="Symbol"/>). Null if the symbol isn't known.</summary>
+        public NativeDetour? DetourSymbol(string symbol, nint detour, int priority = 0) => NativeDetour.Create(this, 0, symbol, detour, priority);
+
+        /// <summary>
+        /// A hook at any instruction: <paramref name="callback"/> runs there with the registers and may change them. A fault
+        /// in it skips it from then on and stops the mod. Removed when disposed or when the mod unloads.
+        /// </summary>
+        public NativeMidHook? MidHook(nint at, delegate* unmanaged[Cdecl]<void*, MirageRegisters*, void> callback, nint user = 0)
+        {
+            var h = Bridge.Api->mid_hook_create(Handle, (void*)at, (void*)callback, (void*)user);
+            if (h == null) return null;
+            var hook = new NativeMidHook(h);
+            Owned.Add(hook);
+            return hook;
+        }
+
+        /// <summary>
+        /// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on
+        /// (`mirage mod test`): <paramref name="test"/> returns null when it passed, else why it failed. An exception
+        /// fails it with its message.
+        /// </summary>
+        public void Test(string name, Func<string?> test)
+        {
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(test);      // Lives as long as the mod
+            Owned.Add(new TestHandle(handle));
+            Bridge.Api->test_register(Handle, Utf8.Intern(name), (void*)(delegate* unmanaged[Cdecl]<void*, byte*, uint, int>)&RunTest,
+                                      (void*)System.Runtime.InteropServices.GCHandle.ToIntPtr(handle));
+        }
+
+        [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+        private static int RunTest(void* user, byte* message, uint capacity)
+        {
+            string? why;
+            try
+            {
+                var test = (Func<string?>)System.Runtime.InteropServices.GCHandle.FromIntPtr((nint)user).Target!;
+                why = test();
+            }
+            catch (Exception e)
+            {
+                why = e.GetType().Name + ": " + e.Message;
+            }
+            if (why is null) return 1;
+            var bytes = System.Text.Encoding.UTF8.GetBytes(why);
+            var n = (int)Math.Min((uint)bytes.Length, capacity - 1);
+            for (int i = 0; i < n; i++) message[i] = bytes[i];
+            message[n] = 0;
+            return 0;
+        }
+
+        private sealed class TestHandle : IDisposable
+        {
+            private System.Runtime.InteropServices.GCHandle _h;
+            public TestHandle(System.Runtime.InteropServices.GCHandle h) => _h = h;
+            public void Dispose() { }       // Kept: the runtime may still hold the test until the mod is gone
+        }
+
+        /// <summary>
         /// The actors in play that match (step 14): of a class (and its subclasses), with a tag or a name, within
         /// <paramref name="radius"/> of <paramref name="near"/> or of a point (nearest first). Every filter optional.
         /// Game thread.
@@ -235,5 +305,57 @@ namespace Mirage
         public Dictionary<string, Action<Call>> Functions { get; set; } = new();
         /// <summary>More UnrealScript, as written.</summary>
         public string Extra { get; set; } = "";
+    }
+}
+
+namespace Mirage
+{
+    /// <summary>A detour of native code (<see cref="Mod.Detour"/>).</summary>
+    public sealed unsafe class NativeDetour : IDisposable
+    {
+        private void* _handle;
+        private readonly nint* _original;       // Native memory the runtime keeps right as the chain changes
+
+        private NativeDetour(void* handle, nint* original)
+        {
+            _handle = handle;
+            _original = original;
+        }
+
+        /// <summary>What the detour calls to go on: the next detour, or the real function.</summary>
+        public nint Original => *_original;
+
+        internal static NativeDetour? Create(Mod mod, nint target, string? symbol, nint detour, int priority)
+        {
+            var original = (nint*)System.Runtime.InteropServices.NativeMemory.AllocZeroed((nuint)sizeof(nint));  // Never freed: a call may still read it
+            void* h = symbol is null
+                ? Bridge.Api->detour_create(mod.Handle, (void*)target, (void*)detour, priority, (void**)original)
+                : Bridge.Api->detour_symbol(mod.Handle, Utf8.Intern(symbol), (void*)detour, priority, (void**)original);
+            if (h == null) return null;
+            var d = new NativeDetour(h, original);
+            mod.Owned.Add(d);
+            return d;
+        }
+
+        public void Dispose()
+        {
+            if (_handle == null) return;
+            Bridge.Api->detour_remove(_handle);
+            _handle = null;
+        }
+    }
+
+    /// <summary>A mid-function hook (<see cref="Mod.MidHook"/>).</summary>
+    public sealed unsafe class NativeMidHook : IDisposable
+    {
+        private void* _handle;
+        internal NativeMidHook(void* handle) => _handle = handle;
+
+        public void Dispose()
+        {
+            if (_handle == null) return;
+            Bridge.Api->mid_hook_remove(_handle);
+            _handle = null;
+        }
     }
 }

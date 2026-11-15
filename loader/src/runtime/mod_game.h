@@ -2,6 +2,8 @@
 // The game side of the mod API (Mirage, step 6): events, function hooks, calls and game objects for MirageApi
 // (runtime/mods.cpp puts these functions in the table), and where the menu tells mods what happened.
 
+#include <string>
+#include <vector>
 #include "mirage/api.h"
 
 #include <string>
@@ -26,6 +28,11 @@ namespace mirage::mods::game_api
 	void MIRAGE_CALL ChangeEnd(MirageMod* mod);
 	int32_t MIRAGE_CALL ChangeRevert(MirageMod* mod, int32_t id);
 	uint32_t MIRAGE_CALL ChangeList(MirageMod* mod, char* buffer, uint32_t capacity);
+	void* MIRAGE_CALL SymbolFind(const char* name);
+	MirageDetour* MIRAGE_CALL DetourSymbol(MirageMod* mod, const char* symbol, void* detour, int32_t priority, void** original);
+	MirageMidHook* MIRAGE_CALL MidHookCreate(MirageMod* mod, void* at, MirageMidHookFn callback, void* user);
+	void MIRAGE_CALL MidHookRemove(MirageMidHook* hook);
+	int32_t MIRAGE_CALL TestRegister(MirageMod* mod, const char* name, MirageTestFn fn, void* user);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
@@ -86,6 +93,16 @@ namespace mirage::mods
 
 	// What happened, to the mods subscribed to it (the menu calls these where the game layer reports it)
 	void DispatchTick(float seconds);								// Game thread
+
+	// The mods' own tests (test_register): every one of the mods named (all mods when empty), on the game thread
+	struct TestResult
+	{
+		std::string mod, name;
+		bool ok = false;
+		std::string message;		// Why it failed (or "didn't run": the mod isn't running)
+		double ms = 0.0;
+	};
+	std::vector<TestResult> RunTests(const std::vector<std::string>& mods);
 	void DispatchLevelLoad(bool finished, const std::string& map);	// Game thread
 	void DispatchDeath(bool after);									// Game thread
 	bool DispatchPlayerState();										// Game thread: reads the move state itself; true: a mod

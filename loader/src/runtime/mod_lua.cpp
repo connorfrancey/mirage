@@ -203,6 +203,9 @@ namespace mirage::mods
 		static int Transaction(lua_State* L);
 		static int Revert(lua_State* L);
 		static int Changes(lua_State* L);
+		static int SymbolFn(lua_State* L);
+		static int TestFn(lua_State* L);
+		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
 		static int ProxyIndex(lua_State* L);
@@ -1077,6 +1080,53 @@ namespace mirage::mods
 	}
 
 	// mirage.changes() -> { { id, name, values = { "Object.Path", ... }, reverted }, ... }, oldest first
+	// mirage.symbol(name): the address of the game's function or global by name (an integer), nil if unknown. Lua can't
+	// detour native code itself; this is for reading what a native mod hooks, and for the developer's eye.
+	int LuaMod::SymbolFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		void* at = MIRAGE_API_HAS(self.api_, symbol_find) ? self.api_->symbol_find(luaL_checkstring(L, 1)) : nullptr;
+		if (!at) lua_pushnil(L);
+		else lua_pushinteger(L, static_cast<lua_Integer>(reinterpret_cast<std::uintptr_t>(at)));
+		return 1;
+	}
+
+	// mirage.test("name", function() ... end): a test the self-test runs ("Mod tests", `mirage mod test`). It passes
+	// unless it raises an error or returns false (and a reason): return false, "the jump is normal"
+	int LuaMod::TestFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		const char* name = luaL_checkstring(L, 1);
+		luaL_checktype(L, 2, LUA_TFUNCTION);
+		if (!MIRAGE_API_HAS(self.api_, test_register)) return luaL_error(L, "mirage.test: this runtime has no mod tests");
+		auto c = std::make_unique<Callback>();
+		c->owner = &self;
+		c->what = std::string("test ") + name;
+		lua_pushvalue(L, 2);
+		c->fn = luaL_ref(L, LUA_REGISTRYINDEX);
+		if (!self.api_->test_register(self.mod_, name, &OnTest, c.get())) return luaL_error(L, "mirage.test: %s wasn't registered", name);
+		self.callbacks_.push_back(std::move(c));
+		return 0;
+	}
+
+	int32_t MIRAGE_CALL LuaMod::OnTest(void* user, char* message, uint32_t capacity)
+	{
+		auto* c = static_cast<Callback*>(user);
+		LuaMod& self = *c->owner;
+		std::lock_guard lock(self.lock_);
+		lua_State* L = self.state_.Get();
+		const int top = lua_gettop(L);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, c->fn);
+		const lua::Result r = self.state_.Call(0, 2);
+		std::string why;
+		if (!r.ok) why = r.error;
+		else if (lua_isboolean(L, -2) && !lua_toboolean(L, -2)) why = lua_isstring(L, -1) ? lua_tostring(L, -1) : "it returned false";
+		lua_settop(L, top);
+		if (why.empty()) return 1;
+		std::snprintf(message, capacity, "%s", why.c_str());
+		return 0;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -1830,7 +1880,7 @@ namespace mirage::mods
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
-			{"changes", Changes}, {nullptr, nullptr}};
+			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

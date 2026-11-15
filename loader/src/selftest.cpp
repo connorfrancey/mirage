@@ -35,6 +35,8 @@
 #include "runtime/routes.h"
 #include <imgui.h>
 #include "runtime/inject.h"
+#include "runtime/detours.h"
+#include "runtime/symbols.h"
 #include "runtime/natives.h"
 #include "runtime/script_patch.h"
 #include "runtime/reflect.h"
@@ -99,6 +101,7 @@ namespace {
 using json = nlohmann::ordered_json;
 
 struct Options {
+    std::vector<std::string> modTests;   // "Mod tests": only these mods' tests (all when empty): `mirage mod test`
     std::string map = "edge_p";
     int checkpoint = 2;         // 0/1 = start of the level: the Prologue's intro cutscene holds the player there
     unsigned ticks = 10;        // Engine ticks (and frames) each module stays on
@@ -1828,6 +1831,121 @@ void TestMirageFunctionHooks()
 // x * 10 + its number: 1 then 12); they read game objects by name and get events; reloading them keeps that up and
 // switching them off leaves no hook behind. Measured: what an unhooked script call pays for the detour (its lookup),
 // and what a native and a Lua hook add to a call.
+// The mods' own tests (test_register; mirage.test in Lua, mirage::Test in C++, Mod.Test in C#): each runs on the game
+// thread with the level loaded and its mod's modules on. `mirage mod test <folder>` runs only that mod's (option
+// modtests=<id>); a full run runs every installed mod's.
+void TestModTests()
+{
+    Step& s = Begin("Mod tests");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    // The mods under test (`mirage mod test`) have their modules on: a test checks what the mod does. A full run
+    // switches nothing (the self-test's own mods include ones that crash or change the game on purpose): their tests
+    // run with the modules as the other steps left them.
+    std::vector<Module*> switched;
+    for (const auto& info : mm::List()) {
+        if (!info.loaded || g_options.modTests.empty()) continue;
+        if (std::find(g_options.modTests.begin(), g_options.modTests.end(), info.id) == g_options.modTests.end())
+            continue;
+        for (const std::string& name : info.modules)
+            if (Module* m = modules::Find(name); m && !m->Enabled()) {
+                OnRenderThread([m] { m->SetEnabled(true); });
+                switched.push_back(m);
+            }
+    }
+    WaitTicks(5);
+    std::vector<mm::TestResult> results;
+    OnGameThread([&] { results = mm::RunTests(g_options.modTests); }, 120.0);
+    for (const auto& r : results) {
+        s.notes.push_back(fmt::format("{} {}: {} ({:.1f} ms){}", r.ok ? "PASS" : "FAIL", r.mod, r.name, r.ms,
+                                      r.ok ? std::string() : " - " + r.message));
+        if (!r.ok) p.Problem(fmt::format("{}: {}: {}", r.mod, r.name, r.message));
+    }
+    if (results.empty()) {
+        std::string names;
+        for (const auto& id : g_options.modTests) names += (names.empty() ? "" : ", ") + id;
+        s.notes.push_back(names.empty() ? std::string("no mod has tests")
+                                        : "no tests from " + names + " (does it call test_register / mirage.test / Mod.Test?)");
+    }
+    if (!g_options.modTests.empty() && results.empty()) p.Problem("the mod under test registered no tests");
+    for (Module* m : switched) OnRenderThread([m] { m->SetEnabled(false); });
+    p.Check(1, true);
+    End(s);
+}
+
+// The engine's symbols and hooks by symbol (step 2 of the next ten steps): every pattern of runtime/symbols.toml is
+// found, exactly once; the names the runtime's code works out are there too. tests/mods/hook-symbol detours
+// StaticLoadObject by name and counts the calls; with its Crash setting on, the next call faults in its detour: the load
+// still works (the guard goes on in the real function), the mod is stopped and named, and the game goes on.
+void TestEngineSymbols()
+{
+    Step& s = Begin("Mirage engine symbols");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    int fromToml = 0, provided = 0;
+    for (const auto& sym : mirage::symbols::List()) {
+        if (sym.provided) {
+            ++provided;
+            continue;
+        }
+        ++fromToml;
+        if (!sym.address) p.Problem(sym.name + " wasn't found: " + sym.problem);
+        else if (sym.matches != sym.expected)
+            p.Problem(fmt::format("{} matches in {} places, not the {} symbols.toml says", sym.name, sym.matches, sym.expected));
+    }
+    for (const char* name : {"FrameTiming", "PreDeath", "PostDeath", "GConfig", "GMalloc"})
+        if (!mirage::symbols::Find(name)) p.Problem(std::string("the runtime's code didn't provide ") + name);
+    s.notes.push_back(fmt::format("{} symbols from symbols.toml, {} provided by the runtime's code", fromToml, provided));
+
+    Module* m = modules::Find("Hook (symbol)");
+    if (!m) {
+        p.Problem("the Hook (symbol) module is missing (tests/mods/hook-symbol)");
+        End(s);
+        return;
+    }
+    const auto calls = [m] {
+        auto* v = dynamic_cast<ctl::Value<int>*>(m->FindSetting("Calls"));
+        return v ? v->Get() : -1;
+    };
+    const auto load = [] {
+        Classes::UObject* o = nullptr;
+        OnGameThread([&] { o = mirage::classes::LoadByName("Engine.Actor", Classes::UClass::StaticClass()); });
+        return o;
+    };
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitTicks(2);
+    void* target = mirage::symbols::Find<void>("StaticLoadObject");
+    if (mirage::detours::Chain(target).empty()) p.Problem("hook-symbol's detour of StaticLoadObject isn't on it");
+    const int before = calls();
+    if (!load()) p.Problem("StaticLoadObject didn't load Engine.Actor through the detour");
+    if (calls() <= before) p.Problem("hook-symbol's detour didn't see the call");
+    // Its mid-function hook inside StaticLoadObject, where the function reads its Name: it saw "Engine.Actor"
+    if (auto* mid = dynamic_cast<ctl::Value<int>*>(m->FindSetting("Mid calls")); !mid || mid->Get() < 1)
+        p.Problem("hook-symbol's mid-function hook didn't see the load of Engine.Actor (its registers)");
+
+    // The fault: the load goes on in the real function, the mod is named, its detour is gone
+    p.Expect("[mod hook-symbol] CRASHED");
+    if (auto* crash = dynamic_cast<ctl::Value<bool>*>(m->FindSetting("Crash"))) OnRenderThread([crash] { crash->Set(true); });
+    if (!load()) p.Problem("with the detour faulting, StaticLoadObject didn't load Engine.Actor (the guard didn't go on)");
+    const auto named = [] {
+        for (const auto& i : mm::List())
+            if (i.id == "hook-symbol") return i.problem;
+        return std::string("hook-symbol not found");
+    };
+    if (!WaitFor(5.0, [&] { return named().find("its detour of StaticLoadObject") != std::string::npos; }))
+        p.Problem("the mod wasn't stopped and named for its detour: " + named());
+    else s.notes.push_back("hook-symbol: " + named());
+    // Named first, then its hooks removed (both on the game thread): the chain empties right after
+    if (!WaitFor(5.0, [&] { return mirage::detours::Chain(target).empty(); }))
+        p.Problem("the faulted detour is still on StaticLoadObject");
+    if (!load()) p.Problem("after the fault, StaticLoadObject doesn't load any more");
+    const auto ticks = Ticks();
+    WaitTicks(3);
+    if (Ticks() == ticks) p.Problem("the game stopped after the detour's fault");
+    p.Check(1, true);
+    End(s);
+}
+
 void TestMirageModHooks()
 {
     Step& s = Begin("Mirage hooks from mods");
@@ -2113,7 +2231,14 @@ void TestCrashReporter()
         if (!mirage::crash::LastAnalysis(a)) p.Problem("the reporter kept no analysis");
         else {
             const bool pdb = fs::exists(paths::Dir() / "Mirage.pdb");
-            if (pdb && (a.frames.empty() || a.frames.front().symbol.find("Fault") == std::string::npos))
+            // Named from the PDB: crash_test::Fault in a debug build. An optimized one folds identical functions together
+            // (/OPT:ICF), so the address may carry another function's name there: a name is what is checked.
+#ifdef NDEBUG
+            const bool named = !a.frames.empty() && !a.frames.front().symbol.empty();
+#else
+            const bool named = !a.frames.empty() && a.frames.front().symbol.find("Fault") != std::string::npos;
+#endif
+            if (pdb && !named)
                 p.Problem("the faulting frame isn't named from the PDB: " + (a.frames.empty() ? std::string("no frames") : a.frames.front().Full()));
             if (a.disasm.empty() || std::none_of(a.disasm.begin(), a.disasm.end(), [](const crashhandler::DisasmLine& l) { return l.current; }))
                 p.Problem("no disassembly at the fault");
@@ -3836,7 +3961,14 @@ void TestScriptInjectionMods()
     OnGameThread([] { player_state::Save(); });
 
     const std::vector<std::uint8_t> original = bytes();
-    const float normal = StandingJump();
+    // Every jump from the same place (a standing jump's height depends on the floor under it: after Higher Jumps' jump
+    // the player lands elsewhere): the state saved above, put back before each
+    const auto jumpFromStart = [] {
+        OnGameThread([] { player_state::Load(); });
+        WaitGrounded();
+        return StandingJump();
+    };
+    const float normal = jumpFromStart();
 
     setOn(b, true);
     setOn(a, true);
@@ -3855,7 +3987,7 @@ void TestScriptInjectionMods()
     };
     if (auto* seen = dynamic_cast<ctl::SliderInt*>(b->FindSetting("Seen"))) OnRenderThread([seen] { seen->Set(-1); });
     const int runsBefore = intOf(a, "Runs");
-    const float heavy = StandingJump();
+    const float heavy = jumpFromStart();
     if (intOf(a, "Runs") <= runsBefore) p.Problem("inject-a's callback didn't run during the jump");
     if (intOf(b, "Seen") != 1) p.Problem("inject-b saw CurrentWeaponType " + std::to_string(intOf(b, "Seen")) + ", not inject-a's 1 (order)");
 
@@ -3864,7 +3996,7 @@ void TestScriptInjectionMods()
     if (higher) {
         setOn(higher, true);
         if (!WaitFor(10.0, [&] { return patchedBy() == "higher-jumps"; })) p.Problem("Higher Jumps didn't patch under the injections");
-        both = StandingJump();
+        both = jumpFromStart();
         setOn(higher, false);
         if (!WaitFor(10.0, [&] { return patchedBy() != "higher-jumps"; })) p.Problem("Higher Jumps' patch stayed after it went off");
     }
@@ -3877,13 +4009,13 @@ void TestScriptInjectionMods()
     if (a2 && !a2->Enabled()) setOn(a2, true);
     if (!WaitFor(10.0, [&] { return injectedBy("inject-a"); })) p.Problem("inject-a's injection didn't come back after its reload");
     if (auto* seen = dynamic_cast<ctl::SliderInt*>(b->FindSetting("Seen"))) OnRenderThread([seen] { seen->Set(-1); });
-    const float reloaded = StandingJump();
+    const float reloaded = jumpFromStart();
     if (intOf(b, "Seen") != 1) p.Problem("after inject-a's reload inject-b saw " + std::to_string(intOf(b, "Seen")) + ", not 1");
 
     setOn(a2 ? a2 : a, false);
     setOn(b, false);
     if (!WaitFor(10.0, [&] { return bytes() == original; })) p.Problem("with both off again, StartMove isn't its original bytecode");
-    const float after = StandingJump();
+    const float after = jumpFromStart();
     OnGameThread([] { player_state::Load(); });
     WaitGrounded();
     if (higher && higherWas) setOn(higher, true);
@@ -4620,6 +4752,7 @@ void ReadOptions(std::istream& in)
         else if (key == "checkpoint") g_options.checkpoint = std::max(0, std::atoi(value.c_str()));
         else if (key == "ticks") g_options.ticks = static_cast<unsigned>(std::clamp(std::atoi(value.c_str()), 2, 3600));
         else if (key == "only") g_options.only = SplitList(value);
+        else if (key == "modtests") { const auto ids = SplitList(value); g_options.modTests.assign(ids.begin(), ids.end()); }
         else if (key == "skip") g_options.skip = SplitList(value);
         else if (key == "quit") g_options.quit = value != "0";
         else if (key == "fast") g_options.fast = value != "0";
@@ -4652,6 +4785,7 @@ const Named* FeatureList()
         {"Mirage mods", &TestMirageMods, false},
         {"Mirage lifecycle", &TestMirageLifecycle, false},
         {"Mirage hooks from mods", &TestMirageModHooks, false},
+        {"Mirage engine symbols", &TestEngineSymbols, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},
@@ -4676,6 +4810,7 @@ const Named* FeatureList()
         {"Mirage change log", &TestChangeLog, false},
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Engine console", &TestEngineConsole, false},
+        {"Mod tests", &TestModTests, false},                // After the loader's own steps: a mod's tests may change the game
         {"Engine death hook", &TestEngineDeath, false},     // Last: it restarts the checkpoint
         {nullptr, nullptr, false},
     };

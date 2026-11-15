@@ -1,4 +1,5 @@
 #include "runtime/fhooks.h"
+#include "runtime/symbols.h"
 
 #include "core/clock.h"
 #include "game/object_cache.h"
@@ -168,6 +169,7 @@ namespace mirage::hooks
 				if (inExe == natives.size() && seen.size() > natives.size() / 2) {
 					g_funcOffset = at;
 					g_processInternal = reinterpret_cast<Native>(static_cast<std::uintptr_t>(common));
+					symbols::Provide("ProcessInternal", common, "code", "UObject::ProcessInternal: runs every script function");
 					spdlog::info("Function hooks: UFunction::Func at 0x{:X}, ProcessInternal at {:#x} ({} script and {} native "
 								 "functions agree)", at, common, script.size(), natives.size());
 					return true;
