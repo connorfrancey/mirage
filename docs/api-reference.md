@@ -42,6 +42,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Mod tests](#mod-tests) (1)
 - [The player and movement](#the-player-and-movement) (1)
 - [Kismet](#kismet) (8)
+- [Physics and world queries](#physics-and-world-queries) (9)
 - [Types](#types)
 
 ## Basics
@@ -1286,6 +1287,78 @@ uint32_t(MIRAGE_CALL* movement_transitions)(char* buffer, uint32_t capacity);
 
 The player's last 256 move transitions, oldest first, as JSON [{"tick", "time", "from", "to", "from_name", "to_name", "skipped"}]: EMovement values and their names ("MOVE_Walking"), the engine tick and the level's time (WorldInfo.TimeSeconds); skipped: a mod's PLAYER_STATE callback kept the game from handling it (event_skip). Recorded whether or not a mod listens. Copies up to capacity, returns the full length. Any thread.
 
+## Physics and world queries
+
+Vectors are 3 floats (x, y, z), Unreal units. Bodies through the engine's own functions (SetRBLinearVelocity, AddImpulse, ...). Velocity, impulses, forces, mass and gravity are gameplay: not recorded. A spawned prop and a collision change are recorded in the open transaction (or one of their own): put back on revert and unload. Game thread.
+
+### `physics_body_get`
+
+```c
+int32_t(MIRAGE_CALL* physics_body_get)(MirageObject* actor, MirageBody* out);
+```
+
+1, or 0 (no such actor). Set out->size first. Actors without a body report location, rotation, velocity.
+
+### `physics_body_set`
+
+```c
+int32_t(MIRAGE_CALL* physics_body_set)(MirageMod* mod, MirageObject* actor, const MirageBody* in, uint32_t fields);
+```
+
+`fields`: MIRAGE_BODY_* bits of `in` to apply. 0: the actor has no rigid body (the log says why).
+
+### `physics_impulse`
+
+```c
+int32_t(MIRAGE_CALL* physics_impulse)(MirageMod* mod, MirageObject* actor, const float* impulse, const float* at, int32_t velocity_change);
+```
+
+An impulse (mass x velocity; `velocity_change` 1: a velocity change, the mass ignored) or a force (applied over the next physics step) at `at` (NULL: the centre of mass). Wakes the body. 0: no rigid body.
+
+### `physics_force`
+
+```c
+int32_t(MIRAGE_CALL* physics_force)(MirageMod* mod, MirageObject* actor, const float* force, const float* at);
+```
+
+### `physics_spawn`
+
+```c
+MirageObject*(MIRAGE_CALL* physics_spawn)(MirageMod* mod, const char* mesh, const float* location, const int32_t* rotation, float mass_scale);
+```
+
+A physics prop: a KActorSpawnable with the static mesh at `mesh` (any loaded StaticMesh with collision: "PX_LevelEffects2.CardboardBox_01.S_CardboardBox_01"), at `location`, `rotation` 3 ints (NULL: none), simulated and awake, its mass the mesh's times `mass_scale` (0 or 1: the mesh's own). Mass is given here only: the engine reads it from the mesh when it makes the body and never makes it again. The engine caps the mesh's MassScale times this at 100 (a mesh of 50: 2x at most); the scale is capped to match (a warning, and physics_body_get reads what the body got). Destroyed on revert and unload. NULL when it can't (the log says why).
+
+### `physics_collision_get`
+
+```c
+int32_t(MIRAGE_CALL* physics_collision_get)(MirageObject* actor);
+```
+
+MIRAGE_COLLIDE_ACTORS | MIRAGE_BLOCK_ACTORS | MIRAGE_BLOCK_RIGID_BODY as the actor has them; -1: no such actor
+
+### `physics_collision_set`
+
+```c
+int32_t(MIRAGE_CALL* physics_collision_set)(MirageMod* mod, MirageObject* actor, uint32_t flags);
+```
+
+### `world_trace`
+
+```c
+int32_t(MIRAGE_CALL* world_trace)(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags, MirageObject* ignore, MirageHit* out);
+```
+
+A line trace from `start` to `end`, or a box swept along it (`extent`: half sizes; NULL: a line), through the engine's own line check (UWorld::SingleLineCheck). `flags`: MIRAGE_TRACE_ACTORS. `ignore`: an actor it passes through (NULL: none). 1: hit, 0: nothing, -1: not done (the engine's line check wasn't found, or the mod went over its 4,000 traces this tick: the log says which). Set out->size first.
+
+### `world_overlap`
+
+```c
+int32_t(MIRAGE_CALL* world_overlap)(const float* center, float radius, const char* class_name, MirageObject** out, int32_t capacity);
+```
+
+Actors in play whose collision bounds touch the sphere (bounds, not shapes), of `class_name` or a subclass (NULL or "": any). Fills up to capacity, returns how many there are.
+
 ## Types
 
 ### `MirageLogLevel`
@@ -1431,6 +1504,41 @@ typedef struct MirageMovement {
     float speed;                /* Horizontal speed (units a second) */
     MirageObject* move_object;
 } MirageMovement;
+```
+
+### `MirageBody`
+
+physics_body_get / physics_body_set (step 6 of the next ten steps): a rigid body (a KActor, a prop) *
+
+```c
+typedef struct MirageBody {
+    uint32_t size;              /* sizeof(MirageBody) */
+    float location[3];
+    int32_t rotation[3];        /* Pitch, yaw, roll (65536 = a full turn) */
+    float linear_velocity[3];   /* Unreal units a second */
+    float angular_velocity[3];  /* Radians a second */
+    float mass_scale;           /* Get only: the mass scale a prop was spawned with (1: the mesh's own mass) */
+    float gravity_scale;        /* RB_BodyInstance.CustomGravityFactor */
+    int32_t awake;              /* Simulating now (not asleep) */
+    int32_t simulated;          /* Get only: Physics is PHYS_RigidBody and there is a body */
+} MirageBody;
+```
+
+### `MirageHit`
+
+world_trace: what the trace hit *
+
+```c
+typedef struct MirageHit {
+    uint32_t size;              /* sizeof(MirageHit) */
+    int32_t hit;                /* 1: something was hit (else the rest is zero) */
+    MirageObject* actor;        /* The actor hit; the world's own geometry (BSP, static meshes): the level's WorldInfo */
+    MirageObject* component;    /* The primitive component hit */
+    float location[3];
+    float normal[3];
+    float time;                 /* Where along the trace, 0..1 */
+    char bone[64];              /* A skeletal mesh's bone, else "" */
+} MirageHit;
 ```
 
 ### `MirageActorQuery`

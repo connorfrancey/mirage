@@ -215,6 +215,63 @@ namespace Mirage
             }
         }
 
+        /// <summary>A rigid body's state (null: no such actor). Game thread.</summary>
+        public Body? Body(GameObject actor)
+        {
+            var b = new MirageBody { size = (uint)sizeof(MirageBody) };
+            if (Bridge.Api->physics_body_get(actor.Handle, &b) == 0) return null;
+            return new Body(new Vec3(b.location[0], b.location[1], b.location[2]), b.rotation[0], b.rotation[1], b.rotation[2],
+                            new Vec3(b.linear_velocity[0], b.linear_velocity[1], b.linear_velocity[2]),
+                            new Vec3(b.angular_velocity[0], b.angular_velocity[1], b.angular_velocity[2]),
+                            b.mass_scale, b.gravity_scale, b.awake != 0, b.simulated != 0);
+        }
+
+        /// <summary>Sets a body's velocity (and wakes it). Game thread.</summary>
+        public bool SetVelocity(GameObject actor, Vec3 velocity)
+        {
+            var b = new MirageBody { size = (uint)sizeof(MirageBody) };
+            b.linear_velocity[0] = velocity.X; b.linear_velocity[1] = velocity.Y; b.linear_velocity[2] = velocity.Z;
+            return Bridge.Api->physics_body_set(Handle, actor.Handle, &b, 4u) != 0;
+        }
+
+        /// <summary>An impulse at the centre of mass (<paramref name="velocityChange"/>: the mass ignored). Game thread.</summary>
+        public bool Impulse(GameObject actor, Vec3 impulse, bool velocityChange = false)
+        {
+            float* v = stackalloc float[3] { impulse.X, impulse.Y, impulse.Z };
+            return Bridge.Api->physics_impulse(Handle, actor.Handle, v, null, velocityChange ? 1 : 0) != 0;
+        }
+
+        /// <summary>A force at the centre of mass, over the next physics step. Game thread.</summary>
+        public bool Force(GameObject actor, Vec3 force)
+        {
+            float* v = stackalloc float[3] { force.X, force.Y, force.Z };
+            return Bridge.Api->physics_force(Handle, actor.Handle, v, null) != 0;
+        }
+
+        /// <summary>
+        /// A physics prop with the static mesh at <paramref name="mesh"/>, its mass the mesh's times
+        /// <paramref name="massScale"/> (given here only); destroyed on revert and unload. Game thread.
+        /// </summary>
+        public GameObject SpawnProp(string mesh, Vec3 location, float massScale = 1f)
+        {
+            float* at = stackalloc float[3] { location.X, location.Y, location.Z };
+            return new GameObject(Bridge.Api->physics_spawn(Handle, Utf8.Intern(mesh), at, null, massScale));
+        }
+
+        /// <summary>A line trace (or a box sweep with <paramref name="extent"/>); null when nothing was hit. Game thread.</summary>
+        public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default)
+        {
+            float* s = stackalloc float[3] { start.X, start.Y, start.Z };
+            float* e = stackalloc float[3] { end.X, end.Y, end.Z };
+            float* x = stackalloc float[3];
+            if (extent is Vec3 ext) { x[0] = ext.X; x[1] = ext.Y; x[2] = ext.Z; }
+            var h = new MirageHit { size = (uint)sizeof(MirageHit) };
+            var r = Bridge.Api->world_trace(Handle, s, e, extent is null ? null : x, actors ? 1u : 0u, ignore.Handle, &h);
+            if (r != 1) return null;
+            return new TraceHit(new GameObject(h.actor), new Vec3(h.location[0], h.location[1], h.location[2]),
+                                new Vec3(h.normal[0], h.normal[1], h.normal[2]), h.time);
+        }
+
         /// <summary>The player's last 256 move transitions as JSON (api.h movement_transitions has the shape). Any thread.</summary>
         public string MovementTransitionsJson()
         {
@@ -440,4 +497,17 @@ namespace Mirage
     /// <summary>What the player is doing (<see cref="Mod.Movement"/>): EMovement values (the SDK's TdGame enum).</summary>
     public readonly record struct Movement(int Move, int PreviousMove, int Physics, float VelocityX, float VelocityY,
                                            float VelocityZ, float Speed, GameObject MoveObject);
+}
+
+namespace Mirage
+{
+    /// <summary>A vector in Unreal units</summary>
+    public readonly record struct Vec3(float X, float Y, float Z);
+
+    /// <summary>A rigid body's state (<see cref="Mod.Body"/>)</summary>
+    public readonly record struct Body(Vec3 Location, int Pitch, int Yaw, int Roll, Vec3 Velocity, Vec3 Angular,
+                                       float MassScale, float GravityScale, bool Awake, bool Simulated);
+
+    /// <summary>What a trace hit (<see cref="Mod.Trace"/>)</summary>
+    public readonly record struct TraceHit(GameObject Actor, Vec3 Location, Vec3 Normal, float Time);
 }

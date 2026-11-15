@@ -901,7 +901,9 @@ namespace mirage::mods
 			game_api::SymbolFind, game_api::DetourSymbol, game_api::MidHookCreate, game_api::MidHookRemove,
 			game_api::TestRegister, game_api::MovementGet, game_api::KismetRead,
 			game_api::KismetLink, game_api::KismetUnlink, game_api::KismetCreate, game_api::KismetFire, game_api::KismetTrace,
-			game_api::KismetTraceRead, game_api::MovementTransitions,
+			game_api::KismetTraceRead, game_api::MovementTransitions, game_api::PhysicsBodyGet, game_api::PhysicsBodySet,
+			game_api::PhysicsImpulse, game_api::PhysicsForce, game_api::PhysicsSpawn, game_api::PhysicsCollisionGet,
+			game_api::PhysicsCollisionSet, game_api::WorldTrace, game_api::WorldOverlap,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

@@ -1984,6 +1984,24 @@ with a template and docs.
    engine holds; the engine adds one thing at load, each streamed sublevel's root sequence nested in the level's root.
 6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with
    native-only queries through step 2.
+   **Status (2026-11-15): Scenario E passes; constraints, physical materials and the TAS question are left.**
+   `runtime/physics`: bodies through the engine's own functions (velocity, angular velocity, position, rotation,
+   impulses, forces, sleep and wake, `RB_BodyInstance.CustomGravityFactor` as gravity scale: verified, a body with 0
+   floats); props are `KActorSpawnable`s given a mesh with `DynamicSMActor.SetStaticMesh`, which makes the body;
+   collision flags (`bCollideActors`, `bBlockActors`, `BlockRigidBody`); traces call `UWorld::SingleLineCheck`
+   (`AActor::execTrace`'s native, a symbol now) with the engine's own trace flags; overlaps test actors' collision
+   bounds. ABI v1 appended `physics_body_get/set`, `physics_impulse`, `physics_force`, `physics_spawn`,
+   `physics_collision_get/set`, `world_trace`, `world_overlap` (Lua, C#, C++); a spawned prop and a collision change are
+   in the change log, a mod's traces have a per-tick budget (4,000). **Mass** is the finding: the engine reads it from
+   the mesh's `RB_BodySetup.MassScale` when it makes a body and nothing reachable makes it again (detach and attach keep
+   the same PhysX actor; a mesh swap destroys it for good), so mass is given at spawn (`physics_spawn`'s `mass_scale`)
+   and a live body's change is refused with that reason; the engine caps MassScale at 100 (the Prologue's cardboard
+   box, 50: 0.25x and 2x exact, 4x the same as 2x), and the runtime caps to match. Self-test "Mirage physics"
+   (tests/mods/physics-lua): the prop falls ~225 units in about 1.5 s, the same impulse in the air gives 142, 568, 71
+   u/s at 1x, 0.25x, 2x (identical in 3 release runs), gravity 0 holds it within 3 units, an overlap and a trace with
+   actors find it, the revert removes it. **500 line traces: 0.70 ms in release** (target 1 ms; 1.9 ms in debug). Left:
+   constraints (`RB_ConstraintActor`), physical materials on hits, rewinds and replays with props (step 24), a C# mod
+   using the API in the game (it compiles; the Lua mod is the test).
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.
 8. **Input actions and custom moves.** As step 22. The experiment between a new `TdMove` subclass, a reused move
    slot and a "virtual move" comes first and decides the API. The replay part of step 24 stays with the menu. Mirage

@@ -21,6 +21,7 @@
 #include "runtime/kismet.h"
 #include "runtime/kismet_layers.h"
 #include "runtime/kismet_trace.h"
+#include "runtime/physics.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -995,6 +996,205 @@ namespace mirage::mods
 								   {"to_name", MoveName(t.to)}, {"skipped", t.skipped}});
 			}
 			return CopyOut(out.dump(), buffer, capacity);
+		}
+
+		// ---- Physics and world queries (step 6) -------------------------------------------------------------------
+		Classes::AActor* ActorOf(MirageObject* o)
+		{
+			Classes::UObject* u = Obj(o);
+			return u && Alive(u) && u->IsA(Classes::AActor::StaticClass()) && !static_cast<Classes::AActor*>(u)->bDeleteMe
+					   ? static_cast<Classes::AActor*>(u) : nullptr;
+		}
+		physics::Vec VecOf(const float* v) { return v ? physics::Vec{v[0], v[1], v[2]} : physics::Vec{}; }
+		void Put(float* out, const physics::Vec& v)
+		{
+			out[0] = v.x;
+			out[1] = v.y;
+			out[2] = v.z;
+		}
+		int32_t PhysicsFail(MirageMod* mod, const char* what, const std::string& why)
+		{
+			spdlog::error("[mod {}] {}: {}", mod ? mod->id : "?", what, why);
+			return 0;
+		}
+
+		int32_t MIRAGE_CALL PhysicsBodyGet(MirageObject* actor, MirageBody* out)
+		{
+			if (!out || out->size < sizeof(MirageBody)) return 0;
+			const uint32_t size = out->size;
+			*out = MirageBody{};
+			out->size = size;
+			if (!game::IsGameThread()) return 0;
+			Classes::AActor* a = ActorOf(actor);
+			physics::Body b;
+			if (!a || !physics::Get(a, b)) return 0;
+			Put(out->location, b.location);
+			out->rotation[0] = b.pitch;
+			out->rotation[1] = b.yaw;
+			out->rotation[2] = b.roll;
+			Put(out->linear_velocity, b.linear);
+			Put(out->angular_velocity, b.angular);
+			out->mass_scale = b.massScale;
+			out->gravity_scale = b.gravityScale;
+			out->awake = b.awake ? 1 : 0;
+			out->simulated = b.simulated ? 1 : 0;
+			return 1;
+		}
+
+		int32_t MIRAGE_CALL PhysicsBodySet(MirageMod* mod, MirageObject* actor, const MirageBody* in, uint32_t fields)
+		{
+			if (!in || in->size < sizeof(MirageBody)) return PhysicsFail(mod, "physics_body_set", "no body, or its size isn't set");
+			if (!game::IsGameThread()) return PhysicsFail(mod, "physics_body_set", "only on the game thread");
+			Classes::AActor* a = ActorOf(actor);
+			if (!a) return PhysicsFail(mod, "physics_body_set", "not an actor in play");
+			physics::Body b;
+			b.location = VecOf(in->location);
+			b.pitch = in->rotation[0];
+			b.yaw = in->rotation[1];
+			b.roll = in->rotation[2];
+			b.linear = VecOf(in->linear_velocity);
+			b.angular = VecOf(in->angular_velocity);
+			b.massScale = in->mass_scale;
+			b.gravityScale = in->gravity_scale;
+			b.awake = in->awake != 0;
+			std::string why;
+			if (!physics::Set(a, b, fields, &why)) return PhysicsFail(mod, "physics_body_set", why);
+			return 1;
+		}
+
+		int32_t MIRAGE_CALL PhysicsImpulse(MirageMod* mod, MirageObject* actor, const float* impulse, const float* at, int32_t velocityChange)
+		{
+			if (!impulse || !game::IsGameThread()) return 0;
+			const physics::Vec where = VecOf(at);
+			Classes::AActor* a = ActorOf(actor);
+			if (!a || !physics::Impulse(a, VecOf(impulse), at ? &where : nullptr, velocityChange != 0))
+				return PhysicsFail(mod, "physics_impulse", "the actor has no rigid body");
+			return 1;
+		}
+
+		int32_t MIRAGE_CALL PhysicsForce(MirageMod* mod, MirageObject* actor, const float* force, const float* at)
+		{
+			if (!force || !game::IsGameThread()) return 0;
+			const physics::Vec where = VecOf(at);
+			Classes::AActor* a = ActorOf(actor);
+			if (!a || !physics::Force(a, VecOf(force), at ? &where : nullptr))
+				return PhysicsFail(mod, "physics_force", "the actor has no rigid body");
+			return 1;
+		}
+
+		MirageObject* MIRAGE_CALL PhysicsSpawn(MirageMod* mod, const char* mesh, const float* location, const int32_t* rotation, float massScale)
+		{
+			if (!mod || !location) return nullptr;
+			if (!game::IsGameThread()) {
+				PhysicsFail(mod, "physics_spawn", "only on the game thread");
+				return nullptr;
+			}
+			auto* m = mesh && *mesh ? classes::LoadByName(mesh, Classes::UStaticMesh::StaticClass()) : nullptr;
+			if (!m || !m->IsA(Classes::UStaticMesh::StaticClass())) {
+				PhysicsFail(mod, "physics_spawn", std::string("no static mesh ") + (mesh ? mesh : ""));
+				return nullptr;
+			}
+			std::string why;
+			Classes::AActor* prop = physics::SpawnProp(static_cast<Classes::UStaticMesh*>(m), VecOf(location), rotation ? rotation[0] : 0,
+													   rotation ? rotation[1] : 0, rotation ? rotation[2] : 0, massScale, &why);
+			if (!prop) {
+				PhysicsFail(mod, "physics_spawn", why);
+				return nullptr;
+			}
+			MirageObject* h = Handle(prop);
+			RecordEdit(mod, "spawn " + prop->GetName(), [hp = HandleOf(h)] {
+				Classes::AActor* a = ActorOf(HandleObject(&hp));
+				return a && a->Destroy();
+			});
+			return h;
+		}
+
+		int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor)
+		{
+			if (!game::IsGameThread()) return -1;
+			Classes::AActor* a = ActorOf(actor);
+			if (!a) return -1;
+			const physics::Collision c = physics::GetCollision(a);
+			return (c.collideActors ? MIRAGE_COLLIDE_ACTORS : 0) | (c.blockActors ? MIRAGE_BLOCK_ACTORS : 0) |
+				   (c.blockRigidBody ? MIRAGE_BLOCK_RIGID_BODY : 0);
+		}
+
+		int32_t MIRAGE_CALL PhysicsCollisionSet(MirageMod* mod, MirageObject* actor, uint32_t flags)
+		{
+			if (!mod || !game::IsGameThread()) return 0;
+			Classes::AActor* a = ActorOf(actor);
+			if (!a) return PhysicsFail(mod, "physics_collision_set", "not an actor in play");
+			const physics::Collision was = physics::GetCollision(a);
+			physics::SetCollision(a, {(flags & MIRAGE_COLLIDE_ACTORS) != 0, (flags & MIRAGE_BLOCK_ACTORS) != 0,
+									  (flags & MIRAGE_BLOCK_RIGID_BODY) != 0});
+			RecordEdit(mod, "collision of " + a->GetName(), [h = HandleOf(actor), was] {
+				Classes::AActor* x = ActorOf(HandleObject(&h));
+				if (x) physics::SetCollision(x, was);
+				return x != nullptr;
+			});
+			return 1;
+		}
+
+		// Traces each mod made this tick: over the budget, -1 (warned once a second)
+		struct TraceBudget
+		{
+			std::uint64_t tick = 0;
+			int used = 0;
+			std::uint64_t warnedTick = 0;
+		};
+		std::map<std::string, TraceBudget> g_traceBudget;
+		constexpr int kTracesPerTick = 4000;
+
+		int32_t MIRAGE_CALL WorldTrace(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags,
+									   MirageObject* ignore, MirageHit* out)
+		{
+			if (!out || out->size < sizeof(MirageHit) || !start || !end) return -1;
+			const uint32_t size = out->size;
+			*out = MirageHit{};
+			out->size = size;
+			if (!game::IsGameThread()) return -1;
+			if (!physics::TraceAvailable()) {
+				static bool told = false;
+				if (!std::exchange(told, true)) spdlog::error("world_trace: the engine's line check (UWorld::SingleLineCheck) wasn't found");
+				return -1;
+			}
+			if (mod) {
+				TraceBudget& b = g_traceBudget[mod->id];
+				const std::uint64_t now = g_ticks.load();
+				if (b.tick != now) {
+					b.tick = now;
+					b.used = 0;
+				}
+				if (++b.used > kTracesPerTick) {
+					if (now - b.warnedTick > 60 || !b.warnedTick) {
+						b.warnedTick = now;
+						spdlog::warn("[mod {}] world_trace: over {} traces this tick: the rest of this tick's are refused", mod->id, kTracesPerTick);
+					}
+					return -1;
+				}
+			}
+			const physics::Vec ext = VecOf(extent);
+			physics::Hit h;
+			if (!physics::Trace(VecOf(start), VecOf(end), extent ? &ext : nullptr, flags, ActorOf(ignore), h)) return -1;
+			if (!h.hit) return 0;
+			out->hit = 1;
+			out->actor = Handle(h.actor);
+			out->component = Handle(h.component);
+			Put(out->location, h.location);
+			Put(out->normal, h.normal);
+			out->time = h.time;
+			std::snprintf(out->bone, sizeof out->bone, "%s", h.bone.c_str());
+			return 1;
+		}
+
+		int32_t MIRAGE_CALL WorldOverlap(const float* center, float radius, const char* className, MirageObject** out, int32_t capacity)
+		{
+			if (!center || !game::IsGameThread()) return 0;
+			Classes::UClass* cls = nullptr;
+			if (className && *className && !(cls = game::FindClass(className))) return 0;
+			const auto found = physics::Overlap(VecOf(center), radius, cls);
+			for (int32_t i = 0; out && i < capacity && i < static_cast<int32_t>(found.size()); ++i) out[i] = Handle(found[static_cast<std::size_t>(i)]);
+			return static_cast<int32_t>(found.size());
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

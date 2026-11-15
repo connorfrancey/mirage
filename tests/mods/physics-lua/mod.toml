@@ -1,0 +1,6 @@
+# Self-test (step 6 of the next ten steps, the plan's Scenario E): a physics prop from Lua, pushed, made heavier, its
+# collision changed, the world queried around it, and gone when the mod reverts
+id = "physics-lua"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): spawns a physics prop and drives it from Lua"
+mirage = "^0.1"

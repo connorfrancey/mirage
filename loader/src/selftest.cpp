@@ -36,6 +36,8 @@
 #include <imgui.h>
 #include "runtime/inject.h"
 #include "runtime/kismet.h"
+#include "runtime/mod_internal.h"
+#include "runtime/physics.h"
 #include "runtime/kismet_trace.h"
 #include "runtime/kismet_layers.h"
 #include "runtime/detours.h"
@@ -2420,6 +2422,139 @@ void TestKismetLayer()
     End(s);
 }
 
+// Step 6 of the next ten steps, the plan's Scenario E: tests/mods/physics-lua spawns a prop with a mesh this step picks
+// (a KActor's, else a small one with collision from the level), lets it fall, pushes it at 1x and 4x mass, turns its
+// gravity off, changes its collision, and finds it with an overlap and a trace. This step checks what the mod shares,
+// times 500 traces in one tick (the plan's target: under 1 ms), and checks the revert takes the prop away.
+std::string PhysicsShared(const char* key)
+{
+    char v[512]{};
+    mirage::mods::game_api::ShareGet("physics-lua", key, v, sizeof v);
+    return v;
+}
+
+void TestPhysics()
+{
+    Step& s = Begin("Mirage physics");
+    Probe p(s);
+    Module* m = modules::Find("Physics (Lua)");
+    if (!m) {
+        p.Problem("the Physics (Lua) module is missing (tests/mods/physics-lua)");
+        End(s);
+        return;
+    }
+    if (!mirage::physics::TraceAvailable()) p.Problem("UWorld::SingleLineCheck wasn't found (runtime/symbols.toml)");
+
+    // The mesh: a KActor's (made to be a prop), else the smallest-but-not-tiny one with collision in the level
+    std::string mesh;
+    OnGameThread([&] {
+        float best = 1e9f;
+        auto& objects = Classes::UObject::GetGlobalObjects();
+        for (std::size_t i = 0; i < objects.Num(); ++i) {
+            auto* o = objects.GetByIndex(i);
+            if (!o || !o->IsA(Classes::UStaticMeshComponent::StaticClass())) continue;
+            auto* c = static_cast<Classes::UStaticMeshComponent*>(o);
+            if (!c->StaticMesh || !c->StaticMesh->BodySetup || !c->Owner || !game::IsA(c->Owner, Classes::AActor::StaticClass())) continue;
+            const bool kactor = c->Owner->IsA(Classes::AKActor::StaticClass());
+            const float r = c->Bounds.SphereRadius;
+            const float score = kactor ? 0.f : (r >= 20.f && r <= 80.f ? r : 1e8f);
+            if (score < best) {
+                best = score;
+                mesh = c->StaticMesh->GetPathName();
+            }
+        }
+        if (best >= 1e8f) mesh.clear();
+    });
+    if (mesh.empty()) {
+        p.Problem("no static mesh with collision for a prop in the level");
+        End(s);
+        return;
+    }
+    p.Expect("a live body's mass can't be changed");     // The mod checks that the refusal is clean
+    p.Expect("over the engine's cap");                   // ... and asks for more than the cap
+    MirageMod self;     // The self-test shares the mesh as "selftest"
+    self.id = "selftest";
+    mirage::mods::game_api::ShareSet(&self, "mesh", mesh.c_str());
+
+    int before = -1;
+    OnGameThread([&] { before = static_cast<int>(game::ActorsOf(Classes::AKActorSpawnable::StaticClass()).size()); });
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitFor(25.0, [] { return !PhysicsShared("done").empty() || !PhysicsShared("problem").empty(); });
+    const auto num = [](const char* key) { return util::ParseFloatOr(PhysicsShared(key).c_str(), -1.f); };
+    const auto yes = [](const char* key) { return PhysicsShared(key) == "true"; };
+    if (const std::string why = PhysicsShared("problem"); !why.empty())
+        p.Problem("the mod: " + why + (PhysicsShared("spot_why").empty() ? "" : " (" + PhysicsShared("spot_why") + ")"));
+    else if (PhysicsShared("done").empty()) p.Problem("the mod didn't finish (it shared: spawned '" + PhysicsShared("spawned") + "')");
+    s.notes.push_back(fmt::format("prop of {}: simulated {}, dropped {:.0f} in {:.2f} s", mesh, PhysicsShared("simulated"),
+                                  num("dropped"), num("fall_time")));
+    if (!yes("simulated")) p.Problem("the prop isn't simulated (PHYS_RigidBody with a body)");
+    if (num("dropped") < 50.f) p.Problem(fmt::format("the prop dropped {:.0f} units: it didn't fall", num("dropped")));
+
+    // Mass: the same impulse in the air, props spawned at other masses at the same spot: speed goes as 1 / mass
+    const float v1 = num("speed_1x"), vLight = num("speed_0.25"), v2 = num("speed_2"), v4 = num("speed_4");
+    s.notes.push_back(fmt::format("on the floor an impulse gives {:.0f} u/s; in the air with gravity off (drift {:.1f} in 0.5 s) the "
+                                  "same impulse: {:.0f} u/s at 1x mass, {:.0f} at 0.25x, {:.0f} at 2x, {:.0f} at 4x (effective mass "
+                                  "x{:.2f}, x{:.2f}, x{:.2f}; 4x reads back {}); a live body's mass change refused, the body kept: {}",
+                                  num("speed_floor"), num("drift"), v1, vLight, v2, v4, vLight > 0 ? v1 / vLight : 0.f,
+                                  v2 > 0 ? v1 / v2 : 0.f, v4 > 0 ? v1 / v4 : 0.f, PhysicsShared("mass_4"), PhysicsShared("live_mass_refused")));
+    if (std::fabs(num("drift")) > 30.f) p.Problem(fmt::format("with gravity_scale 0 the prop drifted {:.0f} units in 0.5 s", num("drift")));
+    if (PhysicsShared("live_mass_refused") != "true") p.Problem("set_body with a mass scale wasn't refused cleanly");
+    if (v1 <= 10.f) p.Problem("the impulse didn't move the prop");
+    else {
+        if (vLight / v1 < 3.f || vLight / v1 > 5.f) p.Problem(fmt::format("at 0.25x the mass the speed is {:.0f}, not about 4x {:.0f}", vLight, v1));
+        if (v2 <= 0.f || v1 / v2 < 1.6f || v1 / v2 > 2.5f) p.Problem(fmt::format("at 2x the mass the speed is {:.0f}, not about half of {:.0f}", v2, v1));
+        // 4x: capped by the engine (MassScale 100); it reads back as the capped scale and moves as that mass
+        const float capped = num("mass_4");
+        if (capped <= 0.f || capped > 4.f) p.Problem("the 4x prop's mass_scale reads " + PhysicsShared("mass_4"));
+        else if (v4 <= 0.f || v1 / v4 < capped * 0.8f || v1 / v4 > capped * 1.25f)
+            p.Problem(fmt::format("at 4x asked ({:.2f}x given) the speed is {:.0f}, not {:.0f}", capped, v4, v1 / capped));
+    }
+
+    // Collision, overlap, trace
+    s.notes.push_back(fmt::format("block_actors {} -> {}; overlap finds it: {}; a trace with actors hits it: {} ({}); without: hits the world: {}",
+                                  PhysicsShared("block_before"), PhysicsShared("block_after"), PhysicsShared("overlap"),
+                                  PhysicsShared("trace_hit_prop"), PhysicsShared("trace_hit_what"), PhysicsShared("trace_world")));
+    if (PhysicsShared("block_after") != "false") p.Problem("set_collision didn't take block_actors away");
+    if (!yes("overlap")) p.Problem("the overlap around the prop didn't find it");
+    if (!yes("trace_hit_prop")) p.Problem("a downward trace with actors didn't hit the prop");
+
+    // 500 traces in one tick: lines down from a ring around the player
+    double ms = -1.0;
+    int hits = 0;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        const Classes::FVector at = pawn->Location;
+        const auto start = clk::Now();
+        for (int i = 0; i < 500; ++i) {
+            const float a = static_cast<float>(i) * 0.0125664f, r = 100.f + static_cast<float>(i % 50) * 10.f;
+            MirageHit h{};
+            h.size = sizeof h;
+            const float from[3] = {at.X + std::cos(a) * r, at.Y + std::sin(a) * r, at.Z + 200.f};
+            const float to[3] = {from[0], from[1], at.Z - 1000.f};
+            hits += mirage::mods::game_api::WorldTrace(nullptr, from, to, nullptr, MIRAGE_TRACE_ACTORS, nullptr, &h) == 1;
+        }
+        ms = clk::Seconds(clk::Now() - start) * 1000.0;
+    }, 10.0);
+    s.notes.push_back(fmt::format("500 line traces in {:.2f} ms ({} hit)", ms, hits));
+    if (ms < 0) p.Problem("the traces didn't run");
+    else if (hits == 0) p.Problem("none of 500 traces down from around the player hit anything");
+#ifdef NDEBUG
+    if (ms > 1.0) p.Problem(fmt::format("500 traces took {:.2f} ms (target under 1 ms)", ms));
+#endif
+
+    // Off: the revert takes the prop away
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitFor(10.0, [] { return !PhysicsShared("reverted").empty(); });
+    WaitTicks(5);
+    int left = -1;
+    OnGameThread([&] { left = static_cast<int>(game::ActorsOf(Classes::AKActorSpawnable::StaticClass()).size()); });
+    s.notes.push_back(fmt::format("module off: reverted {}, KActorSpawnables in play {} (before the mod: {})", PhysicsShared("reverted"), left, before));
+    if (left != before) p.Problem("the prop is still in play after the revert");
+    p.Check(1, true);
+    End(s);
+}
+
 // Step 4 of the next ten steps, the plan's Scenario A: movement tuned from data (tests/mods/movement-tuning: five
 // constants in content/defaults.toml, on the classes' defaults and the live objects). On: the player's move objects and
 // pawn hold the mod's values and a standing jump goes as high as the faster jump makes it; off: every value is the
@@ -3839,6 +3974,7 @@ void TestLevelLayers()
     {
         int spawned = 0, problems = 0;
         Classes::AActor *a = nullptr, *b = nullptr;
+        game::ObjectId aId;         // PadA by its identity: a new pad can get the old one's memory
         std::string missing;
     };
     const auto look = [] {
@@ -3849,7 +3985,10 @@ void TestLevelLayers()
                 if (i.mod != "layer-test") continue;
                 if (i.actor) ++out.spawned;
                 if (!i.problem.empty()) ++out.problems;
-                if (i.name == "PadA") out.a = i.actor;
+                if (i.name == "PadA") {
+                    out.a = i.actor;
+                    if (i.actor) out.aId = game::IdOf(i.actor);
+                }
                 if (i.name == "PadB") out.b = i.actor;
                 if (i.name == "Missing") out.missing = i.problem;
             }
@@ -3976,8 +4115,8 @@ void TestLevelLayers()
     OnGameThread([&] { reload = mm::Reload("layer-test"); }, 20.0);
     if (!reload.empty()) p.Problem("hot reload: " + reload);
     Seen reloaded;
-    WaitFor(10.0, [&] { reloaded = look(); return reloaded.spawned >= 2 && reloaded.a != again.a; });
-    if (reloaded.spawned != 2 || reloaded.a == again.a) p.Problem("the hot reload didn't replace the layer's actors");
+    WaitFor(10.0, [&] { reloaded = look(); return reloaded.spawned >= 2 && !(reloaded.aId == again.aId); });
+    if (reloaded.spawned != 2 || reloaded.aId == again.aId) p.Problem("the hot reload didn't replace the layer's actors");
     End(s);
 }
 
@@ -5467,6 +5606,7 @@ const Named* FeatureList()
         {"Mirage Kismet (read)", &TestKismetRead, false},
         {"Mirage Kismet (edit)", &TestKismetEdit, false},
         {"Mirage Kismet (layer)", &TestKismetLayer, false},
+        {"Mirage physics", &TestPhysics, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

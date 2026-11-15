@@ -584,6 +584,37 @@ namespace mirage
 		return out;
 	}
 
+	// ---- Physics and world queries (step 6) ----------------------------------------------------------------------------
+	inline bool Body(MirageObject* actor, MirageBody& out)
+	{
+		out.size = sizeof out;
+		return MIRAGE_API_HAS(&Api(), physics_body_get) && Api().physics_body_get(actor, &out) != 0;
+	}
+	inline bool SetBody(MirageObject* actor, MirageBody body, uint32_t fields)
+	{
+		body.size = sizeof body;
+		return MIRAGE_API_HAS(&Api(), physics_body_set) && Api().physics_body_set(Mod(), actor, &body, fields) != 0;
+	}
+	inline bool Impulse(MirageObject* actor, const float (&impulse)[3], bool velocityChange = false)
+	{
+		return MIRAGE_API_HAS(&Api(), physics_impulse) && Api().physics_impulse(Mod(), actor, impulse, nullptr, velocityChange ? 1 : 0) != 0;
+	}
+	inline bool Force(MirageObject* actor, const float (&force)[3])
+	{
+		return MIRAGE_API_HAS(&Api(), physics_force) && Api().physics_force(Mod(), actor, force, nullptr) != 0;
+	}
+	inline MirageObject* SpawnProp(const char* mesh, const float (&location)[3], float massScale = 1.f)
+	{
+		return MIRAGE_API_HAS(&Api(), physics_spawn) ? Api().physics_spawn(Mod(), mesh, location, nullptr, massScale) : nullptr;
+	}
+	// A line trace (or, with extent, a box sweep); true when it hit something (out.hit)
+	inline bool Trace(const float (&start)[3], const float (&end)[3], MirageHit& out, uint32_t flags = 0,
+					  const float* extent = nullptr, MirageObject* ignore = nullptr)
+	{
+		out.size = sizeof out;
+		return MIRAGE_API_HAS(&Api(), world_trace) && Api().world_trace(Mod(), start, end, extent, flags, ignore, &out) == 1;
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

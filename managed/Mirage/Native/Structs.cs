@@ -44,6 +44,32 @@ namespace Mirage.Native
         public void* object_class;
     }
 
+    /// <summary>A rigid body (api.h MirageBody)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageBody
+    {
+        public uint size;
+        public fixed float location[3];
+        public fixed int rotation[3];
+        public fixed float linear_velocity[3];
+        public fixed float angular_velocity[3];
+        public float mass_scale, gravity_scale;
+        public int awake, simulated;
+    }
+
+    /// <summary>What a trace hit (api.h MirageHit)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageHit
+    {
+        public uint size;
+        public int hit;
+        public void* actor, component;
+        public fixed float location[3];
+        public fixed float normal[3];
+        public float time;
+        public fixed byte bone[64];
+    }
+
     /// <summary>What the player is doing (api.h MirageMovement)</summary>
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct MirageMovement

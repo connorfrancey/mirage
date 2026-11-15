@@ -165,6 +165,15 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, int, void> kismet_trace;
         public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint> kismet_trace_read;
         public delegate* unmanaged[Cdecl]<byte*, uint, uint> movement_transitions;
+        public delegate* unmanaged[Cdecl]<void*, void*, int> physics_body_get;
+        public delegate* unmanaged[Cdecl]<void*, void*, void*, uint, int> physics_body_set;
+        public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, int, int> physics_impulse;
+        public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, int> physics_force;
+        public delegate* unmanaged[Cdecl]<void*, byte*, void*, void*, float, void*> physics_spawn;
+        public delegate* unmanaged[Cdecl]<void*, int> physics_collision_get;
+        public delegate* unmanaged[Cdecl]<void*, void*, uint, int> physics_collision_set;
+        public delegate* unmanaged[Cdecl]<void*, void*, void*, void*, uint, void*, void*, int> world_trace;
+        public delegate* unmanaged[Cdecl]<void*, float, byte*, void**, int, int> world_overlap;
     }
 
     [StructLayout(LayoutKind.Sequential)]

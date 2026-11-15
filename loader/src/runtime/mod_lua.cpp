@@ -214,6 +214,15 @@ namespace mirage::mods
 		static int KismetTraceFn(lua_State* L);
 		static int KismetTraceReadFn(lua_State* L);
 		static int TransitionsFn(lua_State* L);
+		static int BodyFn(lua_State* L);
+		static int SetBodyFn(lua_State* L);
+		static int ImpulseFn(lua_State* L);
+		static int ForceFn(lua_State* L);
+		static int SpawnPropFn(lua_State* L);
+		static int CollisionFn(lua_State* L);
+		static int SetCollisionFn(lua_State* L);
+		static int TraceFn(lua_State* L);
+		static int OverlapFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1298,6 +1307,290 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// ---- Physics and world queries (step 6): vectors are {x, y, z} (or {1, 2, 3}) -------------------------------------
+	namespace
+	{
+		bool ReadVec(lua_State* L, int index, float out[3])
+		{
+			if (!lua_istable(L, index)) return false;
+			index = lua_absindex(L, index);
+			static const char* keys[] = {"x", "y", "z"};
+			for (int i = 0; i < 3; ++i) {
+				lua_getfield(L, index, keys[i]);
+				if (lua_isnil(L, -1)) {
+					lua_pop(L, 1);
+					lua_rawgeti(L, index, i + 1);
+				}
+				out[i] = static_cast<float>(lua_tonumber(L, -1));
+				lua_pop(L, 1);
+			}
+			return true;
+		}
+		void PushVec(lua_State* L, const float v[3])
+		{
+			lua_createtable(L, 0, 3);
+			lua_pushnumber(L, v[0]);
+			lua_setfield(L, -2, "x");
+			lua_pushnumber(L, v[1]);
+			lua_setfield(L, -2, "y");
+			lua_pushnumber(L, v[2]);
+			lua_setfield(L, -2, "z");
+		}
+		void CheckVec(lua_State* L, int index, float out[3])
+		{
+			if (!ReadVec(L, index, out)) luaL_typeerror(L, index, "vector {x, y, z}");
+		}
+	}
+
+	// mirage.body(actor): {location, rotation = {pitch, yaw, roll}, velocity, angular, mass_scale, gravity_scale, awake,
+	// simulated}, or nil
+	int LuaMod::BodyFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_body_get)) return luaL_error(L, "mirage.body: this runtime has no physics");
+		MirageBody b{};
+		b.size = sizeof b;
+		if (!self.api_->physics_body_get(CheckObject(L, 1), &b)) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_createtable(L, 0, 8);
+		PushVec(L, b.location);
+		lua_setfield(L, -2, "location");
+		lua_createtable(L, 0, 3);
+		lua_pushinteger(L, b.rotation[0]);
+		lua_setfield(L, -2, "pitch");
+		lua_pushinteger(L, b.rotation[1]);
+		lua_setfield(L, -2, "yaw");
+		lua_pushinteger(L, b.rotation[2]);
+		lua_setfield(L, -2, "roll");
+		lua_setfield(L, -2, "rotation");
+		PushVec(L, b.linear_velocity);
+		lua_setfield(L, -2, "velocity");
+		PushVec(L, b.angular_velocity);
+		lua_setfield(L, -2, "angular");
+		lua_pushnumber(L, b.mass_scale);
+		lua_setfield(L, -2, "mass_scale");
+		lua_pushnumber(L, b.gravity_scale);
+		lua_setfield(L, -2, "gravity_scale");
+		lua_pushboolean(L, b.awake);
+		lua_setfield(L, -2, "awake");
+		lua_pushboolean(L, b.simulated);
+		lua_setfield(L, -2, "simulated");
+		return 1;
+	}
+
+	// mirage.set_body(actor, {location =, rotation =, velocity =, angular =, gravity_scale =, awake =}): only the fields
+	// given. True when done. (Mass: mirage.spawn_prop's.)
+	int LuaMod::SetBodyFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_body_set)) return luaL_error(L, "mirage.set_body: this runtime has no physics");
+		MirageObject* actor = CheckObject(L, 1);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		MirageBody b{};
+		b.size = sizeof b;
+		uint32_t fields = 0;
+		lua_getfield(L, 2, "location");
+		if (ReadVec(L, -1, b.location)) fields |= MIRAGE_BODY_LOCATION;
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "rotation");
+		if (lua_istable(L, -1)) {
+			static const char* keys[] = {"pitch", "yaw", "roll"};
+			for (int i = 0; i < 3; ++i) {
+				lua_getfield(L, -1, keys[i]);
+				b.rotation[i] = static_cast<int32_t>(lua_tointeger(L, -1));
+				lua_pop(L, 1);
+			}
+			fields |= MIRAGE_BODY_ROTATION;
+		}
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "velocity");
+		if (ReadVec(L, -1, b.linear_velocity)) fields |= MIRAGE_BODY_LINEAR;
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "angular");
+		if (ReadVec(L, -1, b.angular_velocity)) fields |= MIRAGE_BODY_ANGULAR;
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "mass_scale");		// Refused by the runtime (with the reason in the log): mass is spawn_prop's
+		if (lua_isnumber(L, -1)) {
+			b.mass_scale = static_cast<float>(lua_tonumber(L, -1));
+			fields |= 16u;
+		}
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "gravity_scale");
+		if (lua_isnumber(L, -1)) {
+			b.gravity_scale = static_cast<float>(lua_tonumber(L, -1));
+			fields |= MIRAGE_BODY_GRAVITY;
+		}
+		lua_pop(L, 1);
+		lua_getfield(L, 2, "awake");
+		if (!lua_isnil(L, -1)) {
+			b.awake = lua_toboolean(L, -1);
+			fields |= MIRAGE_BODY_AWAKE;
+		}
+		lua_pop(L, 1);
+		lua_pushboolean(L, self.api_->physics_body_set(self.mod_, actor, &b, fields) != 0);
+		return 1;
+	}
+
+	// mirage.impulse(actor, {x, y, z}, at, velocity_change) / mirage.force(actor, {x, y, z}, at): at nil: the centre
+	int LuaMod::ImpulseFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_impulse)) return luaL_error(L, "mirage.impulse: this runtime has no physics");
+		MirageObject* actor = CheckObject(L, 1);
+		float v[3], at[3];
+		CheckVec(L, 2, v);
+		const bool hasAt = ReadVec(L, 3, at);
+		lua_pushboolean(L, self.api_->physics_impulse(self.mod_, actor, v, hasAt ? at : nullptr, lua_toboolean(L, 4)) != 0);
+		return 1;
+	}
+	int LuaMod::ForceFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_force)) return luaL_error(L, "mirage.force: this runtime has no physics");
+		MirageObject* actor = CheckObject(L, 1);
+		float v[3], at[3];
+		CheckVec(L, 2, v);
+		const bool hasAt = ReadVec(L, 3, at);
+		lua_pushboolean(L, self.api_->physics_force(self.mod_, actor, v, hasAt ? at : nullptr) != 0);
+		return 1;
+	}
+
+	// mirage.spawn_prop(mesh, {x, y, z}, {pitch, yaw, roll}, mass_scale): a physics prop (destroyed on revert and unload),
+	// or nil. mass_scale: times the mesh's mass (default 1), given here only
+	int LuaMod::SpawnPropFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_spawn)) return luaL_error(L, "mirage.spawn_prop: this runtime has no physics");
+		const char* mesh = luaL_checkstring(L, 1);
+		float at[3];
+		CheckVec(L, 2, at);
+		int32_t rot[3] = {};
+		bool hasRot = false;
+		if (lua_istable(L, 3)) {
+			static const char* keys[] = {"pitch", "yaw", "roll"};
+			for (int i = 0; i < 3; ++i) {
+				lua_getfield(L, 3, keys[i]);
+				rot[i] = static_cast<int32_t>(lua_tointeger(L, -1));
+				lua_pop(L, 1);
+			}
+			hasRot = true;
+		}
+		const float mass = static_cast<float>(luaL_optnumber(L, 4, 1.0));
+		MirageObject* prop = self.api_->physics_spawn(self.mod_, mesh, at, hasRot ? rot : nullptr, mass);
+		if (prop) PushObject(L, prop);
+		else lua_pushnil(L);
+		return 1;
+	}
+
+	// mirage.collision(actor): {collide_actors, block_actors, block_rigid_body} or nil; mirage.set_collision(actor, same)
+	int LuaMod::CollisionFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_collision_get)) return luaL_error(L, "mirage.collision: this runtime has no physics");
+		const int32_t f = self.api_->physics_collision_get(CheckObject(L, 1));
+		if (f < 0) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_createtable(L, 0, 3);
+		lua_pushboolean(L, (f & MIRAGE_COLLIDE_ACTORS) != 0);
+		lua_setfield(L, -2, "collide_actors");
+		lua_pushboolean(L, (f & MIRAGE_BLOCK_ACTORS) != 0);
+		lua_setfield(L, -2, "block_actors");
+		lua_pushboolean(L, (f & MIRAGE_BLOCK_RIGID_BODY) != 0);
+		lua_setfield(L, -2, "block_rigid_body");
+		return 1;
+	}
+	int LuaMod::SetCollisionFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, physics_collision_set)) return luaL_error(L, "mirage.set_collision: this runtime has no physics");
+		MirageObject* actor = CheckObject(L, 1);
+		luaL_checktype(L, 2, LUA_TTABLE);
+		const auto flag = [&](const char* key) {
+			lua_getfield(L, 2, key);
+			const bool on = lua_toboolean(L, -1);
+			lua_pop(L, 1);
+			return on;
+		};
+		const uint32_t f = (flag("collide_actors") ? MIRAGE_COLLIDE_ACTORS : 0) | (flag("block_actors") ? MIRAGE_BLOCK_ACTORS : 0) |
+						   (flag("block_rigid_body") ? MIRAGE_BLOCK_RIGID_BODY : 0);
+		lua_pushboolean(L, self.api_->physics_collision_set(self.mod_, actor, f) != 0);
+		return 1;
+	}
+
+	// mirage.trace(start, end, {actors = true, extent = {x, y, z}, ignore = actor}): {actor, component, location, normal,
+	// time, bone} or nil (nothing hit); error when the trace can't be done
+	int LuaMod::TraceFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, world_trace)) return luaL_error(L, "mirage.trace: this runtime has no world queries");
+		float start[3], end[3], extent[3];
+		CheckVec(L, 1, start);
+		CheckVec(L, 2, end);
+		uint32_t flags = 0;
+		bool hasExtent = false;
+		MirageObject* ignore = nullptr;
+		if (lua_istable(L, 3)) {
+			lua_getfield(L, 3, "actors");
+			if (lua_toboolean(L, -1)) flags |= MIRAGE_TRACE_ACTORS;
+			lua_pop(L, 1);
+			lua_getfield(L, 3, "extent");
+			hasExtent = ReadVec(L, -1, extent);
+			lua_pop(L, 1);
+			lua_getfield(L, 3, "ignore");
+			if (!lua_isnil(L, -1)) ignore = CheckObject(L, -1);
+			lua_pop(L, 1);
+		}
+		MirageHit h{};
+		h.size = sizeof h;
+		const int32_t r = self.api_->world_trace(self.mod_, start, end, hasExtent ? extent : nullptr, flags, ignore, &h);
+		if (r < 0) return luaL_error(L, "mirage.trace: the trace couldn't be done (the log says why)");
+		if (r == 0) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_createtable(L, 0, 6);
+		PushObject(L, h.actor);
+		lua_setfield(L, -2, "actor");
+		PushObject(L, h.component);
+		lua_setfield(L, -2, "component");
+		PushVec(L, h.location);
+		lua_setfield(L, -2, "location");
+		PushVec(L, h.normal);
+		lua_setfield(L, -2, "normal");
+		lua_pushnumber(L, h.time);
+		lua_setfield(L, -2, "time");
+		lua_pushstring(L, h.bone);
+		lua_setfield(L, -2, "bone");
+		return 1;
+	}
+
+	// mirage.overlap({x, y, z}, radius, class): the actors whose collision bounds touch the sphere
+	int LuaMod::OverlapFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, world_overlap)) return luaL_error(L, "mirage.overlap: this runtime has no world queries");
+		float c[3];
+		CheckVec(L, 1, c);
+		const float radius = static_cast<float>(luaL_checknumber(L, 2));
+		const char* cls = luaL_optstring(L, 3, "");
+		std::vector<MirageObject*> found(256);
+		int32_t n = self.api_->world_overlap(c, radius, cls, found.data(), static_cast<int32_t>(found.size()));
+		if (n > static_cast<int32_t>(found.size())) {
+			found.resize(static_cast<std::size_t>(n));
+			n = self.api_->world_overlap(c, radius, cls, found.data(), n);
+		}
+		lua_createtable(L, n, 0);
+		for (int32_t i = 0; i < n && i < static_cast<int32_t>(found.size()); ++i) {
+			PushObject(L, found[static_cast<std::size_t>(i)]);
+			lua_rawseti(L, -2, i + 1);
+		}
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -2054,7 +2347,9 @@ namespace mirage::mods
 			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {"kismet", KismetFn},
 			{"kismet_link", KismetLinkFn}, {"kismet_unlink", KismetUnlinkFn}, {"kismet_create", KismetCreateFn},
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
-			{"transitions", TransitionsFn}, {nullptr, nullptr}};
+			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
+			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
+			{"overlap", OverlapFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

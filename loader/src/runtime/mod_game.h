@@ -42,6 +42,16 @@ namespace mirage::mods::game_api
 	void MIRAGE_CALL KismetTrace(MirageMod* mod, int32_t on);
 	uint32_t MIRAGE_CALL KismetTraceRead(MirageMod* mod, char* buffer, uint32_t capacity);
 	uint32_t MIRAGE_CALL MovementTransitions(char* buffer, uint32_t capacity);
+	int32_t MIRAGE_CALL PhysicsBodyGet(MirageObject* actor, MirageBody* out);
+	int32_t MIRAGE_CALL PhysicsBodySet(MirageMod* mod, MirageObject* actor, const MirageBody* in, uint32_t fields);
+	int32_t MIRAGE_CALL PhysicsImpulse(MirageMod* mod, MirageObject* actor, const float* impulse, const float* at, int32_t velocityChange);
+	int32_t MIRAGE_CALL PhysicsForce(MirageMod* mod, MirageObject* actor, const float* force, const float* at);
+	MirageObject* MIRAGE_CALL PhysicsSpawn(MirageMod* mod, const char* mesh, const float* location, const int32_t* rotation, float massScale);
+	int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor);
+	int32_t MIRAGE_CALL PhysicsCollisionSet(MirageMod* mod, MirageObject* actor, uint32_t flags);
+	int32_t MIRAGE_CALL WorldTrace(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags,
+								   MirageObject* ignore, MirageHit* out);
+	int32_t MIRAGE_CALL WorldOverlap(const float* center, float radius, const char* className, MirageObject** out, int32_t capacity);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
