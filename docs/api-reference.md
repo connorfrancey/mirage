@@ -41,6 +41,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Engine symbols and hooks](#engine-symbols-and-hooks) (4)
 - [Mod tests](#mod-tests) (1)
 - [The player and movement](#the-player-and-movement) (1)
+- [Kismet](#kismet) (1)
 - [Types](#types)
 
 ## Basics
@@ -1222,6 +1223,16 @@ int32_t(MIRAGE_CALL* movement_get)(MirageMovement* out);
 ```
 
 What the player is doing now: 1, or 0 (no player). Set out->size first.
+
+## Kismet
+
+Objects by path (object_find with the class in front: "Sequence Edge_p.TheWorld:PersistentLevel.Main_Sequence"). `level`: only that level's package ("Edge_p"); NULL or "": every loaded level. Copies up to capacity, returns the full length. Game thread.
+
+### `kismet_read`
+
+```c
+uint32_t(MIRAGE_CALL* kismet_read)(const char* level, char* buffer, uint32_t capacity);
+```
 
 ## Types
 

@@ -159,6 +159,7 @@ MIRAGE_AT(mid_hook_create, 584);
 MIRAGE_AT(mid_hook_remove, 588);
 MIRAGE_AT(test_register, 592);
 MIRAGE_AT(movement_get, 596);
+MIRAGE_AT(kismet_read, 600);
 static_assert(sizeof(MirageMovement) == 36 && offsetof(MirageMovement, move_object) == 32);
 static_assert(sizeof(MirageRegisters) == 44 && offsetof(MirageRegisters, continue_at) == 40);
 // managed/Mirage/Native/Structs.cs mirrors these by hand (Bridge.Initialize checks the same sizes in the game)

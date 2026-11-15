@@ -1949,6 +1949,16 @@ with a template and docs.
    predicted, off, every value back exactly. Left: the transition record, and the constants in bytecode and native code.
 5. **Kismet runtime.** As step 18: read sequences, change them through the change log, nodes from mod classes
    (step 12), and sequence events delivered to mods.
+   **Status (2026-11-14): the read side and the investigation are done; the write side is next.** `runtime/kismet`
+   reads every sequence of the loaded levels from memory (ops, inputs, outputs and their links, variable links,
+   runtime state); ABI v1 appended `kismet_read` (JSON; Lua `mirage.kismet()` as tables, C# `Mod.KismetJson()`). The
+   investigation (self-test "Mirage Kismet (read)", the Prologue): 131 sequences (one root, 130 nested), 2,077 objects
+   (305 events, 928 actions, 605 variables), 1,247 links, read in 7.8 ms in release (target 20); cooking kept every
+   object's editor title (data can name nodes as the editor shows them); every link leads to an op that was read; a
+   checkpoint restart keeps the same sequence objects, so a runtime edit survives it and a Kismet layer is applied at
+   level loads only. The write side needs: link arrays grown through the engine's allocator (GMalloc, a symbol since
+   step 2), change log records for structural edits (not only property values), and new ops made by the engine's object
+   constructor (a symbol to add).
 6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with
    native-only queries through step 2.
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.

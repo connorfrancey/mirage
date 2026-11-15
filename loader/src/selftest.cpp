@@ -35,6 +35,7 @@
 #include "runtime/routes.h"
 #include <imgui.h>
 #include "runtime/inject.h"
+#include "runtime/kismet.h"
 #include "runtime/detours.h"
 #include "runtime/symbols.h"
 #include "runtime/natives.h"
@@ -1869,6 +1870,99 @@ void TestModTests()
     }
     if (!g_options.modTests.empty() && results.empty()) p.Problem("the mod under test registered no tests");
     for (Module* m : switched) OnRenderThread([m] { m->SetEnabled(false); });
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 5 of the next ten steps (the plan's step 18), the read side and its investigation: the loaded level's Kismet as
+// the engine holds it (runtime/kismet.h). Every link leads to an op the read found; the read is timed (the target is
+// under 20 ms for a level's whole graph); what cooking kept (the editor's titles) and whether a checkpoint restart keeps
+// the same sequence objects (it decides whether a runtime edit survives one) are noted.
+void TestKismetRead()
+{
+    Step& s = Begin("Mirage Kismet (read)");
+    Probe p(s);
+    namespace ki = mirage::kismet;
+    std::vector<ki::Sequence> seqs;
+    double ms = 0.0;
+    OnGameThread([&] {
+        const auto start = clk::Now();
+        seqs = ki::Read();
+        ms = clk::Seconds(clk::Now() - start) * 1000.0;
+    }, 10.0);
+    if (seqs.empty()) {
+        p.Problem("no sequence was read in the loaded level");
+        End(s);
+        return;
+    }
+    std::set<std::string> ops;
+    int kinds[6] = {}, links = 0, titled = 0, touch = 0, roots = 0;
+    for (const auto& q : seqs) {
+        roots += q.parent.empty();
+        for (const auto& op : q.ops) {
+            ops.insert(op.path);
+            ++kinds[static_cast<int>(op.kind)];
+            titled += !op.title.empty();
+            touch += op.cls == "SeqEvent_Touch";
+            for (const auto& o : op.outputs) links += static_cast<int>(o.links.size());
+        }
+    }
+    int dangling = 0;
+    std::string firstDangling;
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops)
+            for (const auto& o : op.outputs)
+                for (const auto& l : o.links)
+                    if (!ops.count(l.op)) {
+                        if (!dangling++) firstDangling = op.path + " -> " + l.op;
+                    }
+    if (dangling) p.Problem(fmt::format("{} link(s) lead to ops the read didn't find (the first: {})", dangling, firstDangling));
+    s.notes.push_back(fmt::format("{} sequence(s) ({} root) in {:.2f} ms: {} events, {} actions, {} conditions, {} variables, "
+                                  "{} nested sequences; {} output links; {} of {} objects keep the editor's title; {} touch events",
+                                  seqs.size(), roots, ms, kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], links, titled,
+                                  ops.size(), touch));
+#ifdef NDEBUG
+    constexpr double kReadBudgetMs = 20.0;      // The plan's target, for a release build
+#else
+    constexpr double kReadBudgetMs = 200.0;     // Debug runs everything several times slower
+#endif
+    if (ms > kReadBudgetMs) p.Problem(fmt::format("reading the graph took {:.1f} ms (budget {:.0f})", ms, kReadBudgetMs));
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops)
+            if (op.cls == "SeqEvent_Touch" && !op.outputs.empty() && !op.outputs[0].links.empty()) {
+                s.notes.push_back("e.g. " + op.name + " (originator " + op.originator + ") -> " + op.outputs[0].links[0].op);
+                goto sampled;
+            }
+sampled:
+    // A checkpoint restart: the same sequence objects (an edit survives it) or new ones (an edit is applied again)?
+    const auto rootOf = [](const std::vector<ki::Sequence>& v) {
+        for (const auto& q : v)
+            if (q.parent.empty()) return q.path + " " + std::to_string(q.ops.size());
+        return std::string();
+    };
+    const std::string before = rootOf(seqs);
+    void* rootBefore = nullptr;
+    OnGameThread([&] { rootBefore = game::FindObject<Classes::UObject>(("Sequence " + seqs.front().path).c_str()); });
+    const void* pawnBefore = nullptr;
+    OnGameThread([&] {
+        pawnBefore = game::Pawn();
+        levels::RestartFromLastCheckpoint();
+    });
+    WaitFor(30.0, [&] {
+        const void* now = nullptr;
+        OnGameThread([&] { now = game::Pawn(); }, 1.0);
+        return now && !game::IsLoading();
+    });
+    WaitPlayerReady(10.0);
+    std::vector<ki::Sequence> again;
+    void* rootAfter = nullptr;
+    OnGameThread([&] {
+        again = ki::Read();
+        rootAfter = game::FindObject<Classes::UObject>(("Sequence " + seqs.front().path).c_str());
+    });
+    if (!rootBefore) p.Problem("the root sequence wasn't found by its name (object_find) before the restart");
+    s.notes.push_back(fmt::format("after a checkpoint restart: {} sequence(s), root \"{}\" -> \"{}\", the same object: {}",
+                                  again.size(), before, rootOf(again), rootBefore && rootBefore == rootAfter ? "yes" : "no"));
     p.Check(1, true);
     End(s);
 }
@@ -4897,6 +4991,7 @@ const Named* FeatureList()
         {"Mirage hooks from mods", &TestMirageModHooks, false},
         {"Mirage engine symbols", &TestEngineSymbols, false},
         {"Mirage movement tuning", &TestMovementTuning, false},
+        {"Mirage Kismet (read)", &TestKismetRead, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

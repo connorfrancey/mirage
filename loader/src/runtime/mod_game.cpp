@@ -18,6 +18,7 @@
 #include "runtime/symbols.h"
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
+#include "runtime/kismet.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -788,6 +789,14 @@ namespace mirage::mods
 			std::lock_guard lock(g_testLock);
 			g_tests.push_back(std::make_unique<TestRecord>(TestRecord{mod, name, fn, user}));
 			return 1;
+		}
+
+		uint32_t MIRAGE_CALL KismetRead(const char* level, char* buffer, uint32_t capacity)
+		{
+			std::vector<kismet::Sequence> all = kismet::Read();
+			if (level && *level)
+				std::erase_if(all, [&](const kismet::Sequence& s) { return _stricmp(s.level.c_str(), level) != 0; });
+			return CopyOut(kismet::ToJson(all), buffer, capacity);
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

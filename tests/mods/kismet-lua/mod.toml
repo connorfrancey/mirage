@@ -1,0 +1,6 @@
+# Self-test (step 5 of the next ten steps): the levels' Kismet read from Lua, checked by its own test (mirage.test, run
+# by the self-test step "Mod tests")
+id = "kismet-lua"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): reads the loaded level's Kismet from Lua"
+mirage = "^0.1"

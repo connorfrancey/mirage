@@ -159,6 +159,19 @@ namespace Mirage
             return hook;
         }
 
+        /// <summary>
+        /// The loaded levels' Kismet as JSON (api.h kismet_read has the shape): parse it with System.Text.Json.
+        /// <paramref name="level"/>: only that level's package ("Edge_p"); null: every loaded level's. Game thread.
+        /// </summary>
+        public string KismetJson(string? level = null)
+        {
+            var l = Utf8.Intern(level ?? "");
+            var n = Bridge.Api->kismet_read(l, null, 0);
+            var buffer = new byte[n + 1];
+            fixed (byte* b = buffer) Bridge.Api->kismet_read(l, b, (uint)buffer.Length);
+            return System.Text.Encoding.UTF8.GetString(buffer, 0, (int)n);
+        }
+
         /// <summary>What the player is doing now (the move, the previous move, velocity), or null without a player. Game thread.</summary>
         public Movement? Movement()
         {

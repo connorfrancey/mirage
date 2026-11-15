@@ -528,6 +528,16 @@ namespace mirage
 		return MIRAGE_API_HAS(&Api(), movement_get) && Api().movement_get(&out) != 0;
 	}
 
+	// ---- Kismet (step 5) -------------------------------------------------------------------------------------------
+	// The loaded levels' sequences as JSON (api.h kismet_read has the shape); `level` "": every loaded level's
+	inline std::string KismetJson(const std::string& level = {})
+	{
+		if (!MIRAGE_API_HAS(&Api(), kismet_read)) return "[]";
+		std::string out(Api().kismet_read(level.c_str(), nullptr, 0) + 1, '\0');
+		out.resize(Api().kismet_read(level.c_str(), out.data(), static_cast<uint32_t>(out.size())));
+		return out;
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

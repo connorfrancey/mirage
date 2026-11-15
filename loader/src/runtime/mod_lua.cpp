@@ -206,6 +206,7 @@ namespace mirage::mods
 		static int SymbolFn(lua_State* L);
 		static int TestFn(lua_State* L);
 		static int MovementFn(lua_State* L);
+		static int KismetFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1161,6 +1162,51 @@ namespace mirage::mods
 		return 1;
 	}
 
+	namespace
+	{
+		void PushJson(lua_State* L, const nlohmann::json& j)
+		{
+			switch (j.type()) {
+				case nlohmann::json::value_t::object:
+					lua_createtable(L, 0, static_cast<int>(j.size()));
+					for (auto it = j.begin(); it != j.end(); ++it) {
+						PushJson(L, it.value());
+						lua_setfield(L, -2, it.key().c_str());
+					}
+					break;
+				case nlohmann::json::value_t::array: {
+					lua_createtable(L, static_cast<int>(j.size()), 0);
+					lua_Integer i = 1;
+					for (const auto& v : j) {
+						PushJson(L, v);
+						lua_rawseti(L, -2, i++);
+					}
+					break;
+				}
+				case nlohmann::json::value_t::string: lua_pushstring(L, j.get_ref<const std::string&>().c_str()); break;
+				case nlohmann::json::value_t::boolean: lua_pushboolean(L, j.get<bool>()); break;
+				case nlohmann::json::value_t::number_integer:
+				case nlohmann::json::value_t::number_unsigned: lua_pushinteger(L, j.get<lua_Integer>()); break;
+				case nlohmann::json::value_t::number_float: lua_pushnumber(L, j.get<double>()); break;
+				default: lua_pushnil(L);
+			}
+		}
+	}
+
+	// mirage.kismet(level): the loaded levels' sequences (or only `level`'s, its package name) as tables: a list of
+	// {path, name, level, parent, enabled, ops = {{path, name, class, kind, title, ..., outputs = {{desc, links = {{op,
+	// input}}}}}}}: api.h kismet_read has every field
+	int LuaMod::KismetFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_read)) return luaL_error(L, "mirage.kismet: this runtime can't read Kismet");
+		const char* level = luaL_optstring(L, 1, "");
+		std::string text(self.api_->kismet_read(level, nullptr, 0) + 1, '\0');
+		text.resize(self.api_->kismet_read(level, text.data(), static_cast<uint32_t>(text.size())));
+		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -1914,7 +1960,7 @@ namespace mirage::mods
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
-			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {nullptr, nullptr}};
+			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {"kismet", KismetFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

@@ -898,6 +898,14 @@ typedef struct MirageApi {
      * lists the 262 tuning values). Game thread. */
     /* What the player is doing now: 1, or 0 (no player). Set out->size first. */
     int32_t(MIRAGE_CALL* movement_get)(MirageMovement* out);
+
+    /* ---- Kismet (step 5 of the next ten steps): the loaded levels' sequences as the engine holds them, as JSON:
+     * [{"path", "name", "level", "parent", "enabled", "ops": [{"path", "name", "class", "kind" (event, action, condition,
+     * variable, sequence), "title", "comment", "active", "activations", "inputs": [...], "outputs": [{"desc", "links":
+     * [{"op", "input"}]}], "variables": [{"desc", "linked": [...]}], "originator"}]}]. Objects by path (object_find with
+     * the class in front: "Sequence Edge_p.TheWorld:PersistentLevel.Main_Sequence"). `level`: only that level's package
+     * ("Edge_p"); NULL or "": every loaded level. Copies up to capacity, returns the full length. Game thread. */
+    uint32_t(MIRAGE_CALL* kismet_read)(const char* level, char* buffer, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */
