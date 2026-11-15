@@ -112,6 +112,7 @@ static void Run(HMODULE module)
 #if MIRAGE_GAME
         // Fatal crashes get a report instead of the game's dialog (runtime/crash_reporter.h): the hooks are up now
         STARTUP_STEP(mirage::crash::Install());
+        if (selfTest) mirage::crash::SetUnattended(true);   // A crash mid-test ends the game (the tool sees it), no window waits
 #endif
         // Background tasks (core/tasks.h) and the event bus's queued deliveries: the render thread now, the game thread
         // once the game layer is up

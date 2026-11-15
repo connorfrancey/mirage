@@ -251,6 +251,10 @@ namespace mirage::call
 		};
 		if (!object) return fail("no object");
 		if (!params.Valid()) return fail(params.Error());
+		// An actor runs its functions only in a level: the engine's actor ProcessEvent reads its WorldInfo, which a class
+		// default object (and an actor not spawned yet) doesn't have, and crashed the game reading through it
+		if (object->IsA(Classes::AActor::StaticClass()) && !static_cast<Classes::AActor*>(object)->WorldInfo)
+			return fail("the actor " + object->GetName() + " isn't in a level (a class default object?): its functions can't run");
 		Classes::UFunction* fn = params.Function();
 
 		// ProcessEvent refuses functions with a native index: cleared for the call, so it runs them like the rest (its own

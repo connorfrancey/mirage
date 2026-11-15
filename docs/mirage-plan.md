@@ -1893,6 +1893,18 @@ with a template and docs.
    left by an earlier step), and the hang in "Crash reporter" (a minidump written while another thread holds a lock
    it needs; the restructure removed one such deadlock). Then step 14's leftovers: drive `level_streamed` in the
    self-test, add a C# world-access test mod, measure an unchanged tick in release.
+
+   **Status (2026-11-14): nearly done; the milestone (five green runs in a row in each build) isn't met yet.** Fixed:
+   the guarded mod crash logged as a game crash; the hook budgets (release numbers, ten times in debug); the bounce
+   pad's launch measured from the switch-on; mods' classes kept from the garbage collector (an injected class's
+   functions were freed through GMalloc: the engine crash in "Mirage level additions"); the "Crash reporter" hang (a
+   minidump written from inside the running game: now by `mirage_crashdump.exe`); textures racing the first level
+   load; checkpoint restarts missed when the new pawn took the old one's address; a call into a class default object
+   (the engine crashed reading its missing WorldInfo: the runtime now refuses such calls); an unattended crash window.
+   Step 14's leftovers are done (see step 14). The last round of ten full runs passed 8: the Lua injection's reload
+   check was too strict (fixed since), and one release run crashed on the render thread during "Memory manager"
+   (`MirrorsEdge.exe+0x14B7C18`, creating a texture with the RHI's D3D device pointer null: a device reset at that
+   moment?) — open, seen once.
 2. **Engine hooks by symbol.** `game::FindPattern` becomes MirageHook's scanner (resolve steps, cache). The patterns
    already in the code (ProcessEvent, ProcessInternal, death, the config lookup, input) become named entries in a
    `symbols.toml` verified at start. Append to ABI v1: hook by symbol (before / after / replace, chained by priority

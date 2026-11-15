@@ -33,6 +33,9 @@ namespace mirage::crash
 	void SetOpenReport(bool open);				// Open the report in Notepad once the game is gone (no crash window)
 	void SetWindow(bool show);					// The crash window for a fatal crash (crashhandler/window.h)
 	void SetFatalDump(bool dump);				// A fatal crash writes a minidump (on unless the self-test turns it off)
+	// Nobody is there to answer (the self-test runs unattended): a fatal crash writes its report and ends the game,
+	// without the crash window waiting for a click or Notepad opening.
+	void SetUnattended(bool unattended);
 	// The analysis of the last report written (crashhandler/analysis.h). False if none.
 	bool LastAnalysis(crashhandler::Analysis& out);
 

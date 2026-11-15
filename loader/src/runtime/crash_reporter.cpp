@@ -43,6 +43,7 @@ namespace mirage::crash
 		std::atomic<bool> g_openReport{true};
 		std::atomic<bool> g_window{true};		// The crash window (crashhandler/window.h) for fatal crashes
 		std::atomic<bool> g_fatalDump{true};	// A fatal crash writes a minidump (SetFatalDump)
+		std::atomic<bool> g_unattended{false};	// Nobody to click (the self-test): no window, no Notepad (SetUnattended)
 		std::atomic<bool> g_installed{false};
 		std::atomic<LONG> g_handling{0};
 		bool TakeHandling() { LONG expected = 0; return g_handling.compare_exchange_strong(expected, 1); }						// One fatal crash at a time
@@ -422,7 +423,7 @@ namespace mirage::crash
 			}
 			const DWORD self = GetCurrentThreadId();
 			// Not when the render thread crashed: the device and the menu's frame are its own, in whatever state
-			if (g_window.load() && analysis && self != hooks::RenderThreadId()) {
+			if (g_window.load() && !g_unattended.load() && analysis && self != hooks::RenderThreadId()) {
 				crashhandler::window::Options o;
 				o.canContinue = canResume && ep && ep->ExceptionRecord && ep->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT;
 				o.canEndThread = self != game::GameThreadId();
@@ -448,7 +449,7 @@ namespace mirage::crash
 						break;		// It couldn't be shown: the report in Notepad, as before
 				}
 			}
-			if (written && g_openReport.load()) {
+			if (written && g_openReport.load() && !g_unattended.load()) {
 				// Notepad shows it once the fullscreen game is gone
 				wchar_t cmd[MAX_PATH + 32];
 				std::swprintf(cmd, MAX_PATH + 32, L"notepad.exe \"%s\"", g_job.reportPath);
@@ -552,6 +553,7 @@ namespace mirage::crash
 	void SetOpenReport(bool open) { g_openReport = open; }
 	void SetWindow(bool show) { g_window = show; }
 	void SetFatalDump(bool dump) { g_fatalDump = dump; }
+	void SetUnattended(bool unattended) { g_unattended = unattended; }
 
 	bool LastAnalysis(crashhandler::Analysis& out)
 	{
