@@ -210,6 +210,9 @@ namespace mirage::mods
 		static int KismetLinkFn(lua_State* L);
 		static int KismetUnlinkFn(lua_State* L);
 		static int KismetCreateFn(lua_State* L);
+		static int KismetFireFn(lua_State* L);
+		static int KismetTraceFn(lua_State* L);
+		static int KismetTraceReadFn(lua_State* L);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
 		static int CallGame(lua_State* L);
@@ -1244,6 +1247,44 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.kismet_fire(event, output, instigator): fires a Kismet event as the engine does (output nil: the first,
+	// "Touched" or an index; instigator nil: the player). True when it activated.
+	int LuaMod::KismetFireFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_fire)) return luaL_error(L, "mirage.kismet_fire: this runtime can't fire Kismet events");
+		MirageObject* event = CheckObject(L, 1);
+		const char* output = luaL_optstring(L, 2, "");
+		MirageObject* instigator = lua_isnoneornil(L, 3) ? nullptr : CheckObject(L, 3);
+		lua_pushboolean(L, self.api_->kismet_fire(self.mod_, event, output, instigator) != 0);
+		return 1;
+	}
+	// mirage.kismet_trace(on): the execution trace on or off; mirage.kismet_trace_read(): its entries since the last
+	// read, {{tick, op, class, times}, ...}
+	int LuaMod::KismetTraceFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_trace)) return luaL_error(L, "mirage.kismet_trace: this runtime has no Kismet trace");
+		self.api_->kismet_trace(self.mod_, lua_toboolean(L, 1) ? 1 : 0);
+		return 0;
+	}
+	int LuaMod::KismetTraceReadFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, kismet_trace_read)) return luaL_error(L, "mirage.kismet_trace_read: this runtime has no Kismet trace");
+		std::string text;
+		for (;;) {
+			text.assign(self.api_->kismet_trace_read(self.mod_, nullptr, 0) + 1, '\0');
+			const uint32_t n = self.api_->kismet_trace_read(self.mod_, text.data(), static_cast<uint32_t>(text.size()));
+			if (n < text.size()) {
+				text.resize(n);
+				break;
+			}
+		}
+		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -1998,7 +2039,8 @@ namespace mirage::mods
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},
 			{"shared", Shared}, {"valid", Valid}, {"actors", Actors}, {"transaction", Transaction}, {"revert", Revert},
 			{"changes", Changes}, {"symbol", SymbolFn}, {"test", TestFn}, {"movement", MovementFn}, {"kismet", KismetFn},
-			{"kismet_link", KismetLinkFn}, {"kismet_unlink", KismetUnlinkFn}, {"kismet_create", KismetCreateFn}, {nullptr, nullptr}};
+			{"kismet_link", KismetLinkFn}, {"kismet_unlink", KismetUnlinkFn}, {"kismet_create", KismetCreateFn},
+			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

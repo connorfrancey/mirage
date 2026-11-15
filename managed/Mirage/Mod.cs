@@ -191,6 +191,30 @@ namespace Mirage
         public GameObject KismetCreate(GameObject sequence, string className) =>
             new GameObject(Bridge.Api->kismet_create(Handle, sequence.Handle, Utf8.Intern(className)));
 
+        /// <summary>
+        /// Fires a Kismet event as the engine does (SequenceEvent.CheckActivate): <paramref name="output"/> which output
+        /// ("Touched" or an index; null: the first), <paramref name="instigator"/> default: the player. True when it
+        /// activated. Game thread.
+        /// </summary>
+        public bool KismetFire(GameObject @event, string? output = null, GameObject instigator = default) =>
+            Bridge.Api->kismet_fire(Handle, @event.Handle, Utf8.Intern(output ?? ""), instigator.Handle) != 0;
+
+        /// <summary>The Kismet execution trace on or off (nothing runs while no mod has it on). Game thread.</summary>
+        public void KismetTrace(bool on) => Bridge.Api->kismet_trace(Handle, on ? 1 : 0);
+
+        /// <summary>The trace's entries since the last read, as JSON [{"tick", "op", "class", "times"}]. Game thread.</summary>
+        public string KismetTraceJson()
+        {
+            while (true)
+            {
+                var n = Bridge.Api->kismet_trace_read(Handle, null, 0);
+                var buffer = new byte[n + 1];
+                uint got;
+                fixed (byte* b = buffer) got = Bridge.Api->kismet_trace_read(Handle, b, (uint)buffer.Length);
+                if (got < buffer.Length) return System.Text.Encoding.UTF8.GetString(buffer, 0, (int)got);
+            }
+        }
+
         /// <summary>What the player is doing now (the move, the previous move, velocity), or null without a player. Game thread.</summary>
         public Movement? Movement()
         {

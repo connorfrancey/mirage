@@ -1,4 +1,5 @@
 #include "runtime/layers.h"
+#include "runtime/layer_values.h"
 
 #include "game/game.h"
 #include "paths.h"
@@ -188,7 +189,7 @@ namespace mirage::layers
 
 		// A property by path, from a TOML value: numbers, booleans, names (strings), objects ("Package.Object"), vectors
 		// and rotators ([x, y, z])
-		bool SetProperty(Classes::AActor* a, const std::string& path, const toml::value& v, std::string* why)
+		bool SetProperty(Classes::UObject* a, const std::string& path, const toml::value& v, std::string* why)
 		{
 			using layout::Kind;
 			if (v.is_array()) {
@@ -578,6 +579,15 @@ namespace mirage::layers
 	}
 
 	int Generation() { return g_generation; }
+
+	Classes::UClass* ClassFor(const mods::Info& mod, const std::string& name, std::string* why, bool* pending)
+	{
+		return ResolveClass(mod, name, why, pending);
+	}
+	bool SetValue(Classes::UObject* o, const std::string& path, const toml::value& v, std::string* why)
+	{
+		return SetProperty(o, path, v, why);
+	}
 
 	std::vector<SublevelInfo> Sublevels()
 	{

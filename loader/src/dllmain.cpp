@@ -28,6 +28,8 @@
 #include "runtime/detours.h"
 #include "runtime/fhooks.h"
 #include "runtime/classes.h"
+#include "runtime/kismet_layers.h"
+#include "runtime/kismet_trace.h"
 #include "runtime/layers.h"
 #include "runtime/world_events.h"
 #include "runtime/maps.h"
@@ -147,6 +149,8 @@ static void Run(HMODULE module)
                 crashhandler::symbols::Refresh();   // Names for the engine's code in crash reports (classes may have loaded)
                 levelLoaded = true;
                 mirage::layers::OnLevelLoaded();
+                mirage::kismet_layers::OnLevelLoaded();
+                mirage::kismet_trace::Invalidate();
                 mirage::routes::OnLevelLoaded();
                 mirage::world_events::OnLevelLoaded();
                 mirage::reflect::ClearCache();   // Classes of the old level's packages are gone
@@ -159,6 +163,8 @@ static void Run(HMODULE module)
                 mirage::mods::DispatchTick(seconds);
                 mirage::world_events::Tick();    // Actors added and removed, levels streamed, restarts (step 14)
                 mirage::layers::Tick();          // Mods' level additions: spawned, respawned at restarts, removed
+                mirage::kismet_layers::Tick();   // Mods' Kismet layers: applied at level loads, undone at unload
+                mirage::kismet_trace::Tick();    // The Kismet execution trace (nothing while no mod has it on)
                 mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
                 mirage::routes::Tick(seconds);   // Time-trial routes: the run in progress
                 modules::Tick();

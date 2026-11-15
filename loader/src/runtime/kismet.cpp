@@ -1,6 +1,7 @@
 #include "runtime/kismet.h"
 
 #include "runtime/classes.h"
+#include "runtime/kismet_trace.h"
 #include "runtime/maps.h"
 #include "runtime/symbols.h"
 #include "sdk/SDK.hpp"
@@ -124,6 +125,20 @@ namespace mirage::kismet
 		std::stable_sort(out.begin(), out.end(), [](const Sequence& a, const Sequence& b) { return a.parent.empty() && !b.parent.empty(); });
 		return out;
 	}
+
+	std::vector<Classes::USequenceObject*> LevelObjects()
+	{
+		std::vector<Classes::USequenceObject*> out;
+		Classes::UClass* cls = Classes::USequenceObject::StaticClass();
+		const auto& objects = Classes::UObject::GetGlobalObjects();
+		for (std::size_t i = 0; i < objects.Num(); ++i) {
+			auto* o = objects.GetByIndex(i);
+			if (o && !IsDefault(o) && o->IsA(cls) && InWorld(o)) out.push_back(static_cast<Classes::USequenceObject*>(o));
+		}
+		return out;
+	}
+
+	std::string LevelOf(const Classes::USequenceObject* o) { return LevelOf(static_cast<const Classes::UObject*>(o)); }
 
 	std::string ToJson(const std::vector<Sequence>& sequences)
 	{
@@ -268,6 +283,7 @@ namespace mirage::kismet
 		auto* op = static_cast<Classes::USequenceOp*>(construct(cls, sequence, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr));
 		if (!op) return fail("the engine didn't construct it");
 		op->ParentSequence = sequence;
+		kismet_trace::Invalidate();
 		Classes::USequenceObject* object = op;
 		if (!Insert(Raw(sequence->SequenceObjects), sizeof object, -1, &object)) return fail("the engine's allocator isn't known");
 		return op;

@@ -1949,7 +1949,7 @@ with a template and docs.
    predicted, off, every value back exactly. Left: the transition record, and the constants in bytecode and native code.
 5. **Kismet runtime.** As step 18: read sequences, change them through the change log, nodes from mod classes
    (step 12), and sequence events delivered to mods.
-   **Status (2026-11-14): Scenario C passes; Kismet layers, firing events from mods and the trace are left.**
+   **Status (2026-11-15): done.**
    `runtime/kismet` reads every sequence of the loaded levels from memory (ops, inputs, outputs and their links,
    variable links, runtime state) and edits them: links added (the engine's arrays grown through GMalloc) and removed,
    new ops made by the engine's own constructor (`StaticConstructObject`, a symbol found through the script VM's `new`;
@@ -1966,8 +1966,18 @@ with a template and docs.
    `Trigger`'s), wires it to its own Ping action, the player walks in and the Lua runs once (the op's own counter
    agrees); the edit survives a checkpoint restart; a hot reload puts the graph back and the reloaded mod edits it
    again (one Ping op, a new one); the module off (`mirage.revert`) leaves the graph exactly as read before (ops and
-   links compared). Left: Kismet layers (`kismet/<map>.toml`), firing an event from a mod, the execution trace, and
-   the offline comparison with UnrealLib's read of the package.
+   links compared). Kismet layers (`runtime/kismet_layers`): a mod's `kismet/<map>.toml` adds ops, unlinks, links
+   and sets properties of the level's ops by name (the map's own level first when a sublevel has the same name, or
+   the end of the path), applied at level loads, undone at unload and re-applied when the file changes; an entry
+   naming nothing is skipped and listed. `kismet_fire` fires an event through SequenceEvent's own CheckActivate (the
+   general conditions: enabled, MaxTriggerCount, ReTriggerDelay; not a class's own, such as a touch event's overlap,
+   whose override only tests). The trace (`kismet_trace`, `kismet_trace_read`) compares each op's ActivateCount (an
+   event's TriggerCount: the engine doesn't count events in ActivateCount) tick to tick while a mod has it on: about
+   4 us a tick in release (15 in debug) for the Prologue's ~1,370 ops, nothing while off; inputs aren't recorded. Self-test "Mirage Kismet
+   (layer)" writes a layer from names it reads (a SeqAct_Log op, a touch event's link moved to it, its properties
+   set, an entry naming nothing), fires the event twice, sees both in the trace, removes the file and gets the graph
+   back. UnrealLib reads Edge_p's file in the read step: its 199 Kismet objects and 118 links are exactly what the
+   engine holds; the engine adds one thing at load, each streamed sublevel's root sequence nested in the level's root.
 6. **Physics and world queries.** As step 20: rigid bodies, spawned props, traces and overlaps as plain structs, with
    native-only queries through step 2.
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.

@@ -65,6 +65,16 @@ namespace mirage::kismet
 	std::string ToJson(const std::vector<Sequence>& sequences);
 	const char* KindName(Op::Kind kind);
 
+	// Every sequence object of the loaded levels (sequences too), unordered. Game thread.
+	std::vector<Classes::USequenceObject*> LevelObjects();
+	// The package of the level an object is in ("Edge_p")
+	std::string LevelOf(const Classes::USequenceObject* o);
+
+	// The level package's own Kismet, read from its file (UnrealLib; any thread, seconds: it reads the script packages'
+	// reflection too): every SequenceObject export as an Op with path, name, class and output links (inputs, variables
+	// and runtime state left empty), in export order. Empty and `error` when the package can't be read.
+	std::vector<Op> ReadPackage(const std::string& level, std::string* error);
+
 	// ---- Editing (game thread; the callers check the objects are alive) ----------------------------------------------
 	// An output's (input's) index from its description ("Touched") or a decimal index ("0"); NULL or "": 0. -1: none such
 	int OutputIndex(Classes::USequenceOp* op, const char* which);

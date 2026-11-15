@@ -38,6 +38,9 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL KismetLink(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
 	int32_t MIRAGE_CALL KismetUnlink(MirageMod* mod, MirageObject* from, const char* output, MirageObject* to, const char* input);
 	MirageObject* MIRAGE_CALL KismetCreate(MirageMod* mod, MirageObject* sequence, const char* class_name);
+	int32_t MIRAGE_CALL KismetFire(MirageMod* mod, MirageObject* event, const char* output, MirageObject* instigator);
+	void MIRAGE_CALL KismetTrace(MirageMod* mod, int32_t on);
+	uint32_t MIRAGE_CALL KismetTraceRead(MirageMod* mod, char* buffer, uint32_t capacity);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

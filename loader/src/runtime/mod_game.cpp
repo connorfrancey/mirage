@@ -19,6 +19,8 @@
 #include "runtime/fhooks.h"
 #include "runtime/inject.h"
 #include "runtime/kismet.h"
+#include "runtime/kismet_layers.h"
+#include "runtime/kismet_trace.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -243,7 +245,11 @@ namespace mirage::mods
 		ReleaseScripts(mod);
 		for (auto& n : mod.natives) n->live = false;		// Its natives return zero from here (their index stays)
 		natives::Release(mod.id);
-		if (game::IsGameThread()) layers::Remove(mod.id);	// Its level additions (else the next tick sees it unloaded)
+		if (game::IsGameThread()) {
+			layers::Remove(mod.id);			// Its level additions (else the next tick sees it unloaded)
+			kismet_layers::Remove(mod.id);	// Its Kismet layer's edits
+			kismet_trace::Forget(mod.id);
+		}
 		// Its transactions put back (step 15), on the game thread where the objects are
 		if (game::IsGameThread()) changes::RevertAndForget(mod.id);
 		else game::RunOnGameThread([id = mod.id] { changes::RevertAndForget(id); });
@@ -901,6 +907,41 @@ namespace mirage::mods
 				return seq && o && kismet::RemoveOp(static_cast<Classes::USequence*>(seq), static_cast<Classes::USequenceObject*>(o));
 			});
 			return h;
+		}
+
+		int32_t MIRAGE_CALL KismetFire(MirageMod* mod, MirageObject* event, const char* output, MirageObject* instigator)
+		{
+			// `mod` may be null (the self-test): it only names the caller in the log
+			if (!game::IsGameThread()) return KismetFail(mod, "kismet_fire", "only on the game thread");
+			Classes::UObject* e = Obj(event);
+			if (!e || !Alive(e) || !e->IsA(Classes::USequenceEvent::StaticClass())) return KismetFail(mod, "kismet_fire", "not a sequence event");
+			Classes::UObject* who = instigator ? Obj(instigator) : game::Pawn();
+			if (who && (!Alive(who) || !who->IsA(Classes::AActor::StaticClass()))) return KismetFail(mod, "kismet_fire", "the instigator isn't an actor");
+			auto* ev = static_cast<Classes::USequenceEvent*>(e);
+			int index = kismet::OutputIndex(ev, output);
+			if (index < 0) return KismetFail(mod, "kismet_fire", fmt::format("{} has no output {}", ev->GetName(), output ? output : ""));
+			auto* by = static_cast<Classes::AActor*>(who);
+			// SequenceEvent's own CheckActivate (virtual, slot 0x180), not the event class's: a class adds its own
+			// conditions (a touch event only tests for an instigator that isn't overlapping its trigger). The general
+			// ones stay: enabled, MaxTriggerCount, ReTriggerDelay. Taken from the class default object's vtable.
+			static void* base = nullptr;
+			if (!base)
+				if (auto* cdo = game::FindObject<Classes::UObject>("SequenceEvent Engine.Default__SequenceEvent"))
+					base = (*reinterpret_cast<void***>(cdo))[0x180 / 4];
+			if (!base) return KismetFail(mod, "kismet_fire", "SequenceEvent's defaults weren't found");
+			// Which output: a list of one, on the stack (CheckActivate only reads it)
+			struct { int* data; std::int32_t count, max; } indices{&index, 1, 1};
+			using CheckFn = int(__thiscall*)(Classes::USequenceEvent*, Classes::AActor*, Classes::AActor*, int, void*, int);
+			return reinterpret_cast<CheckFn>(base)(ev, ev->Originator, by, 0, &indices, 0) ? 1 : 0;
+		}
+		void MIRAGE_CALL KismetTrace(MirageMod* mod, int32_t on)
+		{
+			if (mod) kismet_trace::Enable(mod->id, on != 0);
+		}
+		uint32_t MIRAGE_CALL KismetTraceRead(MirageMod* mod, char* buffer, uint32_t capacity)
+		{
+			if (!mod) return 0;
+			return kismet_trace::Read(mod->id, buffer, capacity);
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

@@ -916,6 +916,18 @@ typedef struct MirageApi {
      * class_define extending SequenceAction, its Activated injected). Its links are the class defaults'. Taken out of the
      * sequence again on revert. NULL when it can't (the log says why). */
     MirageObject*(MIRAGE_CALL* kismet_create)(MirageMod* mod, MirageObject* sequence, const char* class_name);
+    /* Fires `event` (a SequenceEvent op) as the engine does when it happens (SequenceEvent.CheckActivate): `output`
+     * the output to activate (a description, "Touched", or an index; NULL or "": the first), `instigator` NULL the
+     * player's pawn. The event's general conditions apply (enabled, MaxTriggerCount, ReTriggerDelay), not its class's
+     * own (a touch event's overlap with its trigger): firing it is the mod saying it happened. 1 when it activated, 0 when the event refused (disabled, fired its
+     * MaxTriggerCount, inside its ReTriggerDelay). Not recorded: firing is gameplay, not an edit. Game thread. */
+    int32_t(MIRAGE_CALL* kismet_fire)(MirageMod* mod, MirageObject* event, const char* output, MirageObject* instigator);
+    /* The execution trace: which ops activate, on which tick, how many times (each op's ActivateCount compared tick to
+     * tick while any mod has it on; nothing runs while off). kismet_trace_read gives the mod's entries since it last
+     * read them as JSON [{"tick", "op", "class", "times"}] (up to 4096 kept), copies up to capacity and returns the full
+     * length; the entries are taken only when it all fit. Game thread. */
+    void(MIRAGE_CALL* kismet_trace)(MirageMod* mod, int32_t on);
+    uint32_t(MIRAGE_CALL* kismet_trace_read)(MirageMod* mod, char* buffer, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

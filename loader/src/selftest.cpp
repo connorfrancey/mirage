@@ -36,6 +36,8 @@
 #include <imgui.h>
 #include "runtime/inject.h"
 #include "runtime/kismet.h"
+#include "runtime/kismet_trace.h"
+#include "runtime/kismet_layers.h"
 #include "runtime/detours.h"
 #include "runtime/symbols.h"
 #include "runtime/natives.h"
@@ -1955,6 +1957,77 @@ void TestKismetRead()
                 goto sampled;
             }
 sampled:
+    // The package file read offline (UnrealLib, on this thread): the same ops and the same links as the engine holds
+    {
+        const auto start = clk::Now();
+        std::string why;
+        const std::vector<ki::Op> file = ki::ReadPackage("Edge_p", &why);
+        const double fileSeconds = clk::SecondsSince(start);
+        const auto lower = [](std::string x) {
+            std::transform(x.begin(), x.end(), x.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return x;
+        };
+        const auto linksOf = [&](const ki::Op& op) {
+            std::vector<std::string> v;
+            for (std::size_t o = 0; o < op.outputs.size(); ++o)
+                for (const auto& l : op.outputs[o].links) v.push_back(fmt::format("{}>{}[{}]", o, lower(l.op), l.input));
+            std::sort(v.begin(), v.end());
+            return v;
+        };
+        // Edge_p's own objects in memory: its sequences (the root one is no other's op) and their ops, without the
+        // streamed sublevels' root sequences, which the engine nests into the level's root at load
+        std::map<std::string, const ki::Op*> inMemory;
+        std::vector<ki::Op> rootOps;
+        rootOps.reserve(seqs.size());
+        int nestedAtLoad = 0;
+        for (const auto& q : seqs)
+            if (q.level == "Edge_p") {
+                if (q.parent.empty()) {
+                    ki::Op root;
+                    root.path = q.path;
+                    root.cls = "Sequence";
+                    rootOps.push_back(std::move(root));
+                    inMemory[lower(q.path)] = &rootOps.back();
+                }
+                for (const auto& op : q.ops) {
+                    if (!lower(op.path).starts_with("edge_p.")) {
+                        ++nestedAtLoad;
+                        continue;
+                    }
+                    inMemory[lower(op.path)] = &op;
+                }
+            }
+        int same = 0, onlyFile = 0, linksDiffer = 0, fileLinks = 0;
+        std::string firstMissing, firstDiff;
+        std::set<std::string> seen;
+        for (const auto& op : file) {
+            const std::string key = lower(op.path);
+            seen.insert(key);
+            const auto l = linksOf(op);
+            fileLinks += static_cast<int>(l.size());
+            const auto it = inMemory.find(key);
+            if (it == inMemory.end()) {
+                if (!onlyFile++) firstMissing = op.path;
+                spdlog::info("Self-test: Kismet only in the package file: {} ({})", op.path, op.cls);
+                continue;
+            }
+            ++same;
+            if (linksOf(*it->second) != l && !linksDiffer++) firstDiff = op.path;
+        }
+        int onlyMemory = 0;
+        for (const auto& [key, op] : inMemory)
+            if (!seen.count(key)) {
+                ++onlyMemory;
+                spdlog::info("Self-test: Kismet only in memory: {} ({})", op->path, op->cls);
+            }
+        s.notes.push_back(fmt::format("the package file (UnrealLib, {:.1f} s): {} objects, {} links; {} the same in memory, "
+                                      "{} only in the file{}, {} only in memory, {} with other links{}", fileSeconds,
+                                      file.size(), fileLinks, same, onlyFile, onlyFile ? " (" + firstMissing + ")" : "",
+                                      onlyMemory, linksDiffer, linksDiffer ? " (" + firstDiff + ")" : ""));
+        s.notes.push_back(fmt::format("{} streamed sublevels' root sequences are nested in the level's root at load", nestedAtLoad));
+        if (file.empty()) p.Problem("UnrealLib read nothing from Edge_p: " + why);
+        else if (onlyFile || onlyMemory || linksDiffer) p.Problem("the package file and the engine's graph differ");
+    }
     // A checkpoint restart: the same sequence objects (an edit survives it) or new ones (an edit is applied again)?
     const auto rootOf = [](const std::vector<ki::Sequence>& v) {
         for (const auto& q : v)
@@ -2182,6 +2255,167 @@ void TestKismetEdit()
     });
     s.notes.push_back("module off: reverted " + KismetEditShared("reverted") + (diff.empty() ? ", the graph is as it was" : ""));
     if (!diff.empty()) p.Problem("the graph isn't as it was after the revert: " + diff);
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 5's data side, firing and the trace: tests/mods/kismet-layer (a content mod) gets a Kismet layer written while
+// the game runs, from names read in the Prologue: a new SeqAct_Log op, a touch event's link moved to it, the event's
+// properties set, and one entry naming nothing (skipped and listed). Applied within a couple of seconds (the file
+// changed); kismet_fire fires the event twice (the op activates twice) and the trace sees both; the file removed, the
+// layer is undone and the graph is as it was.
+void TestKismetLayer()
+{
+    Step& s = Begin("Mirage Kismet (layer)");
+    Probe p(s);
+    namespace ki = mirage::kismet;
+    namespace kl = mirage::kismet_layers;
+    std::filesystem::path dir;
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "kismet-layer" && m.loaded) dir = m.dir;
+    if (dir.empty()) {
+        p.Problem("the kismet-layer mod isn't loaded (tests/mods/kismet-layer)");
+        End(s);
+        return;
+    }
+    const std::filesystem::path file = dir / "kismet" / "edge_p.toml";
+    std::error_code ec;
+    std::filesystem::remove(file, ec);      // One left by a run that stopped halfway
+    const auto entries = [] {
+        std::vector<kl::Entry> v;
+        OnGameThread([&] {
+            for (auto& e : kl::List())
+                if (e.mod == "kismet-layer") v.push_back(e);
+        });
+        return v;
+    };
+    WaitFor(5.0, [&] { return entries().empty(); });
+    std::vector<ki::Sequence> seqs;
+    OnGameThread([&] { seqs = ki::Read(); }, 10.0);
+    const std::string original = KismetGraph(seqs);
+
+    // A touch event with a link out and a name only it has, and where that link goes
+    std::map<std::string, int> names;       // In Edge_p itself: a layer's name means the map's own level's op first
+    for (const auto& q : seqs)
+        if (q.level == "Edge_p")
+            for (const auto& op : q.ops) ++names[op.name];
+    const ki::Op* event = nullptr;
+    const ki::Sequence* home = nullptr;
+    for (const auto& q : seqs)
+        for (const auto& op : q.ops)
+            if (!event && q.level == "Edge_p" && op.cls == "SeqEvent_Touch" && names[op.name] == 1 && !op.outputs.empty() && !op.outputs[0].links.empty()) {
+                event = &op;
+                home = &q;
+            }
+    if (!event) {
+        p.Problem("no touch event with a link and a unique name in the Prologue");
+        End(s);
+        return;
+    }
+    const ki::Link moved = event->outputs[0].links[0];
+    const std::string target = moved.op.substr(moved.op.rfind('.') + 1);
+    // The target by the end of its path when its name repeats (the layer's way to say which)
+    std::string targetRef = target;
+    if (names[target] > 1) {
+        const std::string parent = moved.op.substr(0, moved.op.rfind('.'));
+        targetRef = parent.substr(parent.rfind('.') + 1) + "." + target;
+    }
+    {
+        std::filesystem::create_directories(file.parent_path(), ec);
+        std::ofstream out(file, std::ios::binary);
+        out << "# Written by the self-test (Mirage Kismet (layer)); removed when it ends\n"
+            << "[[op]]\nname = \"Log\"\nclass = \"Engine.SeqAct_Log\"\nsequence = \"" << home->name << "\"\n"
+            << "[op.properties]\nbOutputToScreen = false\n\n"
+            << "[[unlink]]\nfrom = \"" << event->name << "\"\noutput = 0\nto = \"" << targetRef << "\"\ninput = " << moved.input << "\n\n"
+            << "[[link]]\nfrom = \"" << event->name << "\"\noutput = \"" << event->outputs[0].desc << "\"\nto = \"Log\"\n\n"
+            << "[[link]]\nfrom = \"NoSuchOpAnywhere\"\nto = \"Log\"\n\n"
+            << "[[set]]\nop = \"" << event->name << "\"\n[set.properties]\nMaxTriggerCount = 0\nReTriggerDelay = 0.0\n";
+    }
+    std::vector<kl::Entry> applied;
+    WaitFor(10.0, [&] { applied = entries(); return !applied.empty(); });
+    int ok = 0, skipped = 0;
+    std::string skip;
+    for (const auto& e : applied) {
+        if (e.problem.empty()) ++ok;
+        else {
+            ++skipped;
+            skip = e.what + ": " + e.problem;
+        }
+    }
+    s.notes.push_back(fmt::format("{} (in {}): {} entries applied, {} skipped ({})", event->name, home->name, ok, skipped, skip));
+    if (ok != 4 || skipped != 1 || skip.find("NoSuchOpAnywhere") == std::string::npos)
+        p.Problem(fmt::format("{} entries applied and {} skipped, not 4 and 1 (the missing op)", ok, skipped));
+    std::string cls;
+    std::vector<ki::Sequence> now;
+    OnGameThread([&] { now = ki::Read(); }, 10.0);
+    const std::string to = KismetTouchedTargets(now, event->path, &cls);
+    s.notes.push_back("Touched -> " + to + " (" + cls + ")");
+    if (cls != "SeqAct_Log" || to.find('+') != std::string::npos) p.Problem("the event's first output doesn't lead to the layer's op alone");
+
+    // Fired twice from code; the trace sees the event and the op each time
+    int fired = 0, activations = -1, triggerCount = 0;
+    double traceUs = 0.0;
+    int traced = 0, tracedLog = 0;
+    std::string diag;
+    OnGameThread([&] { mirage::kismet_trace::Enable("selftest", true); });
+    WaitTicks(2);
+    for (int i = 0; i < 2; ++i) {
+        OnGameThread([&] {
+            auto* ev = game::FindObject<Classes::UObject>(("SeqEvent_Touch " + event->path).c_str());
+            if (!i && ev) triggerCount = static_cast<Classes::USequenceEvent*>(ev)->TriggerCount;
+            const int before = ev ? static_cast<Classes::USequenceEvent*>(ev)->TriggerCount : 0;
+            fired += mirage::mods::game_api::KismetFire(nullptr, reinterpret_cast<MirageObject*>(ev), nullptr, nullptr);
+            if (auto* e = static_cast<Classes::USequenceEvent*>(ev)) {
+                int queued = 0;
+                if (auto* seq = e->ParentSequence)
+                    for (std::size_t k = 0; k < seq->ActiveSequenceOps.Num(); ++k) queued += seq->ActiveSequenceOps[k] == e;
+                auto* log = game::FindObject<Classes::USequenceOp>(("SeqAct_Log " + to).c_str());
+                diag += fmt::format("(fire {}: TriggerCount +{}, queued {}, output impulse {}, event active {}, Log impulse {}, "
+                                    "sequence enabled {}, its active ops {}) ", i, e->TriggerCount - before, queued,
+                                    e->OutputLinks.Num() ? e->OutputLinks[0].bHasImpulse : 9, e->bActive ? 1 : 0,
+                                    log && log->InputLinks.Num() ? log->InputLinks[0].bHasImpulse : 9,
+                                    e->ParentSequence ? e->ParentSequence->bEnabled : 9,
+                                    e->ParentSequence ? e->ParentSequence->ActiveSequenceOps.Num() : 0);
+            }
+        });
+        WaitTicks(3);
+    }
+    OnGameThread([&] {
+        if (auto* op = game::FindObject<Classes::USequenceOp>(("SeqAct_Log " + to).c_str())) activations = op->ActivateCount;
+        if (auto* ev = game::FindObject<Classes::USequenceEvent>(("SeqEvent_Touch " + event->path).c_str())) ev->TriggerCount = triggerCount;
+        traceUs = mirage::kismet_trace::Get().lastTickUs;
+        std::string text(mirage::kismet_trace::Read("selftest", nullptr, 0) + 1, '\0');
+        text.resize(mirage::kismet_trace::Read("selftest", text.data(), static_cast<std::uint32_t>(text.size())));
+        for (const auto& h : nlohmann::json::parse(text, nullptr, false)) {
+            if (!h.is_object()) continue;
+            if (h.value("op", "") == event->path) traced += h.value("times", 0);
+            if (h.value("op", "") == to) tracedLog += h.value("times", 0);
+        }
+        mirage::kismet_trace::Enable("selftest", false);
+    });
+    const auto stats = mirage::kismet_trace::Get();
+    s.notes.push_back(fmt::format("fired {} of 2; the op activated {} time(s); the trace saw the event {} and the op {} time(s) "
+                                  "({} ops watched, {:.1f} us a tick)", fired, activations, traced, tracedLog, stats.ops, traceUs));
+    if (activations != 2) s.notes.push_back(diag);
+    if (fired != 2) p.Problem(fmt::format("kismet_fire activated the event {} of 2 times", fired));
+    if (activations != 2) p.Problem(fmt::format("the layer's op activated {} times, not 2", activations));
+    if (traced != 2 || tracedLog != 2) p.Problem(fmt::format("the trace saw the event {} and the op {} times, not 2 each", traced, tracedLog));
+#ifdef NDEBUG
+    if (traceUs > 200.0) p.Problem(fmt::format("the trace took {:.0f} us of a tick", traceUs));
+#endif
+
+    // The file gone: the layer undone
+    std::filesystem::remove(file, ec);
+    std::string diff = "not compared";
+    WaitFor(10.0, [&] {
+        std::vector<ki::Sequence> v;
+        OnGameThread([&] { v = ki::Read(); }, 10.0);
+        const std::string g = KismetGraph(v);
+        diff = g == original ? "" : "differs";
+        return diff.empty() && entries().empty();
+    });
+    if (!diff.empty()) p.Problem("the graph isn't as it was after the layer's file was removed");
+    else s.notes.push_back("the file removed: undone, the graph is as it was");
     p.Check(1, true);
     End(s);
 }
@@ -5214,6 +5448,7 @@ const Named* FeatureList()
         {"Mirage movement tuning", &TestMovementTuning, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},
         {"Mirage Kismet (edit)", &TestKismetEdit, false},
+        {"Mirage Kismet (layer)", &TestKismetLayer, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

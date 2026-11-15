@@ -1,0 +1,7 @@
+# Self-test (step 5 of the next ten steps): a content mod (no code) whose Kismet layer, kismet/edge_p.toml, the
+# self-test writes while the game runs (from the names it reads in the Prologue's Kismet) and removes again. See the
+# step "Mirage Kismet (layer)" in loader/src/selftest.cpp, and runtime/kismet_layers.h for the format.
+id = "kismet-layer"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): a Kismet layer for the Prologue, written by the self-test"
+mirage = "^0.1"

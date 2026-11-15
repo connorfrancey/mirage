@@ -552,6 +552,29 @@ namespace mirage
 		return MIRAGE_API_HAS(&Api(), kismet_create) ? Api().kismet_create(Mod(), sequence, className) : nullptr;
 	}
 
+	// Fires a Kismet event as the engine does (api.h kismet_fire); `instigator` null: the player
+	inline bool KismetFire(MirageObject* event, const char* output = nullptr, MirageObject* instigator = nullptr)
+	{
+		return MIRAGE_API_HAS(&Api(), kismet_fire) && Api().kismet_fire(Mod(), event, output, instigator) != 0;
+	}
+	// The execution trace (api.h kismet_trace): on or off, and the entries since the last read as JSON
+	inline void KismetTrace(bool on)
+	{
+		if (MIRAGE_API_HAS(&Api(), kismet_trace)) Api().kismet_trace(Mod(), on ? 1 : 0);
+	}
+	inline std::string KismetTraceJson()
+	{
+		if (!MIRAGE_API_HAS(&Api(), kismet_trace_read)) return "[]";
+		for (;;) {
+			std::string out(Api().kismet_trace_read(Mod(), nullptr, 0) + 1, '\0');
+			const uint32_t n = Api().kismet_trace_read(Mod(), out.data(), static_cast<uint32_t>(out.size()));
+			if (n < out.size()) {
+				out.resize(n);
+				return out;
+			}
+		}
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

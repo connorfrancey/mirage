@@ -900,7 +900,8 @@ namespace mirage::mods
 			game_api::ChangeBegin, game_api::ChangeEnd, game_api::ChangeRevert, game_api::ChangeList,
 			game_api::SymbolFind, game_api::DetourSymbol, game_api::MidHookCreate, game_api::MidHookRemove,
 			game_api::TestRegister, game_api::MovementGet, game_api::KismetRead,
-			game_api::KismetLink, game_api::KismetUnlink, game_api::KismetCreate,
+			game_api::KismetLink, game_api::KismetUnlink, game_api::KismetCreate, game_api::KismetFire, game_api::KismetTrace,
+			game_api::KismetTraceRead,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -1017,9 +1018,9 @@ namespace mirage::mods
 				const auto& p = it->path();
 				if (it->is_directory()) {
 					if (p.filename() == ".mirage") it.disable_recursion_pending();	// Its hot reload copies
-					// Level layers and routes (step 13): data the runtime reads again by itself when it changes (the
+					// Level layers, routes (step 13) and Kismet layers: data the runtime reads again by itself when it changes (the
 					// in-game editor saves layers while playing): no reload of the whole mod for them
-					if (p.parent_path() == dir && (p.filename() == "levels" || p.filename() == "routes")) it.disable_recursion_pending();
+					if (p.parent_path() == dir && (p.filename() == "levels" || p.filename() == "routes" || p.filename() == "kismet")) it.disable_recursion_pending();
 					continue;
 				}
 				if (p.filename() == "config.toml") continue;	// Written by the mod itself
