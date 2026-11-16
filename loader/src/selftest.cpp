@@ -81,6 +81,8 @@
 #include "runtime/world_events.h"
 #include "runtime/changes.h"
 #include "runtime/actions.h"
+#include "runtime/moves.h"
+#include "runtime/anim.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -3200,7 +3202,9 @@ void TestCustomMove()
         End(s);
         return;
     }
+    mirage::moves::ResetStats();
     const JumpRun dj = JumpThenPress(jumpKey, actionKey);
+    const auto cost = mirage::moves::Stats();
     const bool inMove = std::find(dj.states.begin(), dj.states.end(), slot) != dj.states.end();
     s.notes.push_back(fmt::format("off: the macro jumps {:.0f} (moves {}); on: the mod's move in slot {}: {:.0f} high (moves {}), "
                                   "started {}, callbacks start {} tick {} stop {}, actions seen {} (refused on the ground {}), "
@@ -3214,7 +3218,31 @@ void TestCustomMove()
         p.Problem(fmt::format("the move's callbacks: start {}, tick {}, stop {} (one start, ticks, one stop)", num("starts"), num("ticks"), num("stops")));
     if (!dj.walking) p.Problem("the move didn't hand over to the game's walking move on landing");
     s.notes.push_back("the move's animation as it started: '" + DoubleJumpShared("anim") + "'");
+    s.notes.push_back(fmt::format("the move's tick (the Lua callback): {} calls, {:.1f} us on average, {:.1f} us at most", cost.calls,
+                                  cost.calls ? cost.totalUs / cost.calls : 0.0, cost.maxUs));
+#ifdef NDEBUG
+    if (cost.calls && cost.totalUs / cost.calls > 30.0) p.Problem(fmt::format("a Lua move's tick takes {:.1f} us (target 30)", cost.totalUs / cost.calls));
+#endif
     if (DoubleJumpShared("anim") != "SpringBoardLeftLeg") p.Problem("the move's animation wasn't playing as it started");
+
+    // The action on another key (the mod manager's rebinding, saved in the mod's config.toml): SpaceBar no longer reaches
+    // it, F does the double jump; put back on mod.toml's key
+    const auto onKey = [](const char* key) {
+        for (const auto& [mod, action] : mirage::mods::ActionsForKey(key))
+            if (mod == "double-jump" && action == "double_jump") return true;
+        return false;
+    };
+    const bool rebound = mirage::mods::SetActionKey("double-jump", "double_jump", "F");
+    const bool spaceOff = !onKey("spacebar"), fOn = onKey("f");
+    const JumpRun onF = JumpThenPress(jumpKey, "F");
+    const bool fJumped = std::find(onF.states.begin(), onF.states.end(), slot) != onF.states.end();
+    mirage::mods::SetActionKey("double-jump", "double_jump", "");
+    const bool back = onKey("spacebar") && !onKey("f");
+    s.notes.push_back(fmt::format("rebound to F: saved {}, SpaceBar off it {}, F on it {}; F at the top: {:.0f} high (moves {}); put back on "
+                                  "SpaceBar {}", rebound, spaceOff, fOn, onF.height, path(onF), back));
+    if (!rebound || !spaceOff || !fOn) p.Problem("the action couldn't be put on another key");
+    else if (!fJumped) p.Problem("the action on F didn't start the move");
+    if (!back) p.Problem("the action didn't go back to mod.toml's key");
 
     // Off: the same macro is the game's jump again, and the slot is empty
     OnRenderThread([m] { m->SetEnabled(false); });
@@ -3285,6 +3313,19 @@ void TestAnimation()
                                m["sets"].size(), seqs, names);
     }
     s.notes.push_back(summary);
+    // Each set's sequences against its package file, read with UnrealLib (here, off the game thread)
+    std::string offline;
+    for (const auto& m : sets)
+        for (const auto& set : m["sets"]) {
+            const std::string setPath = set.value("path", std::string());
+            std::string why;
+            const int fromFile = mirage::anim::ReadSetSequences(setPath, &why);
+            const int live = static_cast<int>(set["sequences"].size());
+            offline += fmt::format("{}{}: {} in the game, {}", offline.empty() ? "" : "; ", setPath, live,
+                                   fromFile >= 0 ? std::to_string(fromFile) + " in the file" : "file: " + why);
+            if (fromFile >= 0 && fromFile != live) p.Problem(fmt::format("{} has {} sequences in the game but {} in its file", setPath, live, fromFile));
+        }
+    s.notes.push_back("offline: " + offline);
     if (total == 0 || pick.empty()) {
         p.Problem("the player's meshes list no sequences");
         End(s);

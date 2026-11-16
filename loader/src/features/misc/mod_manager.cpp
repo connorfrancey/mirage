@@ -102,6 +102,82 @@ namespace
 			ImGui::Unindent();
 		}
 
+		// The engine's name of a key ImGui saw pressed ("" for keys an action can't use): what mod.toml's [actions] take
+		std::string EngineKeyName(ImGuiKey k)
+		{
+			if (k >= ImGuiKey_A && k <= ImGuiKey_Z) return std::string(1, static_cast<char>('A' + (k - ImGuiKey_A)));
+			if (k >= ImGuiKey_F1 && k <= ImGuiKey_F12) return "F" + std::to_string(1 + (k - ImGuiKey_F1));
+			static const char* const digits[] = {"Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"};
+			if (k >= ImGuiKey_0 && k <= ImGuiKey_9) return digits[k - ImGuiKey_0];
+			switch (k) {
+				case ImGuiKey_Space: return "SpaceBar";
+				case ImGuiKey_LeftShift: return "LeftShift";
+				case ImGuiKey_RightShift: return "RightShift";
+				case ImGuiKey_LeftCtrl: return "LeftControl";
+				case ImGuiKey_RightCtrl: return "RightControl";
+				case ImGuiKey_LeftAlt: return "LeftAlt";
+				case ImGuiKey_RightAlt: return "RightAlt";
+				case ImGuiKey_Tab: return "Tab";
+				case ImGuiKey_Enter: return "Enter";
+				case ImGuiKey_Backspace: return "BackSpace";
+				case ImGuiKey_CapsLock: return "CapsLock";
+				case ImGuiKey_UpArrow: return "Up";
+				case ImGuiKey_DownArrow: return "Down";
+				case ImGuiKey_LeftArrow: return "Left";
+				case ImGuiKey_RightArrow: return "Right";
+				case ImGuiKey_Home: return "Home";
+				case ImGuiKey_End: return "End";
+				case ImGuiKey_PageUp: return "PageUp";
+				case ImGuiKey_PageDown: return "PageDown";
+				case ImGuiKey_Delete: return "Delete";
+				case ImGuiKey_GraveAccent: return "Tilde";
+				case ImGuiKey_MouseLeft: return "LeftMouseButton";
+				case ImGuiKey_MouseRight: return "RightMouseButton";
+				case ImGuiKey_MouseMiddle: return "MiddleMouseButton";
+				case ImGuiKey_MouseX1: return "ThumbMouseButton";
+				case ImGuiKey_MouseX2: return "ThumbMouseButton2";
+				default: return {};
+			}
+		}
+
+		std::string g_capturing;		// "<mod>/<action>" waiting for a key (render thread)
+
+		// Its input actions: the key each is on, changed by pressing another (saved in the mod's config.toml)
+		void DrawActions(const mirage::mods::Info& m)
+		{
+			if (m.actions.empty()) return;
+			ImGui::Separator();
+			ImGui::TextDisabled("Input actions");
+			for (const auto& a : m.actions) {
+				const std::string id = m.id + "/" + a.name;
+				ImGui::PushID(id.c_str());
+				ImGui::TextUnformatted(a.name.c_str());
+				if (!a.description.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", a.description.c_str());
+				ImGui::SameLine(ImGui::GetFontSize() * 12.f);
+				if (g_capturing == id) {
+					ImGui::Button("Press a key (Esc: cancel)");
+					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) g_capturing.clear();
+					else
+						for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k)
+							if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(k), false))
+								if (const std::string name = EngineKeyName(static_cast<ImGuiKey>(k)); !name.empty()) {
+									mirage::mods::SetActionKey(m.id, a.name, name == a.defaultKey ? "" : name);
+									g_capturing.clear();
+									break;
+								}
+				} else if (ImGui::Button(a.key.c_str())) {
+					g_capturing = id;
+				}
+				if (ImGui::IsItemHovered() && g_capturing != id) ImGui::SetTooltip("Click, then press the key or button to put it on");
+				if (a.key != a.defaultKey) {
+					ImGui::SameLine();
+					if (ImGui::SmallButton("Default")) mirage::mods::SetActionKey(m.id, a.name, "");
+					if (ImGui::IsItemHovered()) ImGui::SetTooltip("Back on %s (the mod's own)", a.defaultKey.c_str());
+				}
+				ImGui::PopID();
+			}
+		}
+
 		void DrawDetails(const mirage::mods::Info& m)
 		{
 			ImGui::TextUnformatted((m.name.empty() ? m.id : m.name).c_str());
@@ -147,6 +223,7 @@ namespace
 						ImGui::TextDisabled("%s", mod->Tab().c_str());
 					}
 			}
+			DrawActions(m);
 			// Its script injections (step 11), and the other mods injecting into the same functions: the order they run in
 			const auto injections = mirage::inject::List();
 			bool header = false;

@@ -81,6 +81,11 @@ namespace mirage::mods
 		std::vector<std::string> dependents;	// The mods that require this one
 		bool offNextStart = false;				// Switched off in the mod manager (disabled.toml)
 		bool crashed = false;					// In crashes.toml: not loaded until allowed again
+		struct Action
+		{
+			std::string name, key, defaultKey, description;	// key: the one it is on now (the player's, or mod.toml's)
+		};
+		std::vector<Action> actions;			// Its input actions (mod.toml [actions.<name>])
 	};
 	// Each loaded Lua mod's Lua memory, biggest first: {id, bytes}. Game thread (reloads replace the states there).
 	std::vector<std::pair<std::string, std::size_t>> LuaMemoryByMod();
@@ -91,6 +96,9 @@ namespace mirage::mods
 	// The loaded mods' input actions (mod.toml [actions.<name>]) on the key `key` (the engine's name, any case):
 	// {mod id, action name} each, in load order
 	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key);
+	// Puts one of a mod's input actions on `key` (the engine's key name), saved in the mod's config.toml; "" puts it back
+	// on mod.toml's key. False: no such mod or action, or the file couldn't be written.
+	bool SetActionKey(const std::string& modId, const std::string& action, const std::string& key);
 
 	// ---- The mod manager (step 9) --------------------------------------------------------------------------------------
 	// Loaded at the next start or not (disabled.toml in its mods folder). Switched off, its modules go off now too.

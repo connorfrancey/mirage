@@ -1,0 +1,10 @@
+# Self-test (steps 7 to 9 of the next ten steps): the gameplay API from C#, as a mod test (Mod.Test, run by the
+# self-test step "Mod tests"): a trigger, a mover sent somewhere, a swing pole and a zipline, a move of its own started
+# and removed, the player's animations listed and one played and stopped, an input action subscribed to.
+id = "gameplay-cs"
+version = "1.0.0"
+mirage = "^0.1"
+
+[actions.gameplay_test]
+key = "F10"
+description = "Subscribed to by the C# test (not pressed)"

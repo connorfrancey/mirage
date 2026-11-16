@@ -2078,9 +2078,13 @@ with a template and docs.
    (self-test "Mirage custom move", tests/mods/double-jump: a page of Lua): a macro jumps and taps the action at the
    top. Off: 279 (Jump > Falling > Walking). On: the action reaches the mod, its move starts with 650 u/s up: 410 high
    (Jump > 58 > Walking), callbacks start 1, tick 120, stop 1, landed in the game's walking move. Off again: 279 exactly
-   and the slot empty. Left: the replay check of a recording (step 24, with the menu: the actions are key events, so a
-   replay gives the mod the same actions), the move's animation (step 9), rebinding an action's key in the menu, the
-   Movement workspace showing mod moves, and the tick cost measured (one callback a tick while in the move).
+   and the slot empty. Then: **rebinding** (the mod manager lists a mod's actions; a key pressed there puts the action on
+   it, saved in the mod's config.toml as action.<name>, "Default" goes back to mod.toml's; the test puts the double
+   jump on F: SpaceBar no longer reaches it, F does it, 411 high), **the tick cost** (the Lua move's tick callback: 21.8
+   us on average in debug, target 30 checked in release), **C#** (tests/mods/gameplay-cs, a mod test: a trigger, a mover
+   sent, a swing pole and a zipline, a move started and removed, an animation played and stopped, an action subscribed;
+   the revert takes them away). Left: the replay check of a recording (step 24, with the menu: the actions are key
+   events, so a replay gives the mod the same actions) and the Movement workspace showing mod moves (the menu's).
 9. **Animation playback.** `PlayCustomAnim` and the custom animation node from mods, blended in and stopped on
    disable, for step 8's moves.
    **Status (2026-11-15): done (playback, inspection, moves' animations); the Animation browser is the menu's.**
@@ -2098,9 +2102,10 @@ with a template and docs.
    stopped as they leave it while it still plays. Self-test "Mirage animation": the player's meshes have 1 set of 281
    sequences (Mesh1p, AS_C1P_Unarmed) and 2 sets of 260 (Mesh3p, AS_F3P_Unarmed and AS_F3P_Face); SpringBoardLeftLeg
    (1.90 s) plays, its time runs and it ends; a missing sequence is refused; a looping one plays past its length and
-   anim_stop stops it. "Mirage custom move": the double jump plays SpringBoardLeftLeg as it starts. Left: the Animation
-   browser and preview (the menu's UI over anim_sets / anim_play), the AnimSet counts compared against the packages read
-   offline, and whether root motion affects a replay (step 24's).
+   anim_stop stops it; each set's sequences match its package file read with UnrealLib (`anim::ReadSetSequences`: 281,
+   259 and 1; the sets are TdAnimSets, so TdGame's classes are in the schema). "Mirage custom move": the double jump
+   plays SpringBoardLeftLeg as it starts. Left: the Animation browser and preview (the menu's UI over anim_sets /
+   anim_play) and whether root motion affects a replay (step 24's).
 10. **Safe mode and conflicts.** A start after a start-up crash (or with Shift held) loads no mods and says why. Each
     mod's touch set comes from `mod.toml`, its content folders and its script patches, and overlaps are shown in the
     mod manager before load. Automatic bisection and permissions are the rest of step 37.

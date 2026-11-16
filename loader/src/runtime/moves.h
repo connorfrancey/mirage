@@ -40,6 +40,14 @@ namespace mirage::moves
 	// The registered move's name in `slot` ("" if none), and its mod's id
 	std::string NameOf(int slot);
 	std::string OwnerOf(int slot);
+	// The tick callbacks' cost (the mod's code and the runtime's call into it), for the self-test
+	struct TickStats
+	{
+		unsigned calls = 0;
+		double totalUs = 0.0, maxUs = 0.0;
+	};
+	TickStats Stats();
+	void ResetStats();
 	// Every engine tick: installed in the player's pawn, enter / tick / leave callbacks
 	void Tick(float seconds);
 }

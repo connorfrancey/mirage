@@ -3,6 +3,7 @@
 #include "game/game.h"
 #include "game/object_cache.h"
 #include "game/uobject.h"
+#include "core/clock.h"
 #include "runtime/engine_calls.h"
 #include "runtime/symbols.h"
 #include "sdk/SDK.hpp"
@@ -34,6 +35,7 @@ namespace mirage::moves
 			bool active = false;					// The player is in it (the start callback ran)
 		};
 		std::vector<std::unique_ptr<Move>> g_moves;
+		TickStats g_stats;
 
 		Move* Find(int slot)
 		{
@@ -169,6 +171,9 @@ namespace mirage::moves
 		return m ? m->name : std::string();
 	}
 
+	TickStats Stats() { return g_stats; }
+	void ResetStats() { g_stats = {}; }
+
 	std::string OwnerOf(int slot)
 	{
 		const Move* m = Find(slot);
@@ -197,7 +202,12 @@ namespace mirage::moves
 				m->active = true;		// Put there by something else than move_start (the game's SetMove)
 				cb(Phase::Start, 0.f);
 			} else if (in) {
+				const auto t0 = clk::Now();
 				cb(Phase::Tick, seconds);
+				const double us = clk::SecondsSince(t0) * 1e6;
+				++g_stats.calls;
+				g_stats.totalUs += us;
+				g_stats.maxUs = std::max(g_stats.maxUs, us);
 			} else if (m->active) {
 				m->active = false;
 				cb(Phase::Stop, seconds);

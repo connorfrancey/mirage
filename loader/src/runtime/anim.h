@@ -39,4 +39,7 @@ namespace mirage::anim
 	std::string SetsJson(Classes::AActor* actor);
 	// CustomNodeType by name ("FullBody", "fullbody", "CNT_FullBody"): -1 if none
 	int SlotFromName(const std::string& name);
+	// How many sequences the AnimSet `path` ("Package.Name") has in its package file, read with UnrealLib (seconds:
+	// never on the game or render thread). -1 and `error` if it can't be read.
+	int ReadSetSequences(const std::string& path, std::string* error);
 }

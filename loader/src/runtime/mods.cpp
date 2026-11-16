@@ -405,6 +405,17 @@ namespace mirage::mods
 			}
 		}
 
+		// An input action's key: the player's own (config.toml: action.<name> = "F", set in the mod manager) or mod.toml's
+		std::string ActionKey(MirageMod& mod, const ActionDecl& a)
+		{
+			std::lock_guard lock(mod.configLock);
+			ReadConfig(&mod);
+			const auto& t = mod.config.as_table();
+			if (const auto it = t.find("action." + a.name); it != t.end() && it->second.is_string() && !it->second.as_string().empty())
+				return it->second.as_string();
+			return a.key;
+		}
+
 		// The settings mod.toml declares for this module ([settings.<key>] with module = its name, or no module and
 		// this is the mod's first module), in the file's order. On a reload the ones made before are kept.
 		void AddDeclaredSettings(MirageMod& mod, ModModule& m, bool firstModule)
@@ -1450,12 +1461,39 @@ namespace mirage::mods
 		std::vector<std::pair<std::string, std::string>> out;
 		std::lock_guard modsLock(g_modsLock);
 		for (const auto& owned : g_mods) {
-			const MirageMod& mod = *owned;
-			if (mod.state.load() != State::Active) continue;
+			MirageMod& mod = *owned;
+			if (mod.state.load() != State::Active || mod.manifest.actions.empty()) continue;
 			for (const ActionDecl& a : mod.manifest.actions)
-				if (same(a.key, key)) out.emplace_back(mod.id, a.name);
+				if (same(ActionKey(mod, a), key)) out.emplace_back(mod.id, a.name);
 		}
 		return out;
+	}
+
+	bool SetActionKey(const std::string& modId, const std::string& action, const std::string& key)
+	{
+		std::lock_guard modsLock(g_modsLock);
+		for (const auto& owned : g_mods) {
+			MirageMod& mod = *owned;
+			if (mod.id != modId) continue;
+			const bool declared = std::any_of(mod.manifest.actions.begin(), mod.manifest.actions.end(),
+											  [&](const ActionDecl& a) { return a.name == action; });
+			if (!declared) return false;
+			std::lock_guard lock(mod.configLock);
+			ReadConfig(&mod);
+			auto& table = mod.config.as_table();
+			if (key.empty()) table.erase("action." + action);		// Back to mod.toml's
+			else table["action." + action] = key;
+			const auto file = FromUtf8(mod.dir) / "config.toml";
+			std::ofstream out(file, std::ios::binary | std::ios::trunc);
+			if (!out) {
+				spdlog::warn("[mod {}] can't write {}", mod.id, Utf8(file));
+				return false;
+			}
+			out << toml::format(mod.config);
+			spdlog::info("[mod {}] action {} on {}", mod.id, action, key.empty() ? "its default key" : key);
+			return true;
+		}
+		return false;
 	}
 
 	std::vector<Info> List()
@@ -1480,6 +1518,7 @@ namespace mirage::mods
 			for (const ModModule* m : mod.modules)
 				if (m->Bound()) info.modules.push_back(m->Name());
 			info.warnings = mod.warnings;
+			for (const ActionDecl& a : mod.manifest.actions) info.actions.push_back({a.name, ActionKey(*owned, a), a.key, a.description});
 			info.description = mod.manifest.description;
 			for (const auto& a : mod.manifest.authors) info.authors += (info.authors.empty() ? "" : ", ") + a;
 			const auto deps = [](const std::vector<Dependency>& list, std::vector<std::string>& to) {
