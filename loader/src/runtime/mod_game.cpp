@@ -23,6 +23,7 @@
 #include "runtime/kismet_trace.h"
 #include "runtime/physics.h"
 #include "runtime/triggers.h"
+#include "runtime/pieces.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -253,6 +254,7 @@ namespace mirage::mods
 			kismet_layers::Remove(mod.id);	// Its Kismet layer's edits
 			kismet_trace::Forget(mod.id);
 			triggers::RemoveAll(mod.id);	// Its callbacks stop before its code goes (the change log removes them too)
+			pieces::RemoveAll(mod.id);
 		}
 		// Its transactions put back (step 15), on the game thread where the objects are
 		if (game::IsGameThread()) changes::RevertAndForget(mod.id);
@@ -1293,6 +1295,41 @@ namespace mirage::mods
 			if (!game::IsGameThread()) return -1;
 			Classes::AActor* a = ActorOf(trigger);
 			return a ? triggers::Count(a) : -1;
+		}
+
+		// ---- Pieces (step 7) ----------------------------------------------------------------------------------------
+		MirageObject* MIRAGE_CALL PieceCreate(MirageMod* mod, const MiragePieceDesc* desc)
+		{
+			auto fail = [&](const std::string& why) -> MirageObject* {
+				spdlog::error("[mod {}] piece_create: {}", mod ? mod->id : "?", why);
+				return nullptr;
+			};
+			if (!mod) return fail("no mod");
+			if (!desc || desc->size < sizeof(MiragePieceDesc)) return fail("no description, or its size isn't set");
+			if (!game::IsGameThread()) return fail("only on the game thread");
+			if (desc->kind != MIRAGE_PIECE_SWING && desc->kind != MIRAGE_PIECE_ZIPLINE) return fail(fmt::format("no piece kind {}", desc->kind));
+			pieces::Desc d;
+			d.kind = desc->kind == MIRAGE_PIECE_SWING ? pieces::Kind::Swing : pieces::Kind::Zipline;
+			for (int i = 0; i < 3; ++i) {
+				d.location[i] = desc->location[i];
+				d.end[i] = desc->end[i];
+			}
+			d.yaw = desc->yaw;
+			if (desc->length > 0.f) d.length = desc->length;
+			d.reach = desc->reach;
+			d.landingStrip = desc->landing_strip;
+			d.thickGrip = !(desc->flags & MIRAGE_PIECE_THIN_GRIP);
+			d.snapToCenter = !(desc->flags & MIRAGE_PIECE_SHIMMY);
+			std::string why;
+			Classes::AActor* a = pieces::Create(mod->id, d, &why);
+			if (!a) return fail(why);
+			MirageObject* h = Handle(a);
+			RecordEdit(mod, std::string(pieces::KindName(d.kind)) + " " + a->GetName(), [ha = HandleOf(h)] {
+				Classes::AActor* x = ActorOf(HandleObject(&ha));
+				if (x) pieces::Remove(x);
+				return x != nullptr;
+			});
+			return h;
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

@@ -638,6 +638,35 @@ namespace mirage
 		return Api().trigger_create(Mod(), &d, fn, user);
 	}
 
+	// ---- Pieces (step 7) -----------------------------------------------------------------------------------------------
+	// A swing pole: the bar's middle, the direction the player swings to, the bar's length (api.h piece_create)
+	inline MirageObject* SwingPole(const float (&location)[3], int32_t yaw, float length = 200.f, uint32_t flags = 0)
+	{
+		if (!MIRAGE_API_HAS(&Api(), piece_create)) return nullptr;
+		MiragePieceDesc d{};
+		d.size = sizeof d;
+		d.kind = MIRAGE_PIECE_SWING;
+		for (int i = 0; i < 3; ++i) d.location[i] = location[i];
+		d.yaw = yaw;
+		d.length = length;
+		d.flags = flags;
+		return Api().piece_create(Mod(), &d);
+	}
+	// A zipline from `start` (the high end) to `end`
+	inline MirageObject* Zipline(const float (&start)[3], const float (&end)[3], float landingStrip = 0.f)
+	{
+		if (!MIRAGE_API_HAS(&Api(), piece_create)) return nullptr;
+		MiragePieceDesc d{};
+		d.size = sizeof d;
+		d.kind = MIRAGE_PIECE_ZIPLINE;
+		for (int i = 0; i < 3; ++i) {
+			d.location[i] = start[i];
+			d.end[i] = end[i];
+		}
+		d.landing_strip = landingStrip;
+		return Api().piece_create(Mod(), &d);
+	}
+
 	// ---- Mod tests (`mirage mod test`) --------------------------------------------------------------------------------
 	// A test of the mod's, run by the self-test on the game thread with a level loaded and the mod on: `test()` returns
 	// "" when it passed, else why it failed.

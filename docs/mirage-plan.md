@@ -2016,6 +2016,32 @@ with a template and docs.
    next). The step goes back to where the level started before it runs: earlier steps reach later checkpoints, and
    the props need room. Rewinds and replays with props are step 24's.
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.
+   **Status (2026-11-15): triggers and pieces done; the door or moving platform of Scenario F and the TAS side left.**
+   Triggers (`runtime/triggers`): the engine's own Trigger actor as a cylinder, filtered by class and tag, with enter,
+   leave and stay callbacks through the mod guard (`trigger_create`, `trigger_count`; Lua `mirage.trigger`, C#
+   `Mod.Trigger`, C++). Mirror's Edge marks Trigger bNoDelete (Spawn refuses it until the class default's bit is off
+   for that spawn), and the engine doesn't send Touch to a trigger spawned at runtime, so the runtime reads the
+   trigger's Touching list each tick. Box and sphere shapes are refused (a volume needs a brush model). Self-test
+   "Mirage triggers". **The survey of the pieces** (the decompiled TdGame script, and the natives in the executable): a
+   swing pole (TdSwingVolume) and a zipline (TdZiplineVolume) are TdMovementVolumes, brush volumes whose brush the moves
+   never read. The pawn's tick calls `ActiveMovementVolume.PawnUpdate`, which tries the move; `PawnEnteredVolume` is all
+   that sets it. The swing reads the volume's Location (the bar's middle), Rotation (X: the swing direction, Y: the bar)
+   and two flags; the zipline reads MoveDirection, LandingStrip and its spline, `SplineLocations` with
+   `NumSplineSegments + 1` points, which is all `FindClosestPointOnDSpline` reads (in the executable). A springboard is
+   geometry (TdMove_SpringBoard: a step 64 high, then a ledge 80 to 148 high 112 units on). Ladders, balance beams and
+   ledge walks are refused for now: their moves read more of the volume. **Pieces** (`runtime/pieces`, `piece_create`;
+   Lua `mirage.piece`, C# `Mod.SwingPole` / `Mod.Zipline`, C++; `[[piece]]` in level layers): the volume class spawned
+   without a brush or collision (Brush makes it bStatic and bNoDelete: the defaults' bits off for the spawn), the
+   zipline's spline filled from its two ends (the array through GMalloc), and the runtime does the volume's part: the
+   player within `reach` of the bar or cable gets the piece as ActiveMovementVolume, and loses it on going away unless
+   a move took it (a point-to-segment distance per piece per tick). A movement volume given to a layer as an
+   `[[actor]]` is refused with that pointer. Self-test "Mirage pieces" (tests/mods/pieces-layer, a layer written while
+   the game runs): a swing pole and a zipline beside where the Prologue starts, a ladder refused with its reason; a jump
+   at the pole starts the game's MOVE_Swing, a jump at the cable MOVE_IntoZipLine then MOVE_ZipLine, which carries the
+   player 1,254 units down the line in 2 s; the layer removed, the pieces go and the player holds no volume. Left: a
+   trigger wired to a door or moving platform (the test's trigger pushes a physics prop), the Collision View drawing
+   triggers and pieces, the Level Editor's piece placement (its palette offers the volume classes, which a layer
+   refuses), and recording and replaying the pieces under the TAS (step 24's, with the menu).
 8. **Input actions and custom moves.** As step 22. The experiment between a new `TdMove` subclass, a reused move
    slot and a "virtual move" comes first and decides the API. The replay part of step 24 stays with the menu. Mirage
    keeps `STATE_RESTORED` and adds what the menu's TAS needs to rewind a mod's move.

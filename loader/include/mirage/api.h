@@ -278,6 +278,24 @@ typedef struct MirageTriggerDesc {
 /* `kind`: MIRAGE_TRIGGER_*; `other`: the actor that came in, went out or is inside. Game thread. */
 typedef void(MIRAGE_CALL* MirageTriggerFn)(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 
+/* piece_create (step 7): the game's traversal pieces. A springboard is geometry, not a piece (a step 64 units high,
+ * then a ledge 80 to 148 high 112 units further); ladders and balance beams aren't supported yet. */
+#define MIRAGE_PIECE_SWING 0        /* A swing pole (TdSwingVolume): the bar is across `yaw` */
+#define MIRAGE_PIECE_ZIPLINE 1      /* A zipline (TdZiplineVolume): from `location` (the high end) to `end` */
+#define MIRAGE_PIECE_THIN_GRIP 1u   /* Swing: the narrow grip (the game's default is the wide one) */
+#define MIRAGE_PIECE_SHIMMY 2u      /* Swing: shimmying along the bar allowed (the default snaps to its middle) */
+typedef struct MiragePieceDesc {
+    uint32_t size;              /* sizeof(MiragePieceDesc) */
+    int32_t kind;               /* MIRAGE_PIECE_* */
+    float location[3];          /* Swing: the bar's middle. Zipline: its start */
+    float end[3];               /* Zipline: its end */
+    int32_t yaw;                /* Swing: the direction the player swings to (65536 = a full turn) */
+    float length;               /* Swing: the bar's length (0: 200) */
+    float reach;                /* How near the player must come to the bar or cable (0: 150 swing, 120 zipline) */
+    float landing_strip;        /* Zipline: no getting on this near its end (0: the game's 500) */
+    uint32_t flags;             /* MIRAGE_PIECE_THIN_GRIP, MIRAGE_PIECE_SHIMMY */
+} MiragePieceDesc;
+
 /* actors_query: which actors (every field optional; zero = any). Actors of the levels in play (the persistent level and
  * the visible streaming levels), from the runtime's per-tick actor lists: no walk of the whole object list. */
 typedef struct MirageActorQuery {
@@ -1048,6 +1066,11 @@ typedef struct MirageApi {
     MirageObject*(MIRAGE_CALL* trigger_create)(MirageMod* mod, const MirageTriggerDesc* desc, MirageTriggerFn fn, void* user);
     /* Actors inside the trigger now; -1: not a trigger of a mod */
     int32_t(MIRAGE_CALL* trigger_count)(MirageObject* trigger);
+
+    /* ---- Pieces (step 7). A swing pole or zipline: the game's own volume class (without a brush), its spline filled
+     * from the two ends, given to the player as the volume the game's move uses when they come within reach. Removed
+     * on revert and unload. NULL when it can't (the log says why). Level layers place them too ([[piece]]). */
+    MirageObject*(MIRAGE_CALL* piece_create)(MirageMod* mod, const MiragePieceDesc* desc);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

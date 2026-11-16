@@ -298,6 +298,27 @@ namespace Mirage
         /// <summary>Actors inside a trigger of a mod now (-1: not one). Game thread.</summary>
         public int TriggerCount(GameObject trigger) => Bridge.Api->trigger_count(trigger.Handle);
 
+        /// <summary>
+        /// A swing pole (the game's TdSwingVolume): the bar's middle at <paramref name="location"/>, the player swinging
+        /// toward <paramref name="yaw"/> (65536 = a full turn). Removed on revert and unload. Game thread.
+        /// </summary>
+        public GameObject SwingPole(Vec3 location, int yaw, float length = 200f, bool thinGrip = false, bool shimmy = false)
+        {
+            var d = new MiragePieceDesc { size = (uint)sizeof(MiragePieceDesc), kind = 0, yaw = yaw, length = length,
+                                          flags = (thinGrip ? 1u : 0u) | (shimmy ? 2u : 0u) };
+            d.location[0] = location.X; d.location[1] = location.Y; d.location[2] = location.Z;
+            return new GameObject(Bridge.Api->piece_create(Handle, &d));
+        }
+
+        /// <summary>A zipline (the game's TdZiplineVolume) from <paramref name="start"/> (the high end) to <paramref name="end"/>. Game thread.</summary>
+        public GameObject Zipline(Vec3 start, Vec3 end, float landingStrip = 0f)
+        {
+            var d = new MiragePieceDesc { size = (uint)sizeof(MiragePieceDesc), kind = 1, landing_strip = landingStrip };
+            d.location[0] = start.X; d.location[1] = start.Y; d.location[2] = start.Z;
+            d.end[0] = end.X; d.end[1] = end.Y; d.end[2] = end.Z;
+            return new GameObject(Bridge.Api->piece_create(Handle, &d));
+        }
+
         private sealed record TriggerCallbacks(Mod Owner, Action<GameObject, GameObject>? Enter, Action<GameObject, GameObject>? Leave,
                                                Action<GameObject, GameObject>? Stay);
 

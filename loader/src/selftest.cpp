@@ -2699,6 +2699,195 @@ void TestTriggers()
     End(s);
 }
 
+// Step 7, the pieces half: tests/mods/pieces-layer (a content mod) gets a level layer written while the game runs, with
+// a swing pole and a zipline near where the level started (and a ladder, refused with its reason). The player is put
+// into a jump at each (as a macro's jump would leave it: in the air, facing the piece, moving toward it) and the game's
+// own move has to start: MOVE_Swing for the pole, MOVE_IntoZipLine then MOVE_ZipLine for the cable, the player carried
+// down the cable. The file removed, the pieces go and the player holds no volume of theirs.
+double GameSeconds();   // Below
+
+struct PieceRun
+{
+    std::vector<int> states;        // Each new MovementState seen, in order
+    Classes::FVector from{}, to{};  // Where the player was put, where it was at the end
+};
+
+PieceRun RunIntoPiece(const Classes::FVector& at, int yaw, const Classes::FVector& velocity, double seconds,
+                      const std::function<bool(int)>& done)
+{
+    PieceRun r;
+    r.from = at;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        if (auto* pc = game::Controller()) pc->Rotation = Classes::FRotator{0, yaw, 0};
+        pawn->Rotation = Classes::FRotator{0, yaw, 0};
+        pawn->SetLocation(at);
+        pawn->Velocity = velocity;
+        pawn->Physics = Classes::EPhysics::PHYS_Falling;
+        mirage::engine::SetMove(pawn, Classes::EMovement::MOVE_Falling);
+    });
+    const double start = GameSeconds();
+    while (!g_aborted && GameSeconds() - start < seconds) {
+        int state = -1;
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) {
+                state = static_cast<int>(pawn->MovementState.GetValue());
+                r.to = pawn->Location;
+            }
+        });
+        if (state >= 0 && (r.states.empty() || r.states.back() != state)) r.states.push_back(state);
+        if (state >= 0 && done(state)) break;
+        WaitTicks(1);
+    }
+    return r;
+}
+
+void TestPieces()
+{
+    Step& s = Begin("Mirage pieces");
+    Probe p(s);
+    p.Expect("isn't supported yet");        // The layer's ladder, refused on purpose
+    std::filesystem::path dir;
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "pieces-layer" && m.loaded) dir = m.dir;
+    if (dir.empty()) {
+        p.Problem("the pieces-layer mod isn't loaded (tests/mods/pieces-layer)");
+        End(s);
+        return;
+    }
+    std::string map;
+    OnGameThread([&] { map = mirage::layers::CurrentMap(); });
+    const std::filesystem::path file = dir / "levels" / (map + ".toml");
+    std::error_code ec;
+    std::filesystem::remove(file, ec);      // One left by a run that stopped halfway
+    const auto entries = [] {
+        std::vector<mirage::layers::ActorInfo> v;
+        OnGameThread([&] {
+            for (auto& e : mirage::layers::List())
+                if (e.mod == "pieces-layer") v.push_back(e);
+        });
+        return v;
+    };
+    const auto volumes = [] {
+        int n = 0;
+        OnGameThread([&] {
+            n = static_cast<int>(game::ActorsOf(Classes::ATdSwingVolume::StaticClass()).size() +
+                                 game::ActorsOf(Classes::ATdZiplineVolume::StaticClass()).size());
+        });
+        return n;
+    };
+    const int before = volumes();
+
+    // Where the level started, facing as the level faces the player
+    if (g_haveLevelStart) {
+        OnGameThread([] {
+            if (auto* pawn = game::Pawn()) {
+                pawn->SetLocation(g_levelStart);
+                pawn->Velocity = Classes::FVector{};
+            }
+        });
+        WaitGrounded();
+    }
+    Classes::FVector at{};
+    int yaw = 0;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) {
+            at = pawn->Location;
+            yaw = pawn->Rotation.Yaw;
+        }
+    });
+    const float a = static_cast<float>(yaw) * 3.14159265f / 32768.f;
+    const Classes::FVector f{std::cos(a), std::sin(a), 0.f}, right{-f.Y, f.X, 0.f};
+    const auto plus = [](Classes::FVector v, const Classes::FVector& d, float k) {
+        v.X += d.X * k;
+        v.Y += d.Y * k;
+        v.Z += d.Z * k;
+        return v;
+    };
+    const Classes::FVector up{0.f, 0.f, 1.f};
+    const Classes::FVector bar = plus(plus(at, f, 300.f), up, 100.f);
+    const Classes::FVector zipStart = plus(plus(at, right, 600.f), up, 250.f);
+    const Classes::FVector zipEnd = plus(plus(zipStart, f, 1500.f), up, -300.f);
+    {
+        std::filesystem::create_directories(file.parent_path(), ec);
+        std::ofstream out(file, std::ios::binary);
+        const auto v = [](const Classes::FVector& x) { return fmt::format("[{:.1f}, {:.1f}, {:.1f}]", x.X, x.Y, x.Z); };
+        out << "# Written by the self-test (Mirage pieces); removed when it ends\n"
+            << "[[piece]]\nname = \"Pole\"\nkind = \"swing\"\nlocation = " << v(bar) << "\nyaw = " << yaw << "\nlength = 200.0\n\n"
+            << "[[piece]]\nname = \"Cable\"\nkind = \"zipline\"\nstart = " << v(zipStart) << "\nend = " << v(zipEnd) << "\n\n"
+            << "[[piece]]\nname = \"Ladder\"\nkind = \"ladder\"\nlocation = " << v(at) << "\n";
+    }
+    std::vector<mirage::layers::ActorInfo> placed;
+    WaitFor(10.0, [&] { placed = entries(); return placed.size() >= 3; });
+    int made = 0;
+    std::string refused;
+    for (const auto& e : placed) {
+        if (e.actor) ++made;
+        else refused += e.name + ": " + e.problem + "; ";
+    }
+    s.notes.push_back(fmt::format("layer: {} of {} pieces placed ({} volumes in play, {} before); refused: {}", made, placed.size(),
+                                  volumes(), before, refused));
+    if (made != 2) p.Problem(fmt::format("{} pieces placed, not 2 (the swing and the zipline)", made));
+    if (refused.find("Ladder") == std::string::npos) p.Problem("the ladder wasn't refused with its reason");
+
+    const auto states = [](const PieceRun& r) {
+        std::string t;
+        for (int x : r.states) t += (t.empty() ? "" : " > ") + std::to_string(x);
+        return t;
+    };
+    const auto has = [](const PieceRun& r, Classes::EMovement m) {
+        return std::find(r.states.begin(), r.states.end(), static_cast<int>(m)) != r.states.end();
+    };
+    if (made == 2) {
+        // The pole: a jump at it from 110 units back and 60 below the bar
+        const PieceRun swing = RunIntoPiece(plus(plus(bar, f, -110.f), up, -60.f), yaw, plus(plus(Classes::FVector{}, f, 400.f), up, 100.f),
+                                            1.5, [](int m) { return m == static_cast<int>(Classes::EMovement::MOVE_Swing); });
+        WaitTicks(30);      // Swinging a moment
+        int swingState = -1;
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) swingState = static_cast<int>(pawn->MovementState.GetValue());
+        });
+        s.notes.push_back(fmt::format("swing pole: moves {} (60 is MOVE_Swing); 30 ticks later {}", states(swing), swingState));
+        if (!has(swing, Classes::EMovement::MOVE_Swing)) p.Problem("the jump at the swing pole didn't start the game's swing move");
+
+        // The cable: a jump at it 200 units down from its start, 80 below it, facing down the line
+        const PieceRun zip = RunIntoPiece(plus(plus(zipStart, f, 200.f), up, -120.f), yaw, plus(Classes::FVector{}, f, 400.f), 2.0,
+                                          [](int) { return false; });
+        const float along = (zip.to.X - zip.from.X) * f.X + (zip.to.Y - zip.from.Y) * f.Y;
+        s.notes.push_back(fmt::format("zipline: moves {} (27 MOVE_IntoZipLine, 28 MOVE_ZipLine); carried {:.0f} units down the line in 2 s",
+                                      states(zip), along));
+        if (!has(zip, Classes::EMovement::MOVE_IntoZipLine) || !has(zip, Classes::EMovement::MOVE_ZipLine))
+            p.Problem("the jump at the zipline didn't start the game's zipline moves");
+        else if (along < 300.f) p.Problem(fmt::format("the zipline carried the player {:.0f} units, not down the line", along));
+    }
+
+    // Back where the level started; the layer file removed: the pieces go
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) {
+            mirage::engine::SetMove(pawn, Classes::EMovement::MOVE_Falling);
+            pawn->Physics = Classes::EPhysics::PHYS_Falling;
+            pawn->SetLocation(g_haveLevelStart ? g_levelStart : at);
+            pawn->Velocity = Classes::FVector{};
+        }
+    });
+    WaitGrounded();
+    std::filesystem::remove(file, ec);
+    WaitFor(10.0, [&] { return entries().empty(); });
+    WaitTicks(3);
+    bool held = true;
+    OnGameThread([&] {
+        auto* pawn = game::Pawn();
+        held = pawn && pawn->ActiveMovementVolume != nullptr;
+    });
+    const int after = volumes();
+    s.notes.push_back(fmt::format("layer removed: {} volumes in play (before: {}); the player holds a volume: {}", after, before, held));
+    if (after != before) p.Problem("the pieces are still in play after their layer went");
+    if (held) p.Problem("the player still holds a movement volume after the pieces went");
+    p.Check(1, true);
+    End(s);
+}
+
 // Step 4 of the next ten steps, the plan's Scenario A: movement tuned from data (tests/mods/movement-tuning: five
 // constants in content/defaults.toml, on the classes' defaults and the live objects). On: the player's move objects and
 // pawn hold the mod's values and a standing jump goes as high as the faster jump makes it; off: every value is the
@@ -5752,6 +5941,7 @@ const Named* FeatureList()
         {"Mirage Kismet (layer)", &TestKismetLayer, false},
         {"Mirage physics", &TestPhysics, false},
         {"Mirage triggers", &TestTriggers, false},
+        {"Mirage pieces", &TestPieces, false},
         {"Mirage UI layer", &TestMirageUi, false},
         {"Cache system", &TestCacheSystem, false},
         {"Memory manager", &TestMemoryManager, false},

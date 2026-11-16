@@ -226,6 +226,7 @@ namespace mirage::mods
 		static int JointFn(lua_State* L);
 		static int TriggerFn(lua_State* L);
 		static int TriggerCountFn(lua_State* L);
+		static int PieceFn(lua_State* L);
 		static void MIRAGE_CALL OnTrigger(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
@@ -1724,6 +1725,62 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.piece{kind = "swing", location = {x, y, z}, yaw = 0, length = 200, reach = 150, thin_grip = false,
+	// shimmy = false} or {kind = "zipline", start = {x, y, z}, ["end"] = {x, y, z}, landing_strip = 500, reach = 120}:
+	// the game's swing pole or zipline, or nil (the log says why). Removed on revert and unload.
+	int LuaMod::PieceFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, piece_create)) return luaL_error(L, "mirage.piece: this runtime has no pieces");
+		luaL_checktype(L, 1, LUA_TTABLE);
+		MiragePieceDesc d{};
+		d.size = sizeof d;
+		lua_getfield(L, 1, "kind");
+		const std::string kind = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		const auto number = [&](const char* key) {
+			lua_getfield(L, 1, key);
+			const float v = static_cast<float>(luaL_optnumber(L, -1, 0.0));
+			lua_pop(L, 1);
+			return v;
+		};
+		const auto flag = [&](const char* key) {
+			lua_getfield(L, 1, key);
+			const bool v = lua_toboolean(L, -1);
+			lua_pop(L, 1);
+			return v;
+		};
+		const auto vec = [&](const char* key, float (&out)[3]) {
+			lua_getfield(L, 1, key);
+			const bool ok = ReadVec(L, -1, out);
+			lua_pop(L, 1);
+			return ok;
+		};
+		if (kind == "swing") {
+			d.kind = MIRAGE_PIECE_SWING;
+			if (!vec("location", d.location)) return luaL_error(L, "mirage.piece: a swing needs location = {x, y, z}");
+			d.yaw = static_cast<int32_t>(number("yaw"));
+			d.length = number("length");
+			d.flags = (flag("thin_grip") ? MIRAGE_PIECE_THIN_GRIP : 0u) | (flag("shimmy") ? MIRAGE_PIECE_SHIMMY : 0u);
+		} else if (kind == "zipline") {
+			d.kind = MIRAGE_PIECE_ZIPLINE;
+			if (!vec("start", d.location) || !vec("end", d.end)) return luaL_error(L, "mirage.piece: a zipline needs start and end = {x, y, z}");
+			d.landing_strip = number("landing_strip");
+		} else {
+			const bool geometry = kind == "springboard";
+			self.Log(MIRAGE_LOG_ERROR, "mirage.piece: " + (geometry ? std::string("a springboard is geometry, not a piece: a step 64 units high, then a "
+																			 "ledge 80 to 148 high 112 units further")
+																 : "no piece kind '" + kind + "' (swing, zipline; ladders and balance beams aren't supported yet)"));
+			lua_pushnil(L);
+			return 1;
+		}
+		d.reach = number("reach");
+		MirageObject* p = self.api_->piece_create(self.mod_, &d);
+		if (p) PushObject(L, p);
+		else lua_pushnil(L);
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -2482,7 +2539,7 @@ namespace mirage::mods
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
-			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {nullptr, nullptr}};
+			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

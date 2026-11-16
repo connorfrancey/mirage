@@ -57,6 +57,19 @@ namespace Mirage.Native
         public int stay;
     }
 
+    /// <summary>A traversal piece (api.h MiragePieceDesc)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MiragePieceDesc
+    {
+        public uint size;
+        public int kind;
+        public fixed float location[3];
+        public fixed float end[3];
+        public int yaw;
+        public float length, reach, landing_strip;
+        public uint flags;
+    }
+
     /// <summary>A rigid body (api.h MirageBody)</summary>
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct MirageBody

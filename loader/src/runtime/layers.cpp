@@ -2,6 +2,7 @@
 #include "runtime/layer_values.h"
 
 #include "game/game.h"
+#include "game/uobject.h"
 #include "paths.h"
 #ifdef GetObject		// windows.h (through paths.h) would rename call::Params::GetObject
 #undef GetObject
@@ -10,6 +11,7 @@
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/mods.h"
+#include "runtime/pieces.h"
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
 
@@ -399,6 +401,62 @@ namespace mirage::layers
 			a->DrawScale = scale;
 		}
 
+		// [[piece]] entries: the game's swing poles and ziplines (runtime/pieces), listed with the layer's actors
+		//     [[piece]]
+		//     kind = "zipline"                 # or "swing"
+		//     start = [x, y, z]                # zipline: the high end, then end = [x, y, z], landing_strip = 500.0
+		//     location = [x, y, z]             # swing: the bar's middle, then yaw = 0, length = 200.0, thin_grip, shimmy
+		//     reach = 120.0                    # optional: how near the player must come
+		void SpawnPieces(const mods::Info& mod, const toml::value& root, ModLayer& layer)
+		{
+			if (!root.contains("piece")) return;
+			int index = 0;
+			for (const toml::value& entry : toml::find<toml::array>(root, "piece")) {
+				++index;
+				Spawned s;
+				s.info.mod = mod.id;
+				s.info.name = toml::find_or<std::string>(entry, "name", "");
+				const std::string kind = toml::find_or<std::string>(entry, "kind", "");
+				s.info.cls = "piece " + kind;
+				const std::string label = s.info.name.empty() ? "piece " + std::to_string(index) : s.info.name;
+				pieces::Desc d;
+				std::string why;
+				const auto vec = [&](const char* key, float (&out)[3]) {
+					if (!entry.contains(key)) return false;
+					const auto v = toml::find<std::vector<toml::value>>(entry, key);
+					if (v.size() != 3) return false;
+					for (int i = 0; i < 3; ++i) out[i] = Number(v[i]);
+					return true;
+				};
+				const auto number = [&](const char* key, float fallback) {
+					return entry.contains(key) ? Number(toml::find(entry, key)) : fallback;
+				};
+				try {
+					if (!pieces::KindFromName(kind, &d.kind, &why)) s.info.problem = why;
+					else if (d.kind == pieces::Kind::Swing) {
+						if (!vec("location", d.location)) s.info.problem = "a swing needs location = [x, y, z]";
+						d.yaw = static_cast<int>(number("yaw", 0.f));
+						d.length = number("length", d.length);
+						d.thickGrip = !toml::find_or<bool>(entry, "thin_grip", false);
+						d.snapToCenter = !toml::find_or<bool>(entry, "shimmy", false);
+					} else {
+						if (!vec("start", d.location) || !vec("end", d.end)) s.info.problem = "a zipline needs start and end = [x, y, z]";
+						d.landingStrip = number("landing_strip", 0.f);
+					}
+					d.reach = number("reach", 0.f);
+				} catch (const std::exception& e) {
+					s.info.problem = e.what();
+				}
+				if (s.info.problem.empty()) {
+					s.info.actor = pieces::Create(mod.id, d, &why);
+					if (!s.info.actor) s.info.problem = why;
+					else s.objectIndex = SlotOf(s.info.actor);
+				}
+				if (!s.info.problem.empty()) spdlog::warn("[mod {}] levels/{}.toml, {}: {}", mod.id, Lower(g_map), label, s.info.problem);
+				layer.actors.push_back(std::move(s));
+			}
+		}
+
 		void SpawnLayer(const mods::Info& mod, ModLayer& layer)
 		{
 			layer.reloads = mod.reloads;
@@ -421,6 +479,7 @@ namespace mirage::layers
 				layer.waiting = true;
 				return;
 			}
+			SpawnPieces(mod, root, layer);
 			if (!root.contains("actor")) return;
 			Classes::AWorldInfo* world = game::World();
 			if (!world) return;
@@ -459,6 +518,16 @@ namespace mirage::layers
 					} catch (const std::exception& e) {
 						s.info.problem = std::string("location: ") + e.what();
 					}
+					// The game's traversal volumes (Brush: static, bNoDelete, and a brush model) aren't actors a layer spawns:
+					// swing poles and ziplines are [[piece]] entries (runtime/pieces)
+					const auto isMovementVolume = [](const Classes::UStruct* c) {
+						for (int depth = 0; c && depth < 64; c = game::SuperOf(c), ++depth)
+							if (c == Classes::ATdMovementVolume::StaticClass()) return true;
+						return false;
+					};
+					if (s.info.problem.empty() && isMovementVolume(cls))
+						s.info.problem = "a movement volume isn't spawned as an actor: a swing pole or zipline is a [[piece]] entry "
+										 "(kind = \"swing\" or \"zipline\"); ladders and balance beams aren't supported yet";
 					if (s.info.problem.empty()) {
 						s.info.actor = world->Spawn(cls, nullptr, Classes::FName{}, at, rot, nullptr, true);
 						if (!s.info.actor) s.info.problem = "the engine didn't spawn it (an abstract, static or bNoDelete class?)";

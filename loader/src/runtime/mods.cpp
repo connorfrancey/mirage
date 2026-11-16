@@ -904,7 +904,7 @@ namespace mirage::mods
 			game_api::KismetTraceRead, game_api::MovementTransitions, game_api::PhysicsBodyGet, game_api::PhysicsBodySet,
 			game_api::PhysicsImpulse, game_api::PhysicsForce, game_api::PhysicsSpawn, game_api::PhysicsCollisionGet,
 			game_api::PhysicsCollisionSet, game_api::WorldTrace, game_api::WorldOverlap, game_api::PhysicsJoint,
-			game_api::TriggerCreate, game_api::TriggerCount,
+			game_api::TriggerCreate, game_api::TriggerCount, game_api::PieceCreate,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

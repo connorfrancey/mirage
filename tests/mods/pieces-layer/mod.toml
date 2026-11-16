@@ -1,0 +1,7 @@
+# Self-test (step 7 of the next ten steps): a content mod (no code) whose level layer, levels/edge_p.toml, the
+# self-test writes while the game runs (a swing pole and a zipline near where the Prologue starts, as [[piece]]
+# entries) and removes again. See the step "Mirage pieces" in loader/src/selftest.cpp, and runtime/pieces.h.
+id = "pieces-layer"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): a swing pole and a zipline from a level layer, written by the self-test"
+mirage = "^0.1"

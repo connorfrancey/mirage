@@ -44,6 +44,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Kismet](#kismet) (8)
 - [Physics and world queries](#physics-and-world-queries) (10)
 - [Triggers](#triggers) (2)
+- [Pieces](#pieces) (1)
 - [Types](#types)
 
 ## Basics
@@ -1386,6 +1387,16 @@ int32_t(MIRAGE_CALL* trigger_count)(MirageObject* trigger);
 
 Actors inside the trigger now; -1: not a trigger of a mod
 
+## Pieces
+
+A swing pole or zipline: the game's own volume class (without a brush), its spline filled from the two ends, given to the player as the volume the game's move uses when they come within reach. Removed on revert and unload. NULL when it can't (the log says why). Level layers place them too ([[piece]]).
+
+### `piece_create`
+
+```c
+MirageObject*(MIRAGE_CALL* piece_create)(MirageMod* mod, const MiragePieceDesc* desc);
+```
+
 ## Types
 
 ### `MirageLogLevel`
@@ -1586,6 +1597,24 @@ typedef struct MirageTriggerDesc {
     const char* tag;            /* Only actors with this Tag; NULL or "": any */
     int32_t stay;               /* 1: MIRAGE_TRIGGER_STAY callbacks too */
 } MirageTriggerDesc;
+```
+
+### `MiragePieceDesc`
+
+Swing: shimmying along the bar allowed (the default snaps to its middle) *
+
+```c
+typedef struct MiragePieceDesc {
+    uint32_t size;              /* sizeof(MiragePieceDesc) */
+    int32_t kind;               /* MIRAGE_PIECE_* */
+    float location[3];          /* Swing: the bar's middle. Zipline: its start */
+    float end[3];               /* Zipline: its end */
+    int32_t yaw;                /* Swing: the direction the player swings to (65536 = a full turn) */
+    float length;               /* Swing: the bar's length (0: 200) */
+    float reach;                /* How near the player must come to the bar or cable (0: 150 swing, 120 zipline) */
+    float landing_strip;        /* Zipline: no getting on this near its end (0: the game's 500) */
+    uint32_t flags;             /* MIRAGE_PIECE_THIN_GRIP, MIRAGE_PIECE_SHIMMY */
+} MiragePieceDesc;
 ```
 
 ### `MirageActorQuery`
