@@ -18,6 +18,7 @@ namespace Mirage
         ActorRemoved = Constants.EventActorRemoved,    // An actor left play: Object = the one it was (compare, never use)
         LevelStreamed = Constants.EventLevelStreamed,  // A streaming level shown (Value 1) or hidden (0): Text = its name
         Restart = Constants.EventRestart,              // A checkpoint restart: a new player pawn in the same level
+        Action = Constants.EventAction,                // One of the mod's input actions (mod.toml [actions.<name>]): Text = its name, Value 1 pressed / 0 released
     }
 
     public readonly struct EventArgs

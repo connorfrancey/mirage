@@ -70,6 +70,17 @@ namespace Mirage.Native
         public uint flags;
     }
 
+    /// <summary>A mod's own move (api.h MirageMoveDesc)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageMoveDesc
+    {
+        public uint size;
+        public byte* name;
+        public byte* behaves_as;
+        public void* fn;
+        public void* user;
+    }
+
     /// <summary>A moving platform (api.h MirageMoverDesc)</summary>
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct MirageMoverDesc
@@ -165,7 +176,8 @@ namespace Mirage.Native
         public const uint ModuleAction = 0x1, ModuleEnabledByDefault = 0x2, ModuleEveryTick = 0x4, ModulePanelOpen = 0x8;
         public const int ValueNone = 0, ValueBool = 1, ValueInt = 2, ValueFloat = 3, ValueObject = 4, ValueText = 5, ValueStruct = 6, ValueArray = 7;
         public const int EventTick = 0, EventLevelLoad = 1, EventDeath = 2, EventPlayerState = 3, EventKey = 4, EventStateRestored = 5,
-            EventMemoryPressure = 6, EventActorAdded = 7, EventActorRemoved = 8, EventLevelStreamed = 9, EventRestart = 10;
+            EventMemoryPressure = 6, EventActorAdded = 7, EventActorRemoved = 8, EventLevelStreamed = 9, EventRestart = 10,
+            EventAction = 11;
         public const int HookBefore = 0, HookAfter = 1, HookReplace = 2;
     }
 }

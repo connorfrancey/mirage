@@ -19,6 +19,7 @@ std::deque<Move> g_moves;                               // The last second of mo
 std::deque<double> g_presses;                           // The last second of presses
 std::unordered_map<long long, std::string> g_names;     // Game thread: FName -> lower case name
 bool g_installed = false;
+KeyListener g_listener = nullptr;
 
 const std::string& NameOf(int index, int number)
 {
@@ -36,35 +37,44 @@ void Monitor(const engine::RawInput& in)
 {
     const std::string& name = NameOf(in.nameIndex, in.nameNumber);
     const double now = Now();
-    std::lock_guard lock(g_mutex);
+    std::unique_lock lock(g_mutex);
     if (in.axis) {
         if (name == "mousex") g_moves.push_back({now, in.value, 0.f});
         else if (name == "mousey") g_moves.push_back({now, 0.f, in.value});
         while (!g_moves.empty() && g_moves.front().at < now - 1.0) g_moves.pop_front();
         return;
     }
-    Key& k = g_keys[name];
-    switch (in.event) {
-        case 0:     // Pressed
-        case 3:     // DoubleClick: the engine's second press of a mouse button
-            if (!k.held) {
-                k.held = true;
-                k.down = now;
-                ++k.presses;
-                g_presses.push_back(now);
-            }
-            break;
-        case 1:     // Released
-            k.held = false;
-            k.up = now;
-            break;
-        default:    // Repeat: still held
-            break;
+    int edge = -1;                          // 1 went down, 0 came up (for the listener)
+    {
+        Key& k = g_keys[name];
+        switch (in.event) {
+            case 0:     // Pressed
+            case 3:     // DoubleClick: the engine's second press of a mouse button
+                if (!k.held) {
+                    k.held = true;
+                    k.down = now;
+                    ++k.presses;
+                    g_presses.push_back(now);
+                    edge = 1;
+                }
+                break;
+            case 1:     // Released
+                if (k.held) edge = 0;
+                k.held = false;
+                k.up = now;
+                break;
+            default:    // Repeat: still held
+                break;
+        }
+        while (!g_presses.empty() && g_presses.front() < now - 1.0) g_presses.pop_front();
     }
-    while (!g_presses.empty() && g_presses.front() < now - 1.0) g_presses.pop_front();
+    lock.unlock();
+    if (edge >= 0 && g_listener) g_listener(name, edge == 1);
 }
 
 } // namespace
+
+void SetKeyListener(KeyListener listener) { g_listener = listener; }
 
 bool Install()
 {

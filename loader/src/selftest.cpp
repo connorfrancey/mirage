@@ -80,6 +80,7 @@
 #include "util/float_util.h"
 #include "runtime/world_events.h"
 #include "runtime/changes.h"
+#include "runtime/actions.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -2992,6 +2993,245 @@ void TestPieces()
 // pawn hold the mod's values and a standing jump goes as high as the faster jump makes it; off: every value is the
 // game's again, exactly, and so is the jump. movement_get reports what the player is doing.
 float StandingJump();   // Below
+
+// Step 8's experiment (the plan's step 22: which way a mod's move can live). The player's move table has slots no
+// player move uses (MoveClasses None: the obsolete backflips 58 and 59, bot and RB moves); a game move object put into
+// one is reached by SetMove like any other. Here a TdMove_Falling in slot 58 (MOVE_Backflip_OBSOLETE) is started at
+// the top of a real jump with fresh upward speed (a double jump): does the engine run it (physics, landing, the
+// transitions out), how high does it get against the single jump, and does the slot put back leave the jump as it was.
+bool HoldKey(const std::string& key, double seconds, const std::function<void()>& each);
+
+void TestCustomMoveProbe()
+{
+    Step& s = Begin("Mirage custom move (probe)");
+    Probe p(s);
+    constexpr int kSlot = 58;
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    const float single = StandingJump();
+    std::string jumpKey;
+    Classes::UObject* original = nullptr;
+    Classes::UObject* made = nullptr;
+    std::string setup;
+    OnGameThread([&] {
+        jumpKey = KeyFor(game::Controller(), "GBA_Jump", "SpaceBar");
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        setup = fmt::format("{} moves, {} move classes; slot {}: class {}, object {}", pawn->Moves.Num(), pawn->MoveClasses.Num(), kSlot,
+                            kSlot < static_cast<int>(pawn->MoveClasses.Num()) && pawn->MoveClasses[kSlot] ? pawn->MoveClasses[kSlot]->GetName() : "None",
+                            kSlot < static_cast<int>(pawn->Moves.Num()) && pawn->Moves[kSlot] ? pawn->Moves[kSlot]->GetName() : "None");
+        if (kSlot >= static_cast<int>(pawn->Moves.Num())) return;
+        using Fn = Classes::UObject*(__cdecl*)(Classes::UClass*, Classes::UObject*, int, int, std::uint32_t, std::uint32_t,
+                                               Classes::UObject*, void*, Classes::UObject*, void*);
+        auto construct = reinterpret_cast<Fn>(mirage::symbols::Find("StaticConstructObject"));
+        if (!construct) return;
+        made = construct(Classes::UTdMove_Falling::StaticClass(), pawn, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr);
+        if (!made) return;
+        static_cast<Classes::UTdMove*>(made)->PawnOwner = pawn;
+        original = pawn->Moves[kSlot];
+        pawn->Moves[kSlot] = static_cast<Classes::UTdMove*>(made);
+    });
+    s.notes.push_back(setup);
+    if (!made) {
+        p.Problem("the move object couldn't be made or the slot isn't there: " + setup);
+        End(s);
+        return;
+    }
+
+    // The jump; at its top (rising no more) the slot's move with 600 u/s up
+    float startZ = 0.f, topZ = 0.f;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) startZ = topZ = pawn->Location.Z;
+    });
+    std::vector<int> states;
+    bool switched = false, setOk = false;
+    const auto sample = [&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        topZ = std::max(topZ, pawn->Location.Z);
+        const int st = static_cast<int>(pawn->MovementState.GetValue());
+        if (states.empty() || states.back() != st) states.push_back(st);
+        if (!switched && pawn->Location.Z > startZ + 20.f && pawn->Velocity.Z <= 0.f) {
+            switched = true;
+            pawn->Velocity.Z = 600.f;
+            setOk = mirage::engine::SetMove(pawn, static_cast<Classes::EMovement>(kSlot));
+            const int now = static_cast<int>(pawn->MovementState.GetValue());
+            if (states.back() != now) states.push_back(now);
+            if (pawn->Velocity.Z < 600.f) pawn->Velocity.Z = 600.f;     // StartMove may have set its own
+        }
+    };
+    HoldKey(jumpKey, 0.05, sample);
+    const double t0 = GameSeconds();
+    while (!g_aborted && GameSeconds() - t0 < 3.0) {
+        OnGameThread(sample, 1.0);
+        bool down = false;
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) down = pawn->Physics == Classes::EPhysics::PHYS_Walking && switched;
+        });
+        if (down) break;
+        WaitTicks(1);
+    }
+    WaitGrounded();
+    WaitTicks(10);
+    int endState = -1, physics = -1;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) {
+            endState = static_cast<int>(pawn->MovementState.GetValue());
+            physics = static_cast<int>(pawn->Physics.GetValue());
+        }
+    });
+    std::string path;
+    for (int x : states) path += (path.empty() ? "" : " > ") + std::to_string(x);
+    s.notes.push_back(fmt::format("single jump {:.0f}; with the slot's move at the top: SetMove {} , moves {}, height {:.0f}; landed in move {} "
+                                  "(physics {})", single, setOk, path, topZ - startZ, endState, physics));
+    if (!setOk) p.Problem("SetMove to the slot was refused");
+    else if (std::find(states.begin(), states.end(), kSlot) == states.end()) p.Problem("the player never was in the slot's move");
+    if (topZ - startZ < single + 100.f) p.Problem(fmt::format("the double jump got {:.0f} high, not well over the single {:.0f}", topZ - startZ, single));
+    if (endState == kSlot || physics != static_cast<int>(Classes::EPhysics::PHYS_Walking))
+        p.Problem("the move didn't hand over to the game's moves on landing");
+
+    // The slot put back: the jump as before
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) pawn->Moves[kSlot] = static_cast<Classes::UTdMove*>(original);
+    });
+    const float again = StandingJump();
+    s.notes.push_back(fmt::format("slot {} put back: a jump {:.0f} (before {:.0f})", kSlot, again, single));
+    if (std::fabs(again - single) > 5.f) p.Problem("the jump isn't the same after the slot was put back");
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 8, the plan's Scenario B: tests/mods/double-jump (Lua). A macro jumps and, at the top, presses the mod's input
+// action (SpaceBar, through the engine's input like any key a TAS replays); the mod starts its own move, which goes
+// higher than a single jump (measured in the same run with the module off), runs its start, tick and stop callbacks,
+// and hands over to the game's moves on landing. Off: the same macro gives the single jump exactly, and the move's slot
+// is empty again.
+std::string DoubleJumpShared(const char* key)
+{
+    char v[64]{};
+    mirage::mods::game_api::ShareGet("double-jump", key, v, sizeof v);
+    return v;
+}
+
+struct JumpRun
+{
+    float height = 0.f;
+    std::vector<int> states;
+    bool walking = false;       // Back on the ground in the game's walking move
+};
+
+// A jump (the player's own jump key, a tap), then `actionKey` tapped at its top (rising no more)
+JumpRun JumpThenPress(const std::string& jumpKey, const std::string& actionKey)
+{
+    JumpRun r;
+    WaitGrounded();
+    float startZ = 0.f, topZ = 0.f;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) startZ = topZ = pawn->Location.Z;
+    });
+    bool pressed = false;
+    const auto sample = [&] {
+        auto* pawn = game::Pawn();
+        if (!pawn) return;
+        topZ = std::max(topZ, pawn->Location.Z);
+        const int st = static_cast<int>(pawn->MovementState.GetValue());
+        if (r.states.empty() || r.states.back() != st) r.states.push_back(st);
+    };
+    HoldKey(jumpKey, 0.05, sample);
+    const double t0 = GameSeconds();
+    while (!g_aborted && GameSeconds() - t0 < 3.0) {
+        bool apex = false, down = false;
+        OnGameThread([&] {
+            sample();
+            if (auto* pawn = game::Pawn()) {
+                apex = !pressed && pawn->Location.Z > startZ + 20.f && pawn->Velocity.Z <= 0.f;
+                down = pressed && pawn->Physics == Classes::EPhysics::PHYS_Walking;
+            }
+        }, 1.0);
+        if (apex) {
+            pressed = true;
+            HoldKey(actionKey, 0.05, sample);
+        }
+        if (down) break;
+        WaitTicks(1);
+    }
+    WaitGrounded();
+    WaitTicks(5);
+    OnGameThread([&] {
+        sample();
+        if (auto* pawn = game::Pawn())
+            r.walking = pawn->Physics == Classes::EPhysics::PHYS_Walking && pawn->MovementState == Classes::EMovement::MOVE_Walking;
+    });
+    r.height = topZ - startZ;
+    return r;
+}
+
+void TestCustomMove()
+{
+    Step& s = Begin("Mirage custom move");
+    Probe p(s);
+    Module* m = modules::Find("Double Jump (test)");
+    if (!m) {
+        p.Problem("the Double Jump (test) module is missing (tests/mods/double-jump)");
+        End(s);
+        return;
+    }
+    WaitPlayerReady(10.0);
+    std::string jumpKey;
+    OnGameThread([&] { jumpKey = KeyFor(game::Controller(), "GBA_Jump", "SpaceBar"); });
+    const std::string actionKey = "SpaceBar";       // The mod's [actions.double_jump] key
+    const auto num = [](const char* k) { return static_cast<int>(util::ParseFloatOr(DoubleJumpShared(k).c_str(), 0.f)); };
+    const auto path = [](const JumpRun& r) {
+        std::string t;
+        for (int x : r.states) t += (t.empty() ? "" : " > ") + std::to_string(x);
+        return t;
+    };
+
+    // The game's own: the macro with the module off
+    const JumpRun before = JumpThenPress(jumpKey, actionKey);
+    const unsigned actionsBefore = mirage::actions::Delivered();
+
+    OnRenderThread([m] { m->SetEnabled(true); });
+    WaitFor(10.0, [&] { return num("move") > 0; });
+    const int slot = num("move");
+    if (slot <= 0) {
+        p.Problem("the mod's move wasn't registered (the log says why)");
+        OnRenderThread([m] { m->SetEnabled(false); });
+        End(s);
+        return;
+    }
+    const JumpRun dj = JumpThenPress(jumpKey, actionKey);
+    const bool inMove = std::find(dj.states.begin(), dj.states.end(), slot) != dj.states.end();
+    s.notes.push_back(fmt::format("off: the macro jumps {:.0f} (moves {}); on: the mod's move in slot {}: {:.0f} high (moves {}), "
+                                  "started {}, callbacks start {} tick {} stop {}, actions seen {} (refused on the ground {}), "
+                                  "landed walking {}", before.height, path(before), slot, dj.height, path(dj), DoubleJumpShared("started"),
+                                  num("starts"), num("ticks"), num("stops"), num("actions"), num("refused"), dj.walking));
+    if (mirage::actions::Delivered() == actionsBefore) p.Problem("no input action reached the mod (runtime/actions)");
+    if (!inMove) p.Problem("the player never was in the mod's move");
+    if (dj.height < before.height + 100.f)
+        p.Problem(fmt::format("the double jump got {:.0f} high, not well over the single {:.0f}", dj.height, before.height));
+    if (num("starts") != 1 || num("stops") != 1 || num("ticks") < 1)
+        p.Problem(fmt::format("the move's callbacks: start {}, tick {}, stop {} (one start, ticks, one stop)", num("starts"), num("ticks"), num("stops")));
+    if (!dj.walking) p.Problem("the move didn't hand over to the game's walking move on landing");
+
+    // Off: the same macro is the game's jump again, and the slot is empty
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitFor(10.0, [] { return !DoubleJumpShared("reverted").empty(); });
+    WaitTicks(3);
+    bool slotEmpty = false;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) slotEmpty = slot < static_cast<int>(pawn->Moves.Num()) && !pawn->Moves[slot];
+    });
+    const JumpRun after = JumpThenPress(jumpKey, actionKey);
+    s.notes.push_back(fmt::format("off again (reverted {}): the macro jumps {:.0f} (moves {}); slot {} empty: {}", DoubleJumpShared("reverted"),
+                                  after.height, path(after), slot, slotEmpty));
+    if (std::fabs(after.height - before.height) > 5.f)
+        p.Problem(fmt::format("off, the jump is {:.0f}, not the game's {:.0f}", after.height, before.height));
+    if (std::find(after.states.begin(), after.states.end(), slot) != after.states.end()) p.Problem("off, the player still got into the mod's move");
+    if (!slotEmpty) p.Problem("the move's slot isn't empty after the revert");
+    p.Check(1, true);
+    End(s);
+}
 
 void TestMovementTuning()
 {
@@ -6035,6 +6275,8 @@ const Named* FeatureList()
         {"Mirage hooks from mods", &TestMirageModHooks, false},
         {"Mirage engine symbols", &TestEngineSymbols, false},
         {"Mirage movement tuning", &TestMovementTuning, false},
+        {"Mirage custom move (probe)", &TestCustomMoveProbe, false},
+        {"Mirage custom move", &TestCustomMove, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},
         {"Mirage Kismet (edit)", &TestKismetEdit, false},
         {"Mirage Kismet (layer)", &TestKismetLayer, false},

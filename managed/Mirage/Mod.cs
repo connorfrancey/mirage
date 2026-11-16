@@ -325,6 +325,45 @@ namespace Mirage
             return new GameObject(Bridge.Api->mover_create(Handle, &d));
         }
 
+        /// <summary>
+        /// A move of the mod's own, running as <paramref name="behavesAs"/> (a game move class, default TdMove_Falling, or
+        /// a mod class extending TdMove): <paramref name="onStart"/> as the player enters it, <paramref name="onTick"/>
+        /// (seconds) every tick in it, <paramref name="onStop"/> as the player leaves it. Its EMovement number (what
+        /// PlayerState events report), or 0. Removed on revert and unload. Game thread.
+        /// </summary>
+        public int Move(string name, Action? onStart = null, Action<float>? onTick = null, Action? onStop = null, string? behavesAs = null)
+        {
+            var callbacks = new MoveCallbacks(this, onStart, onTick, onStop);
+            var handle = System.Runtime.InteropServices.GCHandle.Alloc(callbacks);      // Lives as long as the mod
+            Owned.Add(new TestHandle(handle));
+            var d = new MirageMoveDesc { size = (uint)sizeof(MirageMoveDesc), name = Utf8.Intern(name),
+                                         behaves_as = behavesAs is null ? null : Utf8.Intern(behavesAs),
+                                         fn = (void*)(delegate* unmanaged[Cdecl]<void*, int, float, void>)&OnMove,
+                                         user = (void*)System.Runtime.InteropServices.GCHandle.ToIntPtr(handle) };
+            return Bridge.Api->move_register(Handle, &d);
+        }
+
+        /// <summary>Puts the player into one of the mod's moves now: true, or false (the log says why). Game thread.</summary>
+        public bool StartMove(int move) => Bridge.Api->move_start(Handle, move) == 1;
+
+        /// <summary>Takes one of the mod's moves out. Game thread.</summary>
+        public void RemoveMove(int move) => Bridge.Api->move_remove(Handle, move);
+
+        private sealed record MoveCallbacks(Mod Owner, Action? Start, Action<float>? Tick, Action? Stop);
+
+        [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = new[] { typeof(System.Runtime.CompilerServices.CallConvCdecl) })]
+        private static void OnMove(void* user, int phase, float seconds)
+        {
+            var cb = (MoveCallbacks)System.Runtime.InteropServices.GCHandle.FromIntPtr((IntPtr)user).Target!;
+            try
+            {
+                if (phase == 0) cb.Start?.Invoke();
+                else if (phase == 1) cb.Tick?.Invoke(seconds);
+                else cb.Stop?.Invoke();
+            }
+            catch (Exception e) { Bridge.Report(cb.Owner, "move", e); }
+        }
+
         /// <summary>Sends a mover toward <paramref name="location"/>, arriving after <paramref name="seconds"/>. Game thread.</summary>
         public bool MoveTo(GameObject mover, Vec3 location, float seconds)
         {

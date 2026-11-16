@@ -183,6 +183,10 @@ MIRAGE_AT(piece_create, 680);
 MIRAGE_AT(mover_create, 684);
 MIRAGE_AT(mover_move, 688);
 MIRAGE_AT(mover_moving, 692);
+MIRAGE_AT(move_register, 696);
+MIRAGE_AT(move_start, 700);
+MIRAGE_AT(move_remove, 704);
+static_assert(sizeof(MirageMoveDesc) == 20 && offsetof(MirageMoveDesc, fn) == 12);
 static_assert(sizeof(MirageMoverDesc) == 44 && offsetof(MirageMoverDesc, scale) == 32);
 static_assert(sizeof(MirageTriggerDesc) == 40 && offsetof(MirageTriggerDesc, stay) == 36);
 static_assert(sizeof(MiragePieceDesc) == 52 && offsetof(MiragePieceDesc, yaw) == 32 && offsetof(MiragePieceDesc, flags) == 48);
@@ -215,7 +219,7 @@ static_assert(sizeof(MirageEvent) == 28 && offsetof(MirageEvent, number) == 16 &
 static_assert(sizeof(MirageHandle) == 24 && offsetof(MirageHandle, slot) == 8 && offsetof(MirageHandle, object_class) == 20);
 static_assert(sizeof(MirageActorQuery) == 36 && offsetof(MirageActorQuery, near_object) == 16 && offsetof(MirageActorQuery, radius) == 32);
 static_assert(MIRAGE_EVENT_MEMORY_PRESSURE == 6 && MIRAGE_EVENT_ACTOR_ADDED == 7 && MIRAGE_EVENT_ACTOR_REMOVED == 8 &&
-              MIRAGE_EVENT_LEVEL_STREAMED == 9 && MIRAGE_EVENT_RESTART == 10);
+              MIRAGE_EVENT_LEVEL_STREAMED == 9 && MIRAGE_EVENT_RESTART == 10 && MIRAGE_EVENT_ACTION == 11);
 static_assert(MIRAGE_HOOK_BEFORE == 0 && MIRAGE_HOOK_AFTER == 1 && MIRAGE_HOOK_REPLACE == 2);
 static_assert(MIRAGE_EVENT_TICK == 0 && MIRAGE_EVENT_LEVEL_LOAD == 1 && MIRAGE_EVENT_DEATH == 2 &&
               MIRAGE_EVENT_PLAYER_STATE == 3 && MIRAGE_EVENT_KEY == 4 && MIRAGE_EVENT_STATE_RESTORED == 5);

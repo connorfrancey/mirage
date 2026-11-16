@@ -181,6 +181,9 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, void*, void*> mover_create;
         public delegate* unmanaged[Cdecl]<void*, void*, float, int> mover_move;
         public delegate* unmanaged[Cdecl]<void*, int> mover_moving;
+        public delegate* unmanaged[Cdecl]<void*, void*, int> move_register;
+        public delegate* unmanaged[Cdecl]<void*, int, int> move_start;
+        public delegate* unmanaged[Cdecl]<void*, int, void> move_remove;
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -652,6 +652,21 @@ namespace mirage
 		d.flags = flags;
 		return Api().piece_create(Mod(), &d);
 	}
+	// ---- Moves (step 8) ------------------------------------------------------------------------------------------------
+	// A move of the mod's own (api.h move_register): its EMovement number, or 0. `fn` gets MIRAGE_MOVE_START / _TICK / _STOP.
+	inline int32_t RegisterMove(const char* name, MirageMoveFn fn, void* user = nullptr, const char* behavesAs = nullptr)
+	{
+		if (!MIRAGE_API_HAS(&Api(), move_register)) return 0;
+		MirageMoveDesc d{};
+		d.size = sizeof d;
+		d.name = name;
+		d.behaves_as = behavesAs;
+		d.fn = fn;
+		d.user = user;
+		return Api().move_register(Mod(), &d);
+	}
+	inline bool StartMove(int32_t move) { return MIRAGE_API_HAS(&Api(), move_start) && Api().move_start(Mod(), move) == 1; }
+
 	// ---- Movers (step 7) -----------------------------------------------------------------------------------------------
 	// A moving platform, lift or door (api.h mover_create); sent with MoveTo
 	inline MirageObject* Mover(const char* mesh, const float (&location)[3], const float (&scale)[3] = {1.f, 1.f, 1.f}, int32_t yaw = 0)

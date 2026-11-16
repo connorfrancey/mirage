@@ -1,0 +1,12 @@
+# Self-test (step 8 of the next ten steps, the plan's Scenario B): a double jump. An input action on the jump key; in
+# the air, the action starts the mod's own move (a TdMove_Falling in a free slot of the player's move table) with fresh
+# upward speed, once per jump. See the step "Mirage custom move" in loader/src/selftest.cpp.
+id = "double-jump"
+name = "Double Jump (test)"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): a double jump from an input action and a move of its own"
+mirage = "^0.1"
+
+[actions.double_jump]
+key = "SpaceBar"
+description = "Jump again in the air"

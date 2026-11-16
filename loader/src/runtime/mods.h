@@ -88,6 +88,10 @@ namespace mirage::mods
 	// Every mod found, loaded or not, in load order then the rest
 	std::vector<Info> List();
 
+	// The loaded mods' input actions (mod.toml [actions.<name>]) on the key `key` (the engine's name, any case):
+	// {mod id, action name} each, in load order
+	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key);
+
 	// ---- The mod manager (step 9) --------------------------------------------------------------------------------------
 	// Loaded at the next start or not (disabled.toml in its mods folder). Switched off, its modules go off now too.
 	// The menu's thread (where modules are switched).

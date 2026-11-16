@@ -28,6 +28,11 @@ struct Snapshot {
     double now = 0.0;
 };
 
+// Told of every key or button the engine gets as it goes down or comes up (the lower-case name, as above): game thread,
+// as the engine processes the input. Mods' input actions (runtime/actions) listen here. One listener.
+using KeyListener = void (*)(const std::string& name, bool down);
+void SetKeyListener(KeyListener listener);
+
 // `window`: how far back the mouse movement is added up.
 Snapshot Get(double window = 0.05);
 void ResetCounts();

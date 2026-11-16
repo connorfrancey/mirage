@@ -905,7 +905,8 @@ namespace mirage::mods
 			game_api::PhysicsImpulse, game_api::PhysicsForce, game_api::PhysicsSpawn, game_api::PhysicsCollisionGet,
 			game_api::PhysicsCollisionSet, game_api::WorldTrace, game_api::WorldOverlap, game_api::PhysicsJoint,
 			game_api::TriggerCreate, game_api::TriggerCount, game_api::PieceCreate,
-			game_api::MoverCreate, game_api::MoverMove, game_api::MoverMoving,
+			game_api::MoverCreate, game_api::MoverMove, game_api::MoverMoving, game_api::MoveRegister, game_api::MoveStart,
+			game_api::MoveRemove,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -1436,6 +1437,24 @@ namespace mirage::mods
 		for (const auto& owned : g_mods)
 			if (owned->lua && owned->state.load() == State::Active) out.emplace_back(owned->id, LuaMemory(*owned->lua));
 		std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
+		return out;
+	}
+
+	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key)
+	{
+		const auto same = [](const std::string& a, const std::string& b) {
+			return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+				return std::tolower(static_cast<unsigned char>(x)) == std::tolower(static_cast<unsigned char>(y));
+			});
+		};
+		std::vector<std::pair<std::string, std::string>> out;
+		std::lock_guard modsLock(g_modsLock);
+		for (const auto& owned : g_mods) {
+			const MirageMod& mod = *owned;
+			if (mod.state.load() != State::Active) continue;
+			for (const ActionDecl& a : mod.manifest.actions)
+				if (same(a.key, key)) out.emplace_back(mod.id, a.name);
+		}
 		return out;
 	}
 

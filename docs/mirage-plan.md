@@ -2057,6 +2057,30 @@ with a template and docs.
 8. **Input actions and custom moves.** As step 22. The experiment between a new `TdMove` subclass, a reused move
    slot and a "virtual move" comes first and decides the API. The replay part of step 24 stays with the menu. Mirage
    keeps `STATE_RESTORED` and adds what the menu's TAS needs to rewind a mod's move.
+   **Status (2026-11-15): done (Scenario B), the TAS replay and the Movement workspace left to the menu.**
+   **The experiment** (self-test "Mirage custom move (probe)") chose the reused slot: TdPawn.Moves is indexed by
+   EMovement and the player's MoveClasses are None in a number of slots (the obsolete backflips 58 and 59, the
+   obsolete RB moves, bot moves); `SetMove` only indexes `Moves[MovementState]` from script. A TdMove_Falling put into
+   slot 58 and started at the top of a jump ran under the engine (Jump > 58 > Walking: physics, landing and the hand-over
+   are the game's), and the slot put back left the jump exactly as it was (279 before and after). A value past MOVE_MAX
+   would reach the natives' switches out of range, so it isn't tried. **Moves** (`runtime/moves`, `move_register`,
+   `move_start`, `move_remove`; Lua `mirage.move{name, as, on_start, on_tick, on_stop}` / `move_start`, C# `Mod.Move` /
+   `StartMove`, C++ `RegisterMove` / `StartMove`): a free slot (58, 59, 80, 83, 86-90, 92: checked None on each pawn), a
+   move object of the class it behaves as (a game move, TdMove_Falling by default, or a mod class extending TdMove)
+   made by the engine's constructor and installed in the player's pawn, and again in each new one; the runtime calls
+   the mod as the player enters the slot, every tick in it and as the player leaves it (whatever moved them out); the
+   move's state is the move object's and the pawn's (game memory). Removed (move_remove, revert, unload, a crash in a
+   callback), the slot gets back what it had and a player in it goes to the game's falling or walking move. **Input
+   actions**: `[actions.<name>] key = "SpaceBar"` in mod.toml (manifest: parsed and checked, a unit test); the engine
+   input monitor (what the engine really gets: the player's keys and a TAS's injected ones alike) tells
+   `runtime/actions`, which queues the action and delivers it at the next tick as MIRAGE_EVENT_ACTION (Lua
+   `mirage.on("action", function(name, pressed))`, C# `GameEvent.Action`) to the declaring mod only. **Scenario B**
+   (self-test "Mirage custom move", tests/mods/double-jump: a page of Lua): a macro jumps and taps the action at the
+   top. Off: 279 (Jump > Falling > Walking). On: the action reaches the mod, its move starts with 650 u/s up: 410 high
+   (Jump > 58 > Walking), callbacks start 1, tick 120, stop 1, landed in the game's walking move. Off again: 279 exactly
+   and the slot empty. Left: the replay check of a recording (step 24, with the menu: the actions are key events, so a
+   replay gives the mod the same actions), the move's animation (step 9), rebinding an action's key in the menu, the
+   Movement workspace showing mod moves, and the tick cost measured (one callback a tick while in the move).
 9. **Animation playback.** `PlayCustomAnim` and the custom animation node from mods, blended in and stopped on
    disable, for step 8's moves.
 10. **Safe mode and conflicts.** A start after a start-up crash (or with Shift held) loads no mods and says why. Each

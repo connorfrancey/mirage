@@ -25,6 +25,7 @@
 #include "runtime/triggers.h"
 #include "runtime/pieces.h"
 #include "runtime/movers.h"
+#include "runtime/moves.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -188,15 +189,17 @@ namespace mirage::mods
 			auto* args = static_cast<EventArgs*>(a);
 			args->sub->fn(args->sub->user, args->event);
 		}
-		void Dispatch(const MirageEvent& e)
+		// To every subscriber of the event's type; onlyMod: only that mod's
+		void Dispatch(const MirageEvent& e, const std::string* onlyMod = nullptr)
 		{
 			const auto subs = g_subs.load(std::memory_order_acquire);
 			if (subs->empty()) return;
 			static const char* const kNames[] = {"tick", "level load", "death", "player state", "key", "state restored",
-												 "memory pressure", "actor added", "actor removed", "level streamed", "restart"};
-			static_assert(std::size(kNames) == MIRAGE_EVENT_RESTART + 1);
+												 "memory pressure", "actor added", "actor removed", "level streamed", "restart", "action"};
+			static_assert(std::size(kNames) == MIRAGE_EVENT_ACTION + 1);
 			for (const auto& s : *subs) {
 				if (s->type != e.type || !s->active.load(std::memory_order_relaxed)) continue;
+				if (onlyMod && s->mod->id != *onlyMod) continue;
 				EventArgs args{s.get(), &e};
 				detail::Enter(*s->mod, "event", std::string(kNames[e.type]) + " event", &RunEvent, &args);
 			}
@@ -257,6 +260,7 @@ namespace mirage::mods
 			triggers::RemoveAll(mod.id);	// Its callbacks stop before its code goes (the change log removes them too)
 			pieces::RemoveAll(mod.id);
 			movers::RemoveAll(mod.id);
+			moves::RemoveAll(mod.id);		// A player in one of its moves goes to the game's
 		}
 		// Its transactions put back (step 15), on the game thread where the objects are
 		if (game::IsGameThread()) changes::RevertAndForget(mod.id);
@@ -386,6 +390,13 @@ namespace mirage::mods
 		Dispatch(e);
 	}
 	void DispatchRestart() { Dispatch(Event(MIRAGE_EVENT_RESTART)); }
+	void DispatchAction(const std::string& modId, const std::string& action, bool down)
+	{
+		MirageEvent e = Event(MIRAGE_EVENT_ACTION);
+		e.value = down ? 1 : 0;
+		e.text = action.c_str();
+		Dispatch(e, &modId);
+	}
 
 	bool HasSubscribers(int type)
 	{
@@ -399,7 +410,7 @@ namespace mirage::mods
 	{
 		MirageSubscription* MIRAGE_CALL EventSubscribe(MirageMod* mod, int32_t type, MirageEventFn fn, void* user)
 		{
-			if (!mod || !fn || type < MIRAGE_EVENT_TICK || type > MIRAGE_EVENT_RESTART) return nullptr;
+			if (!mod || !fn || type < MIRAGE_EVENT_TICK || type > MIRAGE_EVENT_ACTION) return nullptr;
 			auto s = std::make_shared<Subscription>();
 			s->mod = mod;
 			s->type = type;
@@ -1378,6 +1389,64 @@ namespace mirage::mods
 			if (!game::IsGameThread()) return -1;
 			Classes::AActor* a = ActorOf(mover);
 			return a ? movers::Moving(a) : -1;
+		}
+
+		// ---- Moves (step 8) -----------------------------------------------------------------------------------------
+		struct MoveCall
+		{
+			MirageMoveFn fn;
+			void* user;
+			int32_t phase;
+			float seconds;
+		};
+		void RunMove(void* arg)
+		{
+			auto* c = static_cast<MoveCall*>(arg);
+			c->fn(c->user, c->phase, c->seconds);
+		}
+
+		int32_t MIRAGE_CALL MoveRegister(MirageMod* mod, const MirageMoveDesc* desc)
+		{
+			auto fail = [&](const std::string& why) {
+				spdlog::error("[mod {}] move_register: {}", mod ? mod->id : "?", why);
+				return 0;
+			};
+			if (!mod) return fail("no mod");
+			if (!desc || desc->size < sizeof(MirageMoveDesc) || !desc->fn) return fail("no description or callback, or its size isn't set");
+			if (!game::IsGameThread()) return fail("only on the game thread");
+			const std::string name = desc->name && *desc->name ? desc->name : "Move";
+			const std::string as = desc->behaves_as && *desc->behaves_as ? desc->behaves_as : "TdMove_Falling";
+			Classes::UClass* cls = game::FindClass(as);
+			if (!cls) return fail("no class " + as);
+			std::string why;
+			const int slot = moves::Register(mod->id, name, cls, [mod, fn = desc->fn, user = desc->user, name](moves::Phase phase, float seconds) {
+				if (mod->state.load() != State::Active) return;
+				MoveCall c{fn, user, static_cast<int32_t>(phase), seconds};
+				static const char* const kPhases[] = {"start", "tick", "stop"};
+				detail::Enter(*mod, "move", "move " + name + " " + kPhases[static_cast<int>(phase)], &RunMove, &c);
+			}, &why);
+			if (!slot) return fail(why);
+			RecordEdit(mod, "move " + name, [slot] {
+				moves::Remove(slot);
+				return true;
+			});
+			return slot;
+		}
+
+		int32_t MIRAGE_CALL MoveStart(MirageMod* mod, int32_t move)
+		{
+			if (!mod || !game::IsGameThread()) return 0;
+			std::string why;
+			if (moves::Start(mod->id, move, &why)) return 1;
+			spdlog::warn("[mod {}] move_start {}: {}", mod->id, move, why);
+			return 0;
+		}
+
+		void MIRAGE_CALL MoveRemove(MirageMod* mod, int32_t move)
+		{
+			if (!mod || !game::IsGameThread()) return;
+			if (moves::OwnerOf(move) != mod->id) return;
+			moves::Remove(move);
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

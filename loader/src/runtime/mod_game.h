@@ -60,6 +60,9 @@ namespace mirage::mods::game_api
 	MirageObject* MIRAGE_CALL MoverCreate(MirageMod* mod, const MirageMoverDesc* desc);
 	int32_t MIRAGE_CALL MoverMove(MirageObject* mover, const float* location, float seconds);
 	int32_t MIRAGE_CALL MoverMoving(MirageObject* mover);
+	int32_t MIRAGE_CALL MoveRegister(MirageMod* mod, const MirageMoveDesc* desc);
+	int32_t MIRAGE_CALL MoveStart(MirageMod* mod, int32_t move);
+	void MIRAGE_CALL MoveRemove(MirageMod* mod, int32_t move);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
@@ -141,6 +144,8 @@ namespace mirage::mods
 	void DispatchActor(bool added, void* actor, const std::string& className);	// actor: a Classes::AActor*
 	void DispatchLevelStreamed(bool visible, const std::string& level);
 	void DispatchRestart();
+	// One of `modId`'s input actions went down or came up (runtime/actions): to that mod only. Game thread.
+	void DispatchAction(const std::string& modId, const std::string& action, bool down);
 	// Whether any mod listens to MIRAGE_EVENT_<type> now (so the work to find out can be skipped). Any thread.
 	bool HasSubscribers(int type);
 }

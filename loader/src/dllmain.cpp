@@ -33,6 +33,8 @@
 #include "runtime/triggers.h"
 #include "runtime/pieces.h"
 #include "runtime/movers.h"
+#include "runtime/moves.h"
+#include "runtime/actions.h"
 #include "runtime/layers.h"
 #include "runtime/world_events.h"
 #include "runtime/maps.h"
@@ -163,6 +165,7 @@ static void Run(HMODULE module)
             game::OnTick([](float seconds) {
                 mirage::hang::BeatGame();
                 if (levelLoaded && !worldLoaded.exchange(true)) mirage::mods::LoadPhase(mirage::mods::Phase::World);
+                mirage::actions::Tick();         // Mods' input actions the engine got since the last tick (step 8)
                 mirage::mods::DispatchTick(seconds);
                 mirage::world_events::Tick();    // Actors added and removed, levels streamed, restarts (step 14)
                 mirage::layers::Tick();          // Mods' level additions: spawned, respawned at restarts, removed
@@ -171,6 +174,7 @@ static void Run(HMODULE module)
                 mirage::triggers::Tick();        // Mods' triggers: stay callbacks, gone ones dropped
                 mirage::pieces::Tick();          // Mods' swing poles and ziplines: the player near one gets it
                 mirage::movers::Tick();          // Mods' moving platforms: moved toward where they were sent
+                mirage::moves::Tick(seconds);    // Mods' own moves: in the player's pawn, enter / tick / leave callbacks
                 mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
                 mirage::routes::Tick(seconds);   // Time-trial routes: the run in progress
                 modules::Tick();
@@ -202,6 +206,7 @@ static void Run(HMODULE module)
             // The engine's input, seen (mods' input state) and injected (the self-test's key presses)
             if (!STARTUP_STEP(tas::engine::Init()) || !tas::input::Install())
                 spdlog::warn("Input hooks unavailable: their patterns were not found");
+            else mirage::actions::Install();     // Mods' input actions (mod.toml [actions.<name>])
 #endif
         }
         else

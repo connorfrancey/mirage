@@ -61,6 +61,9 @@ it works the same.
   reference for property paths (`pawn.Location.Z`) and the functions a mod can hook or call.
 - **Examples**: `examples/mods/` (hello in each language, a script patch, a retexture, a bounce pad written in
   UnrealScript) and the self-test's own mods in `tests/mods/` (hooks, world access, classes, level additions).
+- **Input actions and moves**: `[actions.<name>] key = "Q"` in `mod.toml` gives the mod an `action` event when the
+  game gets that key (a TAS's replayed input too); `move_register` (Lua `mirage.move`) adds a move of the mod's own
+  that the game runs like its own ones (`tests/mods/double-jump` is a double jump in a page of Lua).
 - **More**: [csharp-mods.md](csharp-mods.md) (C# in depth), [mod-classes.md](mod-classes.md) (new UnrealScript classes).
 
 ## When it goes wrong

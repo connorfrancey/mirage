@@ -257,3 +257,44 @@ TEST(Manifest, DisabledListRoundTrip)
 	EXPECT_TRUE(ReadDisabled(dir).empty());
 	std::filesystem::remove_all(dir);
 }
+
+TEST(Manifest, DeclaredActions)
+{
+	const Parsed p = Parse(R"(
+id = "jumper"
+version = "1.0.0"
+
+[actions.double_jump]
+key = "SpaceBar"
+description = "Jump again in the air"
+
+[actions.dash]
+key = "Q"
+color = "red"
+
+[actions.nokey]
+description = "No key"
+)");
+	ASSERT_FALSE(p.manifest.has_value());       // nokey has no key
+	ASSERT_EQ(p.errors.size(), 1u);
+	EXPECT_NE(p.errors[0].find("actions.nokey.key"), std::string::npos);
+	ASSERT_EQ(p.warnings.size(), 1u);           // dash's unknown key
+	EXPECT_NE(p.warnings[0].find("color"), std::string::npos);
+
+	const Parsed ok = Parse(R"(
+id = "jumper"
+version = "1.0.0"
+[actions.double_jump]
+key = "SpaceBar"
+description = "Jump again in the air"
+[actions.dash]
+key = "Q"
+)");
+	ASSERT_TRUE(ok.manifest.has_value());
+	ASSERT_EQ(ok.manifest->actions.size(), 2u);
+	EXPECT_EQ(ok.manifest->actions[0].name, "double_jump");
+	EXPECT_EQ(ok.manifest->actions[0].key, "SpaceBar");
+	EXPECT_EQ(ok.manifest->actions[0].description, "Jump again in the air");
+	EXPECT_EQ(ok.manifest->actions[1].name, "dash");
+	EXPECT_EQ(ok.manifest->actions[1].key, "Q");
+}

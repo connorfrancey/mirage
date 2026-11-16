@@ -103,7 +103,8 @@ namespace mirage::mods
 		};
 
 		static const std::set<std::string> known = {"id", "name", "version", "description", "authors", "mirage", "game",
-			"entry", "lua", "dotnet", "phase", "content", "dependencies", "optional", "incompatible", "settings", "hot_reload"};
+			"entry", "lua", "dotnet", "phase", "content", "dependencies", "optional", "incompatible", "settings", "hot_reload",
+			"actions"};
 		for (const auto& [key, value] : root.as_table())
 			if (!known.count(key)) warn("unknown key '" + key + "' (ignored)");
 
@@ -180,6 +181,35 @@ namespace mirage::mods
 		deps("dependencies", m.required);
 		deps("optional", m.optional);
 		deps("incompatible", m.incompatible);
+
+		// [actions.<name>]: input actions, each a key (the engine's name for it)
+		if (root.contains("actions")) {
+			const toml::ordered_value& table = root.at("actions");
+			if (!table.is_table()) error("actions must be tables: [actions.<name>] key = \"Q\"");
+			else
+				for (const auto& [name, v] : table.as_table()) {
+					const std::string where = "actions." + name;
+					if (!ValidId(name)) {
+						error(where + ": an action's name is a-z, 0-9, '-' and '_'");
+						continue;
+					}
+					if (!v.is_table()) {
+						error(where + " must be a table ([" + where + "] key = \"Q\")");
+						continue;
+					}
+					for (const auto& [k, unused] : v.as_table())
+						if (k != "key" && k != "description") warn(where + ": unknown key '" + k + "' (ignored)");
+					ActionDecl a;
+					a.name = name;
+					if (v.contains("key") && v.at("key").is_string()) a.key = v.at("key").as_string();
+					if (a.key.empty()) error(where + ".key is required: the engine's name of a key (\"SpaceBar\", \"Q\")");
+					if (v.contains("description")) {
+						if (v.at("description").is_string()) a.description = v.at("description").as_string();
+						else error(where + ".description must be a string");
+					}
+					m.actions.push_back(std::move(a));
+				}
+		}
 
 		// [settings.<key>]: declared settings
 		if (root.contains("settings")) {

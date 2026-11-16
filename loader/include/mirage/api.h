@@ -162,6 +162,9 @@ typedef void(MIRAGE_CALL* MirageNativeFn)(void* user, MirageNativeCall* call);
                                          package name */
 #define MIRAGE_EVENT_RESTART 10       /* A checkpoint restart: the player is a new pawn in the same level. Objects of the
                                          old player are gone */
+#define MIRAGE_EVENT_ACTION 11        /* Game thread (step 8): one of the mod's own input actions (mod.toml [actions.<name>])
+                                         went down (value 1) or came up (0): text = its name. Only to the mod that
+                                         declared it. The engine's input as it gets it: a TAS's replayed keys too */
 typedef struct MirageEvent {
     uint32_t size;              /* sizeof(MirageEvent) */
     int32_t type;               /* MIRAGE_EVENT_* */
@@ -295,6 +298,23 @@ typedef struct MiragePieceDesc {
     float landing_strip;        /* Zipline: no getting on this near its end (0: the game's 500) */
     uint32_t flags;             /* MIRAGE_PIECE_THIN_GRIP, MIRAGE_PIECE_SHIMMY */
 } MiragePieceDesc;
+
+/* move_register (step 8): a mod's own move. The callback runs on the game thread as the player enters the move
+ * (MIRAGE_MOVE_START, seconds 0), every tick in it (MIRAGE_MOVE_TICK, seconds since the last) and as the player leaves
+ * it (MIRAGE_MOVE_STOP), whatever moved the player out (the game's landing, a grab, death, another move). */
+#define MIRAGE_MOVE_START 0
+#define MIRAGE_MOVE_TICK 1
+#define MIRAGE_MOVE_STOP 2
+typedef void(MIRAGE_CALL* MirageMoveFn)(void* user, int32_t phase, float seconds);
+typedef struct MirageMoveDesc {
+    uint32_t size;              /* sizeof(MirageMoveDesc) */
+    const char* name;           /* "DoubleJump": for the log and the mod manager */
+    const char* behaves_as;     /* The move class it runs as: a game move ("TdMove_Falling": an air move whose landing,
+                                   grabs and wall runs the game handles) or a mod class extending TdMove (step 12).
+                                   NULL: TdMove_Falling */
+    MirageMoveFn fn;
+    void* user;
+} MirageMoveDesc;
 
 /* mover_create (step 7): a moving platform, lift or door: a static mesh that blocks, that pawns stand on and ride */
 typedef struct MirageMoverDesc {
@@ -1090,6 +1110,18 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* mover_move)(MirageObject* mover, const float* location, float seconds);
     /* 1 moving, 0 still, -1 not a mover */
     int32_t(MIRAGE_CALL* mover_moving)(MirageObject* mover);
+
+    /* ---- Moves (step 8). A mod's own move: a slot of the player's move table no player move uses (its EMovement
+     * number: what movement_get and MIRAGE_EVENT_PLAYER_STATE report while the player is in it), holding a move object
+     * of the class it behaves as, in the player's pawn and again in every new one. The game moves the player into and
+     * out of it like any of its moves. Removed with move_remove, the mod's revert or unload: the slot as it was, a
+     * player in it put in the game's falling or walking move. Game thread. */
+    /* Its EMovement number, or 0 when it can't (the log says why) */
+    int32_t(MIRAGE_CALL* move_register)(MirageMod* mod, const MirageMoveDesc* desc);
+    /* Puts the player into it now (the game's SetMove; the START callback runs before this returns): 1, or 0 (the log
+     * says why) */
+    int32_t(MIRAGE_CALL* move_start)(MirageMod* mod, int32_t move);
+    void(MIRAGE_CALL* move_remove)(MirageMod* mod, int32_t move);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

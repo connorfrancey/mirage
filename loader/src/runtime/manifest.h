@@ -39,6 +39,13 @@
 // The runtime makes them when their module registers, the menu's config saves their values, and code finds them
 // by key (MirageApi::setting_find, mirage.setting("greeting") in Lua).
 //
+//     [actions.double_jump]              # Input actions (step 8): one table per name
+//     key = "SpaceBar"                   # Required: the engine's name of the key or button
+//     description = "Jump again in the air"
+//
+// The mod gets MIRAGE_EVENT_ACTION (Lua: mirage.on("action", function(name, pressed) end)) whenever the game gets that
+// key, the player's own or a TAS's replayed input alike.
+//
 // Unknown keys are reported as warnings (a typo in a key would otherwise be silently ignored).
 
 #include "runtime/semver.h"
@@ -72,6 +79,13 @@ namespace mirage::mods
 	};
 	const char* SettingTypeName(SettingDecl::Type t);
 
+	// [actions.<name>]: an input action the mod reacts to (step 8), `key` the engine's key name ("SpaceBar", "Q",
+	// "LeftMouseButton"); the mod gets MIRAGE_EVENT_ACTION when the game gets that key (real or a TAS's)
+	struct ActionDecl
+	{
+		std::string name, key, description;
+	};
+
 	struct Dependency
 	{
 		std::string id;
@@ -92,6 +106,7 @@ namespace mirage::mods
 		std::vector<std::string> content;
 		std::vector<Dependency> required, optional, incompatible;
 		std::vector<SettingDecl> settings;	// In the order of the file
+		std::vector<ActionDecl> actions;	// In the order of the file
 		std::filesystem::path dir;		// Load: the folder mod.toml is in
 	};
 

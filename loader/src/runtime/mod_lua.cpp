@@ -230,6 +230,10 @@ namespace mirage::mods
 		static int MoverFn(lua_State* L);
 		static int MoveToFn(lua_State* L);
 		static int MoverMovingFn(lua_State* L);
+		static int MoveFn(lua_State* L);
+		static int MoveStartFn(lua_State* L);
+		static int MoveRemoveFn(lua_State* L);
+		static void MIRAGE_CALL OnMove(void* user, int32_t phase, float seconds);
 		static void MIRAGE_CALL OnTrigger(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
@@ -1832,6 +1836,80 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.move{name = "DoubleJump", as = "TdMove_Falling", on_start = function() end, on_tick = function(seconds) end,
+	// on_stop = function() end}: a move of the mod's own; its EMovement number (what player_state reports), or nil (the
+	// log says why). Removed on revert and unload.
+	int LuaMod::MoveFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, move_register)) return luaL_error(L, "mirage.move: this runtime has no moves");
+		luaL_checktype(L, 1, LUA_TTABLE);
+		lua_getfield(L, 1, "name");
+		const std::string name = lua_isstring(L, -1) ? lua_tostring(L, -1) : "Move";
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "as");
+		const std::string as = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		auto c = std::make_unique<Callback>();
+		c->owner = &self;
+		c->what = "move " + name;
+		lua_pushvalue(L, 1);
+		c->fn = luaL_ref(L, LUA_REGISTRYINDEX);		// The table: its on_start / on_tick / on_stop, looked up per call
+		MirageMoveDesc d{};
+		d.size = sizeof d;
+		d.name = name.c_str();
+		d.behaves_as = as.empty() ? nullptr : as.c_str();
+		d.fn = &OnMove;
+		d.user = c.get();
+		const int32_t move = self.api_->move_register(self.mod_, &d);
+		if (!move) {
+			luaL_unref(L, LUA_REGISTRYINDEX, c->fn);
+			lua_pushnil(L);
+			return 1;
+		}
+		self.callbacks_.push_back(std::move(c));
+		lua_pushinteger(L, move);
+		return 1;
+	}
+
+	void MIRAGE_CALL LuaMod::OnMove(void* user, int32_t phase, float seconds)
+	{
+		auto* c = static_cast<Callback*>(user);
+		if (c->failed) return;
+		LuaMod& self = *c->owner;
+		std::lock_guard lock(self.lock_);
+		lua_State* L = self.state_.Get();
+		const int top = lua_gettop(L);
+		lua_rawgeti(L, LUA_REGISTRYINDEX, c->fn);
+		lua_getfield(L, -1, phase == MIRAGE_MOVE_START ? "on_start" : phase == MIRAGE_MOVE_TICK ? "on_tick" : "on_stop");
+		if (!lua_isfunction(L, -1)) {
+			lua_settop(L, top);
+			return;
+		}
+		lua_pushnumber(L, seconds);
+		const lua::Result r = self.state_.Call(1, 0);
+		lua_settop(L, top);
+		if (!r.ok) self.Fail(*c, r.error);
+	}
+
+	// mirage.move_start(move): the player put into it now (true), or false (the log says why)
+	int LuaMod::MoveStartFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, move_start)) return luaL_error(L, "mirage.move_start: this runtime has no moves");
+		lua_pushboolean(L, self.api_->move_start(self.mod_, static_cast<int32_t>(luaL_checkinteger(L, 1))) == 1);
+		return 1;
+	}
+
+	// mirage.move_remove(move)
+	int LuaMod::MoveRemoveFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, move_remove)) return luaL_error(L, "mirage.move_remove: this runtime has no moves");
+		self.api_->move_remove(self.mod_, static_cast<int32_t>(luaL_checkinteger(L, 1)));
+		return 0;
+	}
+
 	// mirage.mover_moving(mover): true while it is on its way
 	int LuaMod::MoverMovingFn(lua_State* L)
 	{
@@ -2008,6 +2086,7 @@ namespace mirage::mods
 				break;
 			}
 			case MIRAGE_EVENT_LEVEL_STREAMED: lua_pushboolean(L, e->value); lua_pushstring(L, e->text ? e->text : ""); n = 2; break;
+			case MIRAGE_EVENT_ACTION: lua_pushstring(L, e->text ? e->text : ""); lua_pushboolean(L, e->value); n = 2; break;
 			default: break;
 		}
 		// A player state callback that returns true skips the game's handling of the new state (event_skip)
@@ -2071,12 +2150,12 @@ namespace mirage::mods
 		return 0;
 	}
 
-	// mirage.on("tick" | "level_load" | "death" | "player_state" | "key", function)
+	// mirage.on("tick" | "level_load" | "death" | "player_state" | "key" | ... | "action", function); "action": (name, pressed)
 	int LuaMod::On(lua_State* L)
 	{
 		LuaMod& self = Self(L);
 		static const char* const kEvents[] = {"tick", "level_load", "death", "player_state", "key", "state_restored", "memory_pressure",
-											  "actor_added", "actor_removed", "level_streamed", "restart", nullptr};
+											  "actor_added", "actor_removed", "level_streamed", "restart", "action", nullptr};
 		const int type = luaL_checkoption(L, 1, nullptr, kEvents);
 		luaL_checktype(L, 2, LUA_TFUNCTION);
 		auto c = std::make_unique<Callback>();
@@ -2600,7 +2679,8 @@ namespace mirage::mods
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
 			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn},
-			{"mover", MoverFn}, {"move_to", MoveToFn}, {"mover_moving", MoverMovingFn}, {nullptr, nullptr}};
+			{"mover", MoverFn}, {"move_to", MoveToFn}, {"mover_moving", MoverMovingFn}, {"move", MoveFn}, {"move_start", MoveStartFn},
+			{"move_remove", MoveRemoveFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");
