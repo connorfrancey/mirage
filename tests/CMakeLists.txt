@@ -15,6 +15,7 @@ add_executable(mirage_tests
         test_shell.cpp
         test_semver.cpp
         test_manifest.cpp
+        test_touch.cpp
         test_abi.cpp
         test_resolve.cpp
         test_detours.cpp
@@ -45,6 +46,7 @@ add_executable(mirage_tests
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/resolve.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/semver.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/manifest.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/touch.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/render/mesh.cpp
         ${CMAKE_SOURCE_DIR}/mods/mirage-collision/render/static_scene.cpp   # A native first-party mod's pure part
         # The settings framework and what it needs (test_settings.cpp): no game, no window

@@ -1,0 +1,12 @@
+# Self-test (step 10 of the next ten steps): one of two mods that overlap on purpose (overlap-a, overlap-b), on things
+# the game doesn't have, so neither changes anything: the self-test step "Mirage conflicts" checks that the runtime
+# finds their conflicts before they load (runtime/touch).
+id = "overlap-a"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): overlaps another mod on purpose, on things the game doesn't have"
+mirage = "^0.1"
+content = ["content"]
+
+[actions.overlap_probe]
+key = "F11"
+description = "On the same key as the other overlap mod's (never pressed by the tests)"

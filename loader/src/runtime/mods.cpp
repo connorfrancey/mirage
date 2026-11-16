@@ -139,6 +139,20 @@ namespace mirage::mods
 		std::mutex g_flagLock;
 		std::set<std::string> g_userOff, g_crashed;
 
+		// ---- Safe mode (step 10): <mods folder>/starting.toml lives from the start of loading until the first level ---
+		// has loaded (or the menu unloads cleanly). Found at a start, the last one never got there: a crash during the
+		// start (one a mod's crash record doesn't explain: recording one removes the marker), or the game closed early.
+		std::filesystem::path g_marker;
+		std::string g_safeMode;					// Why no mod loads in this session ("" normally)
+		std::mutex g_overlapLock;
+		std::vector<touch::Overlap> g_overlaps;	// Between the mods that load, found before any loads
+
+		void RemoveMarker()
+		{
+			std::error_code ec;
+			if (!g_marker.empty()) std::filesystem::remove(g_marker, ec);
+		}
+
 		// ---- Crash records: <mods folder>/crashes.toml, one table per mod ------------------------------------------
 		std::mutex g_crashLock;
 		void RecordCrash(const MirageMod& mod, const std::string& module, const std::string& what, DWORD code,
@@ -172,6 +186,7 @@ namespace mirage::mods
 			std::ofstream(file, std::ios::binary | std::ios::trunc)
 				<< "# Mods that crashed. A mod listed here isn't loaded: delete its table to try it again.\n\n"
 				<< toml::format(root);
+			RemoveMarker();		// The record explains this crash: the next start leaves out that mod, not every mod
 		}
 		std::map<std::string, std::string> ReadCrashes(const std::filesystem::path& folder)
 		{
@@ -943,7 +958,7 @@ namespace mirage::mods
 		bool Ignored(const std::wstring& relative)		// "<mod>\sub\file" relative to a mods folder
 		{
 			const auto slash = relative.find(L'\\');
-			if (slash == std::wstring::npos) return relative == L"disabled.toml" || relative == L"crashes.toml";
+			if (slash == std::wstring::npos) return relative == L"disabled.toml" || relative == L"crashes.toml" || relative == L"starting.toml";
 			const std::wstring rest = relative.substr(slash + 1);
 			if (rest == L"config.toml") return true;	// Written by the mod itself
 			for (const wchar_t* dir : {L".mirage", L"obj", L"bin"})
@@ -1202,6 +1217,25 @@ namespace mirage::mods
 
 	void Discover(const std::vector<std::filesystem::path>& folders)
 	{
+		// Safe mode: the last start didn't finish, or Shift is held now
+		if (!folders.empty()) {
+			std::error_code ec;
+			std::filesystem::create_directories(folders.front(), ec);
+			g_marker = folders.front() / "starting.toml";
+			if (std::filesystem::exists(g_marker, ec)) {
+				g_safeMode = "the last start didn't reach the first level (a crash during the start, or the game was closed first)";
+				try {		// A reason written into the marker (the self-test plants one)
+					const toml::value m = toml::parse(g_marker);
+					if (m.contains("reason") && m.at("reason").is_string()) g_safeMode = m.at("reason").as_string();
+				} catch (const std::exception&) {
+				}
+			}
+			if (GetAsyncKeyState(VK_SHIFT) & 0x8000) g_safeMode = "Shift was held as the game started";
+			std::ofstream(g_marker, std::ios::binary | std::ios::trunc)
+				<< "# Mirage: written as mods start loading, removed once the first level has loaded or the menu unloads.\n"
+				   "# Found at a start, the last start didn't get there: that start loads no mods (safe mode).\n";
+			if (!g_safeMode.empty()) spdlog::warn("Mods: safe mode: no mod is loaded ({})", g_safeMode);
+		}
 		std::vector<Manifest> manifests;
 		std::map<std::string, std::string> off;
 		for (const auto& folder : folders) {
@@ -1241,7 +1275,24 @@ namespace mirage::mods
 			}
 		}
 
+		if (!g_safeMode.empty())
+			for (const Manifest& m : manifests) off[m.id] = "safe mode: " + g_safeMode;
 		const Resolution r = Resolve(manifests, *semver::Version::Parse(kRuntimeVersion), off);
+		// What the mods that load touch, and where two overlap: before any of them runs
+		{
+			std::vector<touch::Set> sets;
+			for (const std::string& id : r.order) {
+				const auto m = std::find_if(manifests.begin(), manifests.end(), [&](const Manifest& x) { return x.id == id; });
+				if (m != manifests.end()) sets.push_back(touch::Read(*m));
+			}
+			auto overlaps = touch::Overlaps(sets);
+			for (const auto& o : overlaps) {
+				if (o.conflict) spdlog::warn("Mods: conflict: {}", o.text);
+				else spdlog::info("Mods: overlap: {}", o.text);
+			}
+			std::lock_guard lock(g_overlapLock);
+			g_overlaps = std::move(overlaps);
+		}
 		for (const auto& w : r.warnings) spdlog::warn("Mods: {}", w);
 		for (const Manifest& m : manifests) {
 			const auto it = r.excluded.find(m.id);
@@ -1426,8 +1477,23 @@ namespace mirage::mods
 		return {};
 	}
 
+	void StartupFinished()
+	{
+		if (!g_marker.empty() && std::filesystem::exists(g_marker)) spdlog::info("Mods: the start finished (the first level is in)");
+		RemoveMarker();
+	}
+
+	std::string SafeModeReason() { return g_safeMode; }
+
+	std::vector<touch::Overlap> Overlaps()
+	{
+		std::lock_guard lock(g_overlapLock);
+		return g_overlaps;
+	}
+
 	void UnloadAll()
 	{
+		RemoveMarker();		// A clean end: the next start isn't a safe mode one
 		StopWatcher();
 		std::vector<MirageMod*> loaded;
 		for (auto& m : g_mods)

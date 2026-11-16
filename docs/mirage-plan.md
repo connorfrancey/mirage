@@ -2109,6 +2109,26 @@ with a template and docs.
 10. **Safe mode and conflicts.** A start after a start-up crash (or with Shift held) loads no mods and says why. Each
     mod's touch set comes from `mod.toml`, its content folders and its script patches, and overlaps are shown in the
     mod manager before load. Automatic bisection and permissions are the rest of step 37.
+    **Status (2026-11-15): done (bisection and permissions stay in step 37).** **Safe mode**: `<mods>/starting.toml`
+    is written as mods start loading and removed once the first level has loaded (`mods::StartupFinished`) or the menu
+    unloads cleanly; a crash a mod's crash record explains removes it too (the next start leaves out that mod, not every
+    mod). Found at a start, or with Shift held then, no mod loads: each says `safe mode: <why>` and the mod manager
+    shows a banner. `mirage game-test` removes a stale marker before a run; `--safe-mode` plants one: self-test `Mirage
+    safe mode`: 46 mods, none loaded, each saying why, the marker gone with the level in (a normal run checks the same
+    step the other way). Shift held at a start isn't covered by a test. **Touch sets** (`runtime/touch`, read without
+    running a mod; unit tests `Touch.*`): mod.toml's action keys; content folders' defaults.toml (each object's property,
+    struct members dotted) and textures/; Kismet layers' set properties and unlinks; the functions the mod's Lua and C#
+    sources name in mirage.script.open / hook / inject (Mod.Hook / Inject), a string literal or a constant holding one (a
+    native DLL can't be read this way). **Overlaps**: the same property, texture, Kismet op property or script patch in
+    two mods is a conflict (the text says which wins: the later in the load order); a patch with injections and two
+    actions on one key are notes; two hooks or two injections alone aren't reported (the runtime runs them all). Found in
+    `Discover` for the mods that will load, before any loads, logged, and shown in the mod manager (a summary at the top,
+    each mod's own in its details). Self-test `Mirage conflicts`: tests/mods/overlap-a and overlap-b overlap on purpose on
+    things the game doesn't have (a property, a texture, a Kismet op of a map that doesn't exist: three conflicts; a key:
+    a note); the one other overlap found is real (Higher Jumps' patch of TdMove_Jump.StartMove under the inject test
+    mods' injections), and none is between first-party mods. The full self-test (93 steps) passed but for one step:
+    `Mirage maps` once saw no new player within 60 s of a checkpoint restart on MirageTestMap (it passed in the run
+    before and twice alone): intermittent, open.
 
 After these, the order above resumes: 24's mod-side hooks as the menu needs them, then 26, 28–31 by demand, and the
 rest of phase 4 as its first user needs it.

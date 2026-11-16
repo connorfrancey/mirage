@@ -56,7 +56,9 @@ local function make()
             }
         end
     end
-    local box = mirage.trigger { shape = "box", location = spot }       -- Refused: only cylinders
+    -- Refused (only cylinders): asked only in the step "Mirage triggers", which expects the error it logs (the self-test's
+    -- sweep of every module would take it for a problem)
+    local box = mirage.shared("selftest", "triggers_box") == "1" and mirage.trigger { shape = "box", location = spot } or nil
     share("made", (t and 1 or 0) + (f and 1 or 0))
     share("box_refused", box == nil)
     share("trigger", t and mirage.name(t) or "")

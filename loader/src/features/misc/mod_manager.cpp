@@ -48,6 +48,28 @@ namespace
 				const auto mods = mirage::mods::List();
 				g_rows = mods.size();
 				if (selected_.empty() && !mods.empty()) selected_ = mods.front().id;
+				// Safe mode (step 10): why nothing loaded, and that the next start is a normal one
+				if (const std::string why = mirage::mods::SafeModeReason(); !why.empty()) {
+					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.95f, 0.8f, 0.3f, 1.f});
+					ImGui::TextWrapped("Safe mode: no mod was loaded this time: %s. The next start loads them as usual (hold Shift "
+									   "as the game starts for another safe start).", why.c_str());
+					ImGui::PopStyleColor();
+				}
+				// Conflicts between the mods that load (found before they loaded)
+				const auto overlaps = mirage::mods::Overlaps();
+				int conflicts = 0;
+				for (const auto& o : overlaps) conflicts += o.conflict ? 1 : 0;
+				if (!overlaps.empty()) {
+					ImGui::PushStyleColor(ImGuiCol_Text, conflicts ? ImVec4{0.95f, 0.55f, 0.3f, 1.f} : ImVec4{0.6f, 0.75f, 0.9f, 1.f});
+					const bool listOpen = ImGui::TreeNode("##overlaps", "%d conflict%s, %d overlap%s between mods (found before they loaded)", conflicts,
+													  conflicts == 1 ? "" : "s", static_cast<int>(overlaps.size()) - conflicts,
+													  overlaps.size() - conflicts == 1 ? "" : "s");
+					ImGui::PopStyleColor();
+					if (listOpen) {
+						for (const auto& o : overlaps) ImGui::BulletText("%s%s", o.conflict ? "Conflict: " : "", o.text.c_str());
+						ImGui::TreePop();
+					}
+				}
 				ImGui::BeginChild("##list", {230.f, 0.f}, ImGuiChildFlags_Borders);
 				for (const auto& m : mods) DrawRow(m);
 				ImGui::EndChild();
@@ -224,6 +246,20 @@ namespace
 					}
 			}
 			DrawActions(m);
+			// Where it overlaps with other mods (its touch set against theirs, read before any of them ran)
+			{
+				bool header = false;
+				for (const auto& o : mirage::mods::Overlaps()) {
+					if (std::find(o.mods.begin(), o.mods.end(), m.id) == o.mods.end()) continue;
+					if (!header) {
+						ImGui::Separator();
+						ImGui::TextDisabled("Overlaps with other mods");
+						header = true;
+					}
+					if (o.conflict) ImGui::TextColored({0.95f, 0.55f, 0.3f, 1.f}, "Conflict: %s", o.text.c_str());
+					else ImGui::BulletText("%s", o.text.c_str());
+				}
+			}
 			// Its script injections (step 11), and the other mods injecting into the same functions: the order they run in
 			const auto injections = mirage::inject::List();
 			bool header = false;

@@ -164,7 +164,10 @@ static void Run(HMODULE module)
             });
             game::OnTick([](float seconds) {
                 mirage::hang::BeatGame();
-                if (levelLoaded && !worldLoaded.exchange(true)) mirage::mods::LoadPhase(mirage::mods::Phase::World);
+                if (levelLoaded && !worldLoaded.exchange(true)) {
+                    mirage::mods::LoadPhase(mirage::mods::Phase::World);
+                    mirage::mods::StartupFinished();     // The start got through: no safe mode next time
+                }
                 mirage::actions::Tick();         // Mods' input actions the engine got since the last tick (step 8)
                 mirage::mods::DispatchTick(seconds);
                 mirage::world_events::Tick();    // Actors added and removed, levels streamed, restarts (step 14)

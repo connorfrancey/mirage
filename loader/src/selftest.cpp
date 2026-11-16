@@ -119,6 +119,7 @@ struct Options {
     // go: the waits count frames and ticks, so they pass as fast as the PC draws. Off: the game as players run it.
     bool fast = true;
     bool keepLevel = false;     // Run from the menu: test in the level the player is in (no level load)
+    bool safeMode = false;      // mirage game-test --safe-mode: the tool planted the start marker, so no mod loads
 };
 
 struct Step {
@@ -2635,6 +2636,9 @@ void TestTriggers()
     }
     const auto num = [](const char* key) { return static_cast<int>(util::ParseFloatOr(TriggersShared(key).c_str(), 0.f)); };
     PropMesh();                     // The prop the mod pushes on entering
+    static MirageMod self;          // The self-test's shares: the mod asks for its box trigger only here
+    self.id = "selftest";
+    mirage::mods::game_api::ShareSet(&self, "triggers_box", "1");
     int before = -1;
     OnGameThread([&] { before = static_cast<int>(game::ActorsOf(Classes::ATrigger::StaticClass()).size()); });
     OnRenderThread([m] { m->SetEnabled(true); });
@@ -2646,6 +2650,7 @@ void TestTriggers()
         return;
     }
     if (TriggersShared("box_refused") != "true") p.Problem("a box trigger wasn't refused");
+    mirage::mods::game_api::ShareSet(&self, "triggers_box", "0");
     float sx = 0, sy = 0, sz = 0;
     sscanf_s(TriggersShared("spot").c_str(), "%f %f %f", &sx, &sy, &sz);
 
@@ -3387,6 +3392,75 @@ void TestAnimation()
                                   looping.looping != 0, stopped, after.playing != 0 && pick == after.sequence));
     if (looped != 1 || !looping.playing || !looping.looping) p.Problem("a looping sequence didn't keep playing past its length");
     if (stopped != 1 || (after.playing && pick == after.sequence)) p.Problem("anim_stop didn't stop it");
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 10: the touch sets of the mods that load, read before any of them ran (runtime/touch). tests/mods/overlap-a and
+// overlap-b overlap on purpose (a property, a texture, a Kismet op's property: conflicts; a key: a note) on things the
+// game doesn't have; nothing else is expected between the first-party mods (no false positives there).
+void TestConflicts()
+{
+    Step& s = Begin("Mirage conflicts");
+    Probe p(s);
+    WaitTicks(2);
+    const auto overlaps = mirage::mods::Overlaps();
+    using K = mirage::touch::Kind;
+    const auto between = [](const mirage::touch::Overlap& o, const char* a, const char* b) {
+        return std::find(o.mods.begin(), o.mods.end(), a) != o.mods.end() && std::find(o.mods.begin(), o.mods.end(), b) != o.mods.end();
+    };
+    bool property = false, texture = false, kismet = false, key = false;
+    int conflicts = 0;
+    for (const auto& o : overlaps) {
+        conflicts += o.conflict ? 1 : 0;
+        s.notes.push_back(std::string(o.conflict ? "conflict: " : "overlap: ") + o.text);
+        if (between(o, "overlap-a", "overlap-b")) {
+            property |= o.kind == K::Property && o.conflict && o.what == "MirageTest.Default__NoSuchObject.OverlapValue";
+            texture |= o.kind == K::Texture && o.conflict;
+            kismet |= o.kind == K::KismetSet && o.conflict;
+            key |= o.kind == K::ActionKey && !o.conflict;
+        }
+        bool firstPartyOnly = !o.mods.empty();
+        for (const auto& m : o.mods) firstPartyOnly &= m == "mirage-levels" || m == "mirage-collision";
+        if (firstPartyOnly) p.Problem("an overlap between first-party mods only: " + o.text);
+    }
+    s.notes.push_back(fmt::format("{} overlaps, {} of them conflicts", overlaps.size(), conflicts));
+    if (!property) p.Problem("overlap-a and overlap-b's shared property wasn't reported as a conflict");
+    if (!texture) p.Problem("their shared texture wasn't reported as a conflict");
+    if (!kismet) p.Problem("their shared Kismet op property wasn't reported as a conflict");
+    if (!key) p.Problem("their shared action key wasn't reported");
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 10: safe mode. A normal run: no safe mode, and the start marker (<mods>/starting.toml) is gone once the level is
+// in. `mirage game-test --safe-mode` plants the marker with a reason before the start: no mod loads, each says why,
+// and the marker goes once the level is in (the next start is a normal one).
+void TestSafeMode()
+{
+    Step& s = Begin("Mirage safe mode");
+    Probe p(s);
+    WaitTicks(2);
+    const std::string why = mirage::mods::SafeModeReason();
+    int loaded = 0, saying = 0, total = 0;
+    for (const auto& m : mirage::mods::List()) {
+        ++total;
+        loaded += m.loaded ? 1 : 0;
+        saying += m.problem.rfind("safe mode", 0) == 0 ? 1 : 0;
+    }
+    const std::filesystem::path marker = paths::Dir() / "mods" / "starting.toml";
+    std::error_code ec;
+    const bool markerLeft = std::filesystem::exists(marker, ec);
+    s.notes.push_back(fmt::format("safe mode: {}; {} mods, {} loaded, {} saying safe mode; the start marker left: {}",
+                                  why.empty() ? "no" : "yes (" + why + ")", total, loaded, saying, markerLeft));
+    if (markerLeft) p.Problem("the start marker is still there with the level in (the next start would be a safe one)");
+    if (g_options.safeMode) {
+        if (why.empty()) p.Problem("the planted start marker didn't give a safe start");
+        if (loaded != 0) p.Problem(fmt::format("{} mods loaded in safe mode", loaded));
+        if (saying != total) p.Problem(fmt::format("{} of {} mods say they weren't loaded for safe mode", saying, total));
+    } else if (!why.empty()) {
+        p.Problem("a normal run started in safe mode: " + why);
+    }
     p.Check(1, true);
     End(s);
 }
@@ -6402,6 +6476,7 @@ void ReadOptions(std::istream& in)
         else if (key == "skip") g_options.skip = SplitList(value);
         else if (key == "quit") g_options.quit = value != "0";
         else if (key == "fast") g_options.fast = value != "0";
+        else if (key == "safemode") g_options.safeMode = value == "1";
         else spdlog::warn("Self-test: unknown option '{}'", key);
     }
 }
@@ -6436,6 +6511,8 @@ const Named* FeatureList()
         {"Mirage custom move (probe)", &TestCustomMoveProbe, false},
         {"Mirage custom move", &TestCustomMove, false},
         {"Mirage animation", &TestAnimation, false},
+        {"Mirage conflicts", &TestConflicts, false},
+        {"Mirage safe mode", &TestSafeMode, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},
         {"Mirage Kismet (edit)", &TestKismetEdit, false},
         {"Mirage Kismet (layer)", &TestKismetLayer, false},

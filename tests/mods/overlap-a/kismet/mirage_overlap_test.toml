@@ -1,0 +1,5 @@
+# A map that doesn't exist: never applied, but the touch set has the op's property
+[[set]]
+op = "SeqAct_NoSuchOp_1"
+[set.properties]
+bEnabled = false

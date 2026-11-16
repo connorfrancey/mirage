@@ -72,3 +72,9 @@ it works the same.
   start until you allow it again there. A crash of the game shows the crash window: what happened, where, the likely
   cause, both call stacks; "Copy the report" gives it all.
 - `mirage mod check` says what the runtime would refuse in `mod.toml` before you start the game.
+- **Safe mode**: a start that crashes before the first level has loaded (in a way no mod's crash record explains)
+  makes the next start load no mods, and the mod manager says why; holding Shift as the game starts does the same on
+  purpose. The start after that is a normal one.
+- **Conflicts**: before any mod loads, the runtime reads what each one touches (the properties `defaults.toml` writes,
+  the textures it replaces, the Kismet ops it sets, the functions its Lua and C# patch, hook or inject into, its
+  action keys) and lists where two overlap, in the log and at the top of the mod manager.

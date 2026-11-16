@@ -20,6 +20,7 @@
 
 #include "mirage/api.h"
 #include "runtime/manifest.h"
+#include "runtime/touch.h"
 
 #include <filesystem>
 #include <map>
@@ -92,6 +93,15 @@ namespace mirage::mods
 
 	// Every mod found, loaded or not, in load order then the rest
 	std::vector<Info> List();
+
+	// ---- Safe mode and conflicts (step 10) -----------------------------------------------------------------------------
+	// Why no mod loads in this session: the last start didn't reach the first level (<mods>/starting.toml was still
+	// there), or Shift was held as the game started. "" normally.
+	std::string SafeModeReason();
+	// The start got to the first level: the marker goes (the next start is a normal one)
+	void StartupFinished();
+	// Where the touch sets of the mods that load overlap (runtime/touch), found before any of them loaded
+	std::vector<touch::Overlap> Overlaps();
 
 	// The loaded mods' input actions (mod.toml [actions.<name>]) on the key `key` (the engine's name, any case):
 	// {mod id, action name} each, in load order
