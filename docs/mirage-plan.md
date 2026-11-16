@@ -2083,6 +2083,24 @@ with a template and docs.
    Movement workspace showing mod moves, and the tick cost measured (one callback a tick while in the move).
 9. **Animation playback.** `PlayCustomAnim` and the custom animation node from mods, blended in and stopped on
    disable, for step 8's moves.
+   **Status (2026-11-15): done (playback, inspection, moves' animations); the Animation browser is the menu's.**
+   The survey (decompiled TdGame): a TdPawn plays on its custom animation slots (CustomNodeType: Canned to Face; the
+   game's moves use FullBody) through the natives PlayCustomAnim, StopCustomAnim and GetCustomAnimation, which every
+   TdMove's PlayMoveAnim calls, on the first-person and third-person meshes together; sequences come from the meshes'
+   AnimSets (the pawn's own and the weapon's, which UpdateAnimSets puts in slots 1 and 2). `runtime/anim`:
+   `anim_play`, `anim_stop`, `anim_state`, `anim_sets` (JSON; Lua `mirage.anim_play` / `anim_stop` / `anim_state` /
+   `anim_sets` with slots by name, C# `Mod.AnimPlay` / `AnimStop` / `AnimGet` / `AnimSetsJson`, C++ `PlayAnim` /
+   `StopAnim`), through mirage::call. A play is checked: the slot must report the sequence, else the meshes don't have it
+   and the call is refused. Stopping a slot blends it back and leaves its sequence node running at no weight (a looping
+   one keeps bPlaying), so "playing" is the node's and its AnimNodeSlot's bIsPlayingCustomAnim; a slot reports its
+   custom sequence ended as it starts blending out. A mod move names its animation (MirageMoveDesc grew at its end:
+   anim, slot, rate, blend in and out; a mod built before passes the old size): played as the player enters the move,
+   stopped as they leave it while it still plays. Self-test "Mirage animation": the player's meshes have 1 set of 281
+   sequences (Mesh1p, AS_C1P_Unarmed) and 2 sets of 260 (Mesh3p, AS_F3P_Unarmed and AS_F3P_Face); SpringBoardLeftLeg
+   (1.90 s) plays, its time runs and it ends; a missing sequence is refused; a looping one plays past its length and
+   anim_stop stops it. "Mirage custom move": the double jump plays SpringBoardLeftLeg as it starts. Left: the Animation
+   browser and preview (the menu's UI over anim_sets / anim_play), the AnimSet counts compared against the packages read
+   offline, and whether root motion affects a replay (step 24's).
 10. **Safe mode and conflicts.** A start after a start-up crash (or with Shift held) loads no mods and says why. Each
     mod's touch set comes from `mod.toml`, its content folders and its script patches, and overlaps are shown in the
     mod manager before load. Automatic bisection and permissions are the rest of step 37.

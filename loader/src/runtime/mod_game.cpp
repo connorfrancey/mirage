@@ -26,6 +26,7 @@
 #include "runtime/pieces.h"
 #include "runtime/movers.h"
 #include "runtime/moves.h"
+#include "runtime/anim.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -1412,15 +1413,41 @@ namespace mirage::mods
 				return 0;
 			};
 			if (!mod) return fail("no mod");
-			if (!desc || desc->size < sizeof(MirageMoveDesc) || !desc->fn) return fail("no description or callback, or its size isn't set");
+			if (!desc || desc->size < MIRAGE_MOVE_DESC_V1_SIZE || !desc->fn) return fail("no description or callback, or its size isn't set");
 			if (!game::IsGameThread()) return fail("only on the game thread");
 			const std::string name = desc->name && *desc->name ? desc->name : "Move";
 			const std::string as = desc->behaves_as && *desc->behaves_as ? desc->behaves_as : "TdMove_Falling";
 			Classes::UClass* cls = game::FindClass(as);
 			if (!cls) return fail("no class " + as);
+			// Its animation (step 9's fields: only when the mod's description has them)
+			struct Anim
+			{
+				std::string sequence;
+				int slot = MIRAGE_ANIM_FULL_BODY;
+				float rate = 1.f, blendIn = 0.15f, blendOut = 0.2f;
+			} anim;
+			if (desc->size >= offsetof(MirageMoveDesc, anim_blend_out) + sizeof(float) && desc->anim && *desc->anim) {
+				anim.sequence = desc->anim;
+				anim.slot = desc->anim_slot;
+				anim.rate = desc->anim_rate > 0.f ? desc->anim_rate : 1.f;
+				anim.blendIn = std::max(0.f, desc->anim_blend_in);
+				anim.blendOut = std::max(0.f, desc->anim_blend_out);
+			}
 			std::string why;
-			const int slot = moves::Register(mod->id, name, cls, [mod, fn = desc->fn, user = desc->user, name](moves::Phase phase, float seconds) {
+			const int slot = moves::Register(mod->id, name, cls, [mod, fn = desc->fn, user = desc->user, name, anim](moves::Phase phase, float seconds) {
 				if (mod->state.load() != State::Active) return;
+				if (!anim.sequence.empty()) {
+					auto* pawn = game::Pawn();
+					std::string bad;
+					if (phase == moves::Phase::Start && pawn &&
+						!anim::Play(pawn, anim.slot, anim.sequence, anim.rate, anim.blendIn, anim.blendOut, false, false, &bad))
+						spdlog::warn("[mod {}] move {}: its animation: {}", mod->id, name, bad);
+					// Leaving: stopped when the slot still plays it (the game's next move may have put its own there)
+					if (phase == moves::Phase::Stop && pawn) {
+						const anim::State s = anim::Get(pawn, anim.slot);
+						if (s.playing && s.sequence == anim.sequence) anim::Stop(pawn, anim.slot, anim.blendOut);
+					}
+				}
 				MoveCall c{fn, user, static_cast<int32_t>(phase), seconds};
 				static const char* const kPhases[] = {"start", "tick", "stop"};
 				detail::Enter(*mod, "move", "move " + name + " " + kPhases[static_cast<int>(phase)], &RunMove, &c);
@@ -1440,6 +1467,44 @@ namespace mirage::mods
 			if (moves::Start(mod->id, move, &why)) return 1;
 			spdlog::warn("[mod {}] move_start {}: {}", mod->id, move, why);
 			return 0;
+		}
+
+		// ---- Animation (step 9) -------------------------------------------------------------------------------------
+		int32_t MIRAGE_CALL AnimPlay(MirageObject* pawn, int32_t slot, const char* sequence, float rate, float blendIn, float blendOut,
+									 uint32_t flags)
+		{
+			if (!game::IsGameThread()) return 0;
+			std::string why;
+			if (anim::Play(ActorOf(pawn), slot, sequence ? sequence : "", rate, blendIn, blendOut, (flags & MIRAGE_ANIM_LOOP) != 0,
+						   (flags & MIRAGE_ANIM_ROOT_MOTION) != 0, &why))
+				return 1;
+			spdlog::warn("anim_play {}: {}", sequence ? sequence : "", why);
+			return 0;
+		}
+
+		int32_t MIRAGE_CALL AnimStop(MirageObject* pawn, int32_t slot, float blendOut)
+		{
+			return game::IsGameThread() && anim::Stop(ActorOf(pawn), slot, blendOut) ? 1 : 0;
+		}
+
+		int32_t MIRAGE_CALL AnimState(MirageObject* pawn, int32_t slot, MirageAnimState* out)
+		{
+			if (!out || out->size < sizeof(MirageAnimState) || !game::IsGameThread()) return 0;
+			const anim::State s = anim::Get(ActorOf(pawn), slot);
+			if (!s.valid) return 0;
+			out->playing = s.playing ? 1 : 0;
+			out->looping = s.looping ? 1 : 0;
+			std::snprintf(out->sequence, sizeof out->sequence, "%s", s.sequence.c_str());
+			out->position = s.position;
+			out->length = s.length;
+			out->rate = s.rate;
+			return 1;
+		}
+
+		uint32_t MIRAGE_CALL AnimSets(MirageObject* actor, char* buffer, uint32_t capacity)
+		{
+			if (!game::IsGameThread()) return 0;
+			return CopyOut(anim::SetsJson(ActorOf(actor)), buffer, capacity);
 		}
 
 		void MIRAGE_CALL MoveRemove(MirageMod* mod, int32_t move)

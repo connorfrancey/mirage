@@ -234,6 +234,10 @@ namespace mirage::mods
 		static int MoveStartFn(lua_State* L);
 		static int MoveRemoveFn(lua_State* L);
 		static void MIRAGE_CALL OnMove(void* user, int32_t phase, float seconds);
+		static int AnimPlayFn(lua_State* L);
+		static int AnimStopFn(lua_State* L);
+		static int AnimStateFn(lua_State* L);
+		static int AnimSetsFn(lua_State* L);
 		static void MIRAGE_CALL OnTrigger(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
@@ -1836,6 +1840,19 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// MIRAGE_ANIM_* by name ("fullbody", "FullBody", "CNT_FullBody"): -1 if none
+	static int32_t AnimSlotByName(const char* name)
+	{
+		static const char* const kNames[] = {"canned", "cannedupperbody", "fullbody", "fullbody_dir", "upperbody", "lowerbody",
+											 "camera", "weapon", "face"};
+		std::string n = name ? name : "";
+		for (char& ch : n) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+		if (n.rfind("cnt_", 0) == 0) n = n.substr(4);
+		for (int32_t i = 0; i < 9; ++i)
+			if (n == kNames[i]) return i;
+		return -1;
+	}
+
 	// mirage.move{name = "DoubleJump", as = "TdMove_Falling", on_start = function() end, on_tick = function(seconds) end,
 	// on_stop = function() end}: a move of the mod's own; its EMovement number (what player_state reports), or nil (the
 	// log says why). Removed on revert and unload.
@@ -1861,6 +1878,27 @@ namespace mirage::mods
 		d.behaves_as = as.empty() ? nullptr : as.c_str();
 		d.fn = &OnMove;
 		d.user = c.get();
+		// Its animation: anim = "SpringBoardLeftLeg", anim_slot = "fullbody", anim_rate, blend_in, blend_out
+		lua_getfield(L, 1, "anim");
+		const std::string anim = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		if (!anim.empty()) {
+			d.anim = anim.c_str();
+			d.anim_slot = MIRAGE_ANIM_FULL_BODY;
+			lua_getfield(L, 1, "anim_slot");
+			if (lua_isstring(L, -1) && !lua_isnumber(L, -1)) d.anim_slot = AnimSlotByName(lua_tostring(L, -1));
+			else if (lua_isnumber(L, -1)) d.anim_slot = static_cast<int32_t>(lua_tointeger(L, -1));
+			lua_pop(L, 1);
+			const auto opt = [&](const char* key, float fallback) {
+				lua_getfield(L, 1, key);
+				const float v = static_cast<float>(luaL_optnumber(L, -1, fallback));
+				lua_pop(L, 1);
+				return v;
+			};
+			d.anim_rate = opt("anim_rate", 1.0f);
+			d.anim_blend_in = opt("blend_in", 0.15f);
+			d.anim_blend_out = opt("blend_out", 0.2f);
+		}
 		const int32_t move = self.api_->move_register(self.mod_, &d);
 		if (!move) {
 			luaL_unref(L, LUA_REGISTRYINDEX, c->fn);
@@ -1890,6 +1928,100 @@ namespace mirage::mods
 		const lua::Result r = self.state_.Call(1, 0);
 		lua_settop(L, top);
 		if (!r.ok) self.Fail(*c, r.error);
+	}
+
+	// A slot argument: a MIRAGE_ANIM_* number or its name ("fullbody", "upperbody", ...); default full body
+	static int32_t AnimSlotArg(lua_State* L, int index)
+	{
+		if (lua_isnoneornil(L, index)) return MIRAGE_ANIM_FULL_BODY;
+		if (lua_isnumber(L, index)) return static_cast<int32_t>(lua_tointeger(L, index));
+		const int slot = AnimSlotByName(luaL_checkstring(L, index));
+		if (slot < 0) return luaL_error(L, "no animation slot '%s' (canned, cannedupperbody, fullbody, fullbody_dir, upperbody, "
+										   "lowerbody, camera, weapon, face)", lua_tostring(L, index));
+		return slot;
+	}
+
+	// mirage.anim_play(pawn, "Sequence", {slot = "fullbody", rate = 1, blend_in = 0.15, blend_out = 0.2, loop = false,
+	// root_motion = false}): true, or false (the log says why)
+	int LuaMod::AnimPlayFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, anim_play)) return luaL_error(L, "mirage.anim_play: this runtime has no animation");
+		MirageObject* pawn = CheckObject(L, 1);
+		const char* sequence = luaL_checkstring(L, 2);
+		int32_t slot = MIRAGE_ANIM_FULL_BODY;
+		float rate = 1.f, in = 0.15f, out = 0.2f;
+		uint32_t flags = 0;
+		if (lua_istable(L, 3)) {
+			lua_getfield(L, 3, "slot");
+			slot = AnimSlotArg(L, -1);
+			lua_pop(L, 1);
+			const auto num = [&](const char* key, float& v) {
+				lua_getfield(L, 3, key);
+				v = static_cast<float>(luaL_optnumber(L, -1, v));
+				lua_pop(L, 1);
+			};
+			num("rate", rate);
+			num("blend_in", in);
+			num("blend_out", out);
+			lua_getfield(L, 3, "loop");
+			if (lua_toboolean(L, -1)) flags |= MIRAGE_ANIM_LOOP;
+			lua_pop(L, 1);
+			lua_getfield(L, 3, "root_motion");
+			if (lua_toboolean(L, -1)) flags |= MIRAGE_ANIM_ROOT_MOTION;
+			lua_pop(L, 1);
+		}
+		lua_pushboolean(L, self.api_->anim_play(pawn, slot, sequence, rate, in, out, flags) == 1);
+		return 1;
+	}
+
+	// mirage.anim_stop(pawn, slot, blend_out)
+	int LuaMod::AnimStopFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, anim_stop)) return luaL_error(L, "mirage.anim_stop: this runtime has no animation");
+		lua_pushboolean(L, self.api_->anim_stop(CheckObject(L, 1), AnimSlotArg(L, 2), static_cast<float>(luaL_optnumber(L, 3, 0.2))) == 1);
+		return 1;
+	}
+
+	// mirage.anim_state(pawn, slot): {playing, looping, sequence, position, length, rate} or nil
+	int LuaMod::AnimStateFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, anim_state)) return luaL_error(L, "mirage.anim_state: this runtime has no animation");
+		MirageAnimState s{};
+		s.size = sizeof s;
+		if (self.api_->anim_state(CheckObject(L, 1), AnimSlotArg(L, 2), &s) != 1) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_createtable(L, 0, 6);
+		lua_pushboolean(L, s.playing);
+		lua_setfield(L, -2, "playing");
+		lua_pushboolean(L, s.looping);
+		lua_setfield(L, -2, "looping");
+		lua_pushstring(L, s.sequence);
+		lua_setfield(L, -2, "sequence");
+		lua_pushnumber(L, s.position);
+		lua_setfield(L, -2, "position");
+		lua_pushnumber(L, s.length);
+		lua_setfield(L, -2, "length");
+		lua_pushnumber(L, s.rate);
+		lua_setfield(L, -2, "rate");
+		return 1;
+	}
+
+	// mirage.anim_sets(actor): {{mesh = "Mesh1p", sets = {{slot, name, path, sequences = {{name, length, frames, rate,
+	// notifies}}}}}}
+	int LuaMod::AnimSetsFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, anim_sets)) return luaL_error(L, "mirage.anim_sets: this runtime has no animation");
+		MirageObject* actor = CheckObject(L, 1);
+		std::string text(self.api_->anim_sets(actor, nullptr, 0) + 1, '\0');
+		text.resize(self.api_->anim_sets(actor, text.data(), static_cast<uint32_t>(text.size())));
+		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		return 1;
 	}
 
 	// mirage.move_start(move): the player put into it now (true), or false (the log says why)
@@ -2680,7 +2812,8 @@ namespace mirage::mods
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
 			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn},
 			{"mover", MoverFn}, {"move_to", MoveToFn}, {"mover_moving", MoverMovingFn}, {"move", MoveFn}, {"move_start", MoveStartFn},
-			{"move_remove", MoveRemoveFn}, {nullptr, nullptr}};
+			{"move_remove", MoveRemoveFn}, {"anim_play", AnimPlayFn}, {"anim_stop", AnimStopFn}, {"anim_state", AnimStateFn},
+			{"anim_sets", AnimSetsFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

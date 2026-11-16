@@ -667,6 +667,18 @@ namespace mirage
 	}
 	inline bool StartMove(int32_t move) { return MIRAGE_API_HAS(&Api(), move_start) && Api().move_start(Mod(), move) == 1; }
 
+	// ---- Animation (step 9) --------------------------------------------------------------------------------------------
+	// A sequence on a TdPawn's custom animation slot (api.h anim_play)
+	inline bool PlayAnim(MirageObject* pawn, const char* sequence, int32_t slot = MIRAGE_ANIM_FULL_BODY, float rate = 1.f,
+						 float blendIn = 0.15f, float blendOut = 0.2f, uint32_t flags = 0)
+	{
+		return MIRAGE_API_HAS(&Api(), anim_play) && Api().anim_play(pawn, slot, sequence, rate, blendIn, blendOut, flags) == 1;
+	}
+	inline bool StopAnim(MirageObject* pawn, int32_t slot = MIRAGE_ANIM_FULL_BODY, float blendOut = 0.2f)
+	{
+		return MIRAGE_API_HAS(&Api(), anim_stop) && Api().anim_stop(pawn, slot, blendOut) == 1;
+	}
+
 	// ---- Movers (step 7) -----------------------------------------------------------------------------------------------
 	// A moving platform, lift or door (api.h mover_create); sent with MoveTo
 	inline MirageObject* Mover(const char* mesh, const float (&location)[3], const float (&scale)[3] = {1.f, 1.f, 1.f}, int32_t yaw = 0)

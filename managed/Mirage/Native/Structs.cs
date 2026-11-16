@@ -79,6 +79,19 @@ namespace Mirage.Native
         public byte* behaves_as;
         public void* fn;
         public void* user;
+        public byte* anim;
+        public int anim_slot;
+        public float anim_rate, anim_blend_in, anim_blend_out;
+    }
+
+    /// <summary>What an animation slot plays (api.h MirageAnimState)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageAnimState
+    {
+        public uint size;
+        public int playing, looping;
+        public fixed byte sequence[64];
+        public float position, length, rate;
     }
 
     /// <summary>A moving platform (api.h MirageMoverDesc)</summary>

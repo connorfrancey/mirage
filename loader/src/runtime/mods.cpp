@@ -906,7 +906,7 @@ namespace mirage::mods
 			game_api::PhysicsCollisionSet, game_api::WorldTrace, game_api::WorldOverlap, game_api::PhysicsJoint,
 			game_api::TriggerCreate, game_api::TriggerCount, game_api::PieceCreate,
 			game_api::MoverCreate, game_api::MoverMove, game_api::MoverMoving, game_api::MoveRegister, game_api::MoveStart,
-			game_api::MoveRemove,
+			game_api::MoveRemove, game_api::AnimPlay, game_api::AnimStop, game_api::AnimState, game_api::AnimSets,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------

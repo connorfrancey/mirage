@@ -63,6 +63,10 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL MoveRegister(MirageMod* mod, const MirageMoveDesc* desc);
 	int32_t MIRAGE_CALL MoveStart(MirageMod* mod, int32_t move);
 	void MIRAGE_CALL MoveRemove(MirageMod* mod, int32_t move);
+	int32_t MIRAGE_CALL AnimPlay(MirageObject* pawn, int32_t slot, const char* sequence, float rate, float blendIn, float blendOut, uint32_t flags);
+	int32_t MIRAGE_CALL AnimStop(MirageObject* pawn, int32_t slot, float blendOut);
+	int32_t MIRAGE_CALL AnimState(MirageObject* pawn, int32_t slot, MirageAnimState* out);
+	uint32_t MIRAGE_CALL AnimSets(MirageObject* actor, char* buffer, uint32_t capacity);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,

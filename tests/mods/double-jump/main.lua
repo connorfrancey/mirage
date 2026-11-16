@@ -17,9 +17,15 @@ mirage.on("tick", function()
     if m:enabled() and not move then
         move = mirage.move {
             name = "DoubleJump", as = "TdMove_Falling",
+            -- Its animation (step 9): the springboard's take-off, blended in and out on the full-body slot
+            anim = "SpringBoardLeftLeg", anim_slot = "fullbody", blend_in = 0.1, blend_out = 0.25,
             on_start = function()
                 local p = mirage.pawn()
-                if p then p.Velocity.Z = 650 end        -- The move's physics: a second jump's speed
+                if p then
+                    p.Velocity.Z = 650                  -- The move's physics: a second jump's speed
+                    local a = mirage.anim_state(p, "fullbody")
+                    mirage.share("anim", a and a.playing and a.sequence or "")
+                end
                 count("starts")
             end,
             on_tick = function() count("ticks") end,

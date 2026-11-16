@@ -331,7 +331,9 @@ namespace Mirage
         /// (seconds) every tick in it, <paramref name="onStop"/> as the player leaves it. Its EMovement number (what
         /// PlayerState events report), or 0. Removed on revert and unload. Game thread.
         /// </summary>
-        public int Move(string name, Action? onStart = null, Action<float>? onTick = null, Action? onStop = null, string? behavesAs = null)
+        public int Move(string name, Action? onStart = null, Action<float>? onTick = null, Action? onStop = null, string? behavesAs = null,
+                        string? anim = null, AnimSlot animSlot = AnimSlot.FullBody, float animRate = 1f, float blendIn = 0.15f,
+                        float blendOut = 0.2f)
         {
             var callbacks = new MoveCallbacks(this, onStart, onTick, onStop);
             var handle = System.Runtime.InteropServices.GCHandle.Alloc(callbacks);      // Lives as long as the mod
@@ -339,8 +341,40 @@ namespace Mirage
             var d = new MirageMoveDesc { size = (uint)sizeof(MirageMoveDesc), name = Utf8.Intern(name),
                                          behaves_as = behavesAs is null ? null : Utf8.Intern(behavesAs),
                                          fn = (void*)(delegate* unmanaged[Cdecl]<void*, int, float, void>)&OnMove,
-                                         user = (void*)System.Runtime.InteropServices.GCHandle.ToIntPtr(handle) };
+                                         user = (void*)System.Runtime.InteropServices.GCHandle.ToIntPtr(handle),
+                                         anim = anim is null ? null : Utf8.Intern(anim), anim_slot = (int)animSlot, anim_rate = animRate,
+                                         anim_blend_in = blendIn, anim_blend_out = blendOut };
             return Bridge.Api->move_register(Handle, &d);
+        }
+
+        /// <summary>
+        /// Plays <paramref name="sequence"/> (a name from <see cref="AnimSetsJson"/>) on a TdPawn's <paramref name="slot"/>,
+        /// the game's PlayCustomAnim: true, or false (not a TdPawn, no such sequence: the log says why). Game thread.
+        /// </summary>
+        public bool AnimPlay(GameObject pawn, string sequence, AnimSlot slot = AnimSlot.FullBody, float rate = 1f, float blendIn = 0.15f,
+                             float blendOut = 0.2f, bool loop = false, bool rootMotion = false)
+            => Bridge.Api->anim_play(pawn.Handle, (int)slot, Utf8.Intern(sequence), rate, blendIn, blendOut,
+                                     (loop ? 1u : 0u) | (rootMotion ? 2u : 0u)) == 1;
+
+        /// <summary>Stops what a TdPawn's slot plays, blending out. Game thread.</summary>
+        public bool AnimStop(GameObject pawn, AnimSlot slot = AnimSlot.FullBody, float blendOut = 0.2f)
+            => Bridge.Api->anim_stop(pawn.Handle, (int)slot, blendOut) == 1;
+
+        /// <summary>What a TdPawn's slot plays now (null: no such slot). Game thread.</summary>
+        public AnimState? AnimGet(GameObject pawn, AnimSlot slot = AnimSlot.FullBody)
+        {
+            var s = new MirageAnimState { size = (uint)sizeof(MirageAnimState) };
+            if (Bridge.Api->anim_state(pawn.Handle, (int)slot, &s) != 1) return null;
+            return new AnimState(s.playing != 0, s.looping != 0, Utf8.Read(s.sequence), s.position, s.length, s.rate);
+        }
+
+        /// <summary>The AnimSets of an actor's skeletal meshes, as JSON (api.h anim_sets). Game thread.</summary>
+        public string AnimSetsJson(GameObject actor)
+        {
+            uint n = Bridge.Api->anim_sets(actor.Handle, null, 0);
+            var buffer = new byte[n + 1];
+            fixed (byte* b = buffer) n = Bridge.Api->anim_sets(actor.Handle, b, (uint)buffer.Length);
+            return System.Text.Encoding.UTF8.GetString(buffer, 0, (int)Math.Min(n, (uint)buffer.Length - 1));
         }
 
         /// <summary>Puts the player into one of the mod's moves now: true, or false (the log says why). Game thread.</summary>

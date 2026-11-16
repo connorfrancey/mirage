@@ -3213,6 +3213,8 @@ void TestCustomMove()
     if (num("starts") != 1 || num("stops") != 1 || num("ticks") < 1)
         p.Problem(fmt::format("the move's callbacks: start {}, tick {}, stop {} (one start, ticks, one stop)", num("starts"), num("ticks"), num("stops")));
     if (!dj.walking) p.Problem("the move didn't hand over to the game's walking move on landing");
+    s.notes.push_back("the move's animation as it started: '" + DoubleJumpShared("anim") + "'");
+    if (DoubleJumpShared("anim") != "SpringBoardLeftLeg") p.Problem("the move's animation wasn't playing as it started");
 
     // Off: the same macro is the game's jump again, and the slot is empty
     OnRenderThread([m] { m->SetEnabled(false); });
@@ -3229,6 +3231,121 @@ void TestCustomMove()
         p.Problem(fmt::format("off, the jump is {:.0f}, not the game's {:.0f}", after.height, before.height));
     if (std::find(after.states.begin(), after.states.end(), slot) != after.states.end()) p.Problem("off, the player still got into the mod's move");
     if (!slotEmpty) p.Problem("the move's slot isn't empty after the revert");
+    p.Check(1, true);
+    End(s);
+}
+
+// Step 9 (the plan's step 23): the player's AnimSets listed (both meshes), a known sequence played on the full-body
+// slot through anim_play (the game's PlayCustomAnim): the slot reports it playing, its time runs, and it ends after its
+// length; a sequence the meshes don't have is refused; anim_stop stops a looping one.
+void TestAnimation()
+{
+    Step& s = Begin("Mirage animation");
+    Probe p(s);
+    p.Expect("have no sequence");           // The missing sequence, asked for on purpose
+    namespace ga = mirage::mods::game_api;
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    MirageObject* pawn = nullptr;
+    nlohmann::json sets;
+    OnGameThread([&] {
+        pawn = reinterpret_cast<MirageObject*>(game::Pawn());
+        if (!pawn) return;
+        std::string text(ga::AnimSets(pawn, nullptr, 0) + 1, '\0');
+        text.resize(ga::AnimSets(pawn, text.data(), static_cast<uint32_t>(text.size())));
+        sets = nlohmann::json::parse(text, nullptr, false);
+    });
+    if (!pawn || !sets.is_array()) {
+        p.Problem("no player, or anim_sets gave no JSON");
+        End(s);
+        return;
+    }
+    // What the meshes have; the sequence to play: the springboard's take-off when the player has it
+    std::string summary, pick;
+    float pickLength = 0.f;
+    int total = 0;
+    for (const auto& m : sets) {
+        int seqs = 0;
+        std::string names;
+        for (const auto& set : m["sets"]) {
+            seqs += static_cast<int>(set["sequences"].size());
+            names += (names.empty() ? "" : ", ") + set.value("name", std::string()) + " (" + std::to_string(set["sequences"].size()) + ")";
+            for (const auto& q : set["sequences"]) {
+                const std::string n = q.value("name", std::string());
+                if (n == "SpringBoardLeftLeg" || (pick.empty() && q.value("length", 0.f) > 0.3f)) {
+                    if (pick != "SpringBoardLeftLeg") {
+                        pick = n;
+                        pickLength = q.value("length", 0.f);
+                    }
+                }
+            }
+        }
+        total += seqs;
+        summary += fmt::format("{}{}: {} sets, {} sequences [{}]", summary.empty() ? "" : "; ", m.value("mesh", std::string()),
+                               m["sets"].size(), seqs, names);
+    }
+    s.notes.push_back(summary);
+    if (total == 0 || pick.empty()) {
+        p.Problem("the player's meshes list no sequences");
+        End(s);
+        return;
+    }
+
+    // Played: the slot reports it, its time runs, it ends after its length
+    int played = 0;
+    MirageAnimState st{};
+    st.size = sizeof st;
+    OnGameThread([&] { played = ga::AnimPlay(pawn, MIRAGE_ANIM_FULL_BODY, pick.c_str(), 1.f, 0.1f, 0.2f, 0); });
+    WaitTicks(5);
+    OnGameThread([&] { ga::AnimState(pawn, MIRAGE_ANIM_FULL_BODY, &st); });
+    const bool startedOk = played == 1 && st.playing && pick == st.sequence;
+    const float early = st.position;
+    const double t0 = GameSeconds();
+    bool ended = false;
+    float latest = early;
+    while (!g_aborted && GameSeconds() - t0 < pickLength + 1.5) {
+        MirageAnimState now{};
+        now.size = sizeof now;
+        OnGameThread([&] { ga::AnimState(pawn, MIRAGE_ANIM_FULL_BODY, &now); });
+        if (!now.playing || pick != now.sequence) {
+            ended = true;
+            break;
+        }
+        latest = now.position;
+        WaitTicks(1);
+    }
+    const double took = GameSeconds() - t0;
+    s.notes.push_back(fmt::format("played {} ({:.2f} s long): anim_play {}, the slot plays '{}' at {:.2f} s, then at {:.2f} s; ended {} "
+                                  "after {:.2f} s", pick, pickLength, played, st.sequence, early, latest, ended, took));
+    if (!startedOk) p.Problem("the slot doesn't report the sequence playing after anim_play");
+    if (latest <= early) p.Problem("the sequence's time didn't advance");
+    if (!ended) p.Problem("the sequence didn't end after its length");
+
+    // Refused: a sequence the meshes don't have
+    int missing = -1;
+    OnGameThread([&] { missing = ga::AnimPlay(pawn, MIRAGE_ANIM_FULL_BODY, "NoSuchSequenceAnywhere", 1.f, 0.1f, 0.1f, 0); });
+    if (missing != 0) p.Problem("a sequence the meshes don't have wasn't refused");
+
+    // A looping one, stopped
+    int looped = 0, stopped = 0;
+    MirageAnimState after{};
+    after.size = sizeof after;
+    OnGameThread([&] { looped = ga::AnimPlay(pawn, MIRAGE_ANIM_FULL_BODY, pick.c_str(), 1.f, 0.f, 0.f, MIRAGE_ANIM_LOOP); });
+    const double t1 = GameSeconds();
+    while (!g_aborted && GameSeconds() - t1 < pickLength + 0.3) WaitTicks(1);
+    MirageAnimState looping{};
+    looping.size = sizeof looping;
+    OnGameThread([&] {
+        ga::AnimState(pawn, MIRAGE_ANIM_FULL_BODY, &looping);
+        stopped = ga::AnimStop(pawn, MIRAGE_ANIM_FULL_BODY, 0.1f);
+    });
+    const double t2 = GameSeconds();
+    while (!g_aborted && GameSeconds() - t2 < 0.3) WaitTicks(1);      // Past its blend out
+    OnGameThread([&] { ga::AnimState(pawn, MIRAGE_ANIM_FULL_BODY, &after); });
+    s.notes.push_back(fmt::format("looping: still playing after its length {} (looping {}); anim_stop {}: playing after {}", looping.playing != 0,
+                                  looping.looping != 0, stopped, after.playing != 0 && pick == after.sequence));
+    if (looped != 1 || !looping.playing || !looping.looping) p.Problem("a looping sequence didn't keep playing past its length");
+    if (stopped != 1 || (after.playing && pick == after.sequence)) p.Problem("anim_stop didn't stop it");
     p.Check(1, true);
     End(s);
 }
@@ -6277,6 +6394,7 @@ const Named* FeatureList()
         {"Mirage movement tuning", &TestMovementTuning, false},
         {"Mirage custom move (probe)", &TestCustomMoveProbe, false},
         {"Mirage custom move", &TestCustomMove, false},
+        {"Mirage animation", &TestAnimation, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},
         {"Mirage Kismet (edit)", &TestKismetEdit, false},
         {"Mirage Kismet (layer)", &TestKismetLayer, false},

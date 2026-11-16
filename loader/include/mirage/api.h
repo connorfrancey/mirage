@@ -314,7 +314,34 @@ typedef struct MirageMoveDesc {
                                    NULL: TdMove_Falling */
     MirageMoveFn fn;
     void* user;
+    /* Appended (step 9): the animation the move plays as the player enters it (anim_play), stopped as they leave it
+     * while it still plays. NULL or "": none. A mod built before these passes size MIRAGE_MOVE_DESC_V1_SIZE. */
+    const char* anim;
+    int32_t anim_slot;          /* MIRAGE_ANIM_* (the game's moves use MIRAGE_ANIM_FULL_BODY) */
+    float anim_rate;            /* 0: 1 */
+    float anim_blend_in, anim_blend_out;
 } MirageMoveDesc;
+#define MIRAGE_MOVE_DESC_V1_SIZE 20u
+
+/* anim_play (step 9): a TdPawn's custom animation slots (the game's CustomNodeType); a slot plays on the first-person
+ * and the third-person mesh together */
+#define MIRAGE_ANIM_CANNED 0
+#define MIRAGE_ANIM_CANNED_UPPER_BODY 1
+#define MIRAGE_ANIM_FULL_BODY 2         /* What the game's moves play their animations on */
+#define MIRAGE_ANIM_FULL_BODY_DIR 3
+#define MIRAGE_ANIM_UPPER_BODY 4
+#define MIRAGE_ANIM_LOWER_BODY 5
+#define MIRAGE_ANIM_CAMERA 6
+#define MIRAGE_ANIM_WEAPON 7
+#define MIRAGE_ANIM_FACE 8
+#define MIRAGE_ANIM_LOOP 0x1u           /* anim_play flags */
+#define MIRAGE_ANIM_ROOT_MOTION 0x2u    /* The sequence's root motion moves the pawn */
+typedef struct MirageAnimState {
+    uint32_t size;              /* sizeof(MirageAnimState) */
+    int32_t playing, looping;
+    char sequence[64];          /* "" when the slot has none */
+    float position, length, rate;   /* Seconds into it, its length, its play rate */
+} MirageAnimState;
 
 /* mover_create (step 7): a moving platform, lift or door: a static mesh that blocks, that pawns stand on and ride */
 typedef struct MirageMoverDesc {
@@ -1122,6 +1149,20 @@ typedef struct MirageApi {
      * says why) */
     int32_t(MIRAGE_CALL* move_start)(MirageMod* mod, int32_t move);
     void(MIRAGE_CALL* move_remove)(MirageMod* mod, int32_t move);
+
+    /* ---- Animation (step 9). The game's own playback on a TdPawn (PlayCustomAnim, StopCustomAnim,
+     * GetCustomAnimation): a sequence by name, from the AnimSets the pawn's meshes have. Game thread. */
+    /* Plays `sequence` on `slot` (MIRAGE_ANIM_*), `rate` 0 meaning 1, blending in and out over those seconds, with
+     * MIRAGE_ANIM_LOOP / _ROOT_MOTION: 1, or 0 (not a TdPawn, or no sequence of that name: the log says why) */
+    int32_t(MIRAGE_CALL* anim_play)(MirageObject* pawn, int32_t slot, const char* sequence, float rate, float blend_in,
+                                    float blend_out, uint32_t flags);
+    int32_t(MIRAGE_CALL* anim_stop)(MirageObject* pawn, int32_t slot, float blend_out);
+    /* What `slot` plays now: 1, or 0 (no such slot). Set out->size first. */
+    int32_t(MIRAGE_CALL* anim_state)(MirageObject* pawn, int32_t slot, MirageAnimState* out);
+    /* The AnimSets of the actor's skeletal meshes as JSON: [{"mesh": "Mesh1p", "sets": [{"slot", "name", "path",
+     * "sequences": [{"name", "length", "frames", "rate", "notifies": [{"time", "notify", "comment"}]}]}]}]. Copies up to
+     * capacity, returns the full length. */
+    uint32_t(MIRAGE_CALL* anim_sets)(MirageObject* actor, char* buffer, uint32_t capacity);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */
