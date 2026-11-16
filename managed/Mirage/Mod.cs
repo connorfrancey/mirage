@@ -310,6 +310,31 @@ namespace Mirage
             return new GameObject(Bridge.Api->piece_create(Handle, &d));
         }
 
+        /// <summary>
+        /// A moving platform, lift or door: <paramref name="mesh"/> (a static mesh's path) at <paramref name="location"/>,
+        /// scaled by <paramref name="scale"/> (null: 1), turned to <paramref name="yaw"/>; it blocks, and a pawn standing on it
+        /// rides it. Sent with <see cref="MoveTo"/>. Removed on revert and unload. Game thread.
+        /// </summary>
+        public GameObject Mover(string mesh, Vec3 location, Vec3? scale = null, int yaw = 0)
+        {
+            var s = scale ?? new Vec3(1, 1, 1);
+            var d = new MirageMoverDesc { size = (uint)sizeof(MirageMoverDesc), mesh = Utf8.Intern(mesh) };
+            d.location[0] = location.X; d.location[1] = location.Y; d.location[2] = location.Z;
+            d.rotation[1] = yaw;
+            d.scale[0] = s.X; d.scale[1] = s.Y; d.scale[2] = s.Z;
+            return new GameObject(Bridge.Api->mover_create(Handle, &d));
+        }
+
+        /// <summary>Sends a mover toward <paramref name="location"/>, arriving after <paramref name="seconds"/>. Game thread.</summary>
+        public bool MoveTo(GameObject mover, Vec3 location, float seconds)
+        {
+            float* at = stackalloc float[3] { location.X, location.Y, location.Z };
+            return Bridge.Api->mover_move(mover.Handle, at, seconds) == 1;
+        }
+
+        /// <summary>True while a mover is on its way. Game thread.</summary>
+        public bool MoverMoving(GameObject mover) => Bridge.Api->mover_moving(mover.Handle) == 1;
+
         /// <summary>A zipline (the game's TdZiplineVolume) from <paramref name="start"/> (the high end) to <paramref name="end"/>. Game thread.</summary>
         public GameObject Zipline(Vec3 start, Vec3 end, float landingStrip = 0f)
         {

@@ -85,10 +85,12 @@ namespace debugworld
         // Live cylinders (pawns and other moving actors). They move, so they are drawn every tick from a list of their
         // components, and not with the rest at the update rate (a pawn running past would lag behind its cylinder).
         // The list is found by walking the object list a slice per tick, never all at once (a full walk is a hitch).
+        // Mods' triggers and pieces (actors spawned at runtime) are live too, drawn in their own category.
         struct LiveCylinder
         {
             Classes::UPrimitiveComponent* component = nullptr;
             std::size_t index = 0;          // In the object list: checked before every use (game::AliveAt)
+            int category = -1;              // A spawned trigger's or piece's category; -1: a pawn's cylinder
         };
         constexpr std::size_t kCylinderScanPerTick = 2500;     // ~100k objects: the whole list in about a second
         std::vector<LiveCylinder> g_cylinders;          // The last complete walk
@@ -230,6 +232,11 @@ namespace debugworld
         }
 
         rmath::Vec3 ToVec3(const Classes::FVector& v) { return {v.X, v.Y, v.Z}; }
+
+        // An actor spawned while the game runs (a mod's trigger, piece or layer actor), not loaded with the level: the
+        // engine gives a level's objects a NetIndex when it loads them (measured: placed Triggers 442, 448; spawned -1).
+        // Those come and go with their mods, so they are drawn live and never go into the level's cache.
+        bool SpawnedAtRuntime(const Classes::AActor* a) { return a->NetIndex < 0; }
 
         bool FiniteVec(rmath::Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 
@@ -626,6 +633,7 @@ namespace debugworld
                 auto* pc = static_cast<Classes::UPrimitiveComponent*>(o);
                 Classes::AActor* owner = pc->Owner;
                 if (!owner || !owner->Class || owner->bDeleteMe) continue;   // class default objects / templates
+                if (SpawnedAtRuntime(owner)) continue;      // A mod's trigger or piece: drawn live, never remembered
 
                 const ClassInfo& ownerInfo = ClassOf(owner);
                 if (ownerInfo.skip || ownerInfo.category == kNoCategory) continue;   // Live cylinders are not remembered
@@ -895,7 +903,7 @@ namespace debugworld
             const std::size_t end = std::min(n, g_cylinderScanAt + kCylinderScanPerTick);
             // Objects of one class tend to sit together: remember the last class instead of a map lookup for each
             Classes::UClass* lastClass = nullptr;
-            bool lastIsCylinder = false;
+            Kind lastKind = Kind::None;
             for (std::size_t i = g_cylinderScanAt; i < end; ++i)
             {
                 Classes::UObject* o = objects.GetByIndex(i);
@@ -903,14 +911,22 @@ namespace debugworld
                 if (o->Class != lastClass)
                 {
                     lastClass = o->Class;
-                    lastIsCylinder = ClassOf(o).kind == Kind::Cylinder;
+                    lastKind = ClassOf(o).kind;
                 }
-                if (!lastIsCylinder) continue;
+                if (lastKind != Kind::Cylinder && lastKind != Kind::Brush) continue;
                 auto* pc = static_cast<Classes::UPrimitiveComponent*>(o);
                 Classes::AActor* owner = pc->Owner;
                 if (!owner || !owner->Class || owner->bDeleteMe) continue;
                 const ClassInfo& ownerInfo = ClassOf(owner);
-                if (ownerInfo.skip || ownerInfo.category != kNoCategory) continue;   // Those are remembered volumes
+                if (ownerInfo.skip) continue;
+                if (SpawnedAtRuntime(owner) && ownerInfo.category != kNoCategory)
+                {
+                    // A mod's trigger (a cylinder) or piece (a brushless movement volume: its bar or cable)
+                    if (lastKind == Kind::Cylinder || game::IsA(owner, Classes::ATdMovementVolume::StaticClass()))
+                        g_cylindersNext.push_back({pc, i, ownerInfo.category});
+                    continue;
+                }
+                if (lastKind != Kind::Cylinder || ownerInfo.category != kNoCategory) continue;   // Remembered volumes
                 g_cylindersNext.push_back({pc, i});
             }
             g_cylinderScanAt = end;
@@ -927,25 +943,46 @@ namespace debugworld
         std::size_t DrawCylinders(const Config& cfg, const rmath::Camera& cam, rmesh::MeshData& mesh)
         {
             constexpr auto kCyl = static_cast<std::size_t>(Category::Cylinder);
-            if (!cfg.enabled[kCyl] || !cam.valid) return 0;
+            if (!cam.valid) return 0;
             ScanCylinders();
 
             const Classes::AActor* self = game::Pawn();
             std::size_t drawn = 0;
             rmesh::Builder builder(mesh);
             rmesh::Style style;
-            style.color = cfg.colors[kCyl];
             style.fill = cfg.style != DrawStyle::Wireframe;
             style.outline = cfg.style != DrawStyle::Solid;
-            builder.SetStyle(style);
             std::vector<Shape> tmp;
             for (const LiveCylinder& c : g_cylinders)
             {
+                const std::size_t category = c.category < 0 ? kCyl : static_cast<std::size_t>(c.category);
+                if (!cfg.enabled[category]) continue;
                 if (!game::AliveAt(c.component, c.index)) continue;
                 Classes::AActor* owner = c.component->Owner;
                 if (!owner || owner->bDeleteMe || (owner == self && !cfg.ownCylinder)) continue;
+                style.color = cfg.colors[category];
+                builder.SetStyle(style);
                 tmp.clear();
-                if (Extract(c.component, Kind::Cylinder, static_cast<int>(kCyl), std::string(), ToVec3(owner->Location), tmp) == 0)
+                if (c.category >= 0 && game::IsA(owner, Classes::ATdMovementVolume::StaticClass()))
+                {
+                    // A piece: its bar or cable, Start to End (runtime/pieces fills them), as a thin capsule
+                    const auto* v = static_cast<const Classes::ATdMovementVolume*>(owner);
+                    const rmath::Vec3 a = ToVec3(v->Start), b = ToVec3(v->End), d = b - a;
+                    const float len = rmath::Length(d);
+                    if (!(len > 1.f) || !FiniteVec(a) || !FiniteVec(b)) continue;
+                    const rmath::Vec3 z = d * (1.f / len);
+                    const rmath::Vec3 x = rmath::Normalize(rmath::Cross(std::fabs(z.z) < 0.9f ? rmath::Vec3{0.f, 0.f, 1.f} : rmath::Vec3{1.f, 0.f, 0.f}, z));
+                    const rmath::Vec3 y = rmath::Cross(z, x), mid = a + d * 0.5f;
+                    Shape s;
+                    s.type = ShapeType::Capsule;
+                    s.world = {{{x.x, x.y, x.z, 0.f}, {y.x, y.y, y.z, 0.f}, {z.x, z.y, z.z, 0.f}, {mid.x, mid.y, mid.z, 1.f}}};
+                    s.a = 10.f;
+                    s.b = len * 0.5f;
+                    s.center = mid;
+                    s.radius = len * 0.5f + s.a;
+                    tmp.push_back(std::move(s));
+                }
+                else if (Extract(c.component, Kind::Cylinder, static_cast<int>(category), std::string(), ToVec3(owner->Location), tmp) == 0)
                     continue;
                 if (rmath::Length(tmp[0].center - cam.pos) - tmp[0].radius > cfg.maxDistance) continue;
                 if (owner == self)
@@ -1400,12 +1437,14 @@ namespace debugworld
     {
         std::vector<std::string> out;
         const auto& objects = Classes::UObject::GetGlobalObjects();
-        for (const LiveCylinder& c : g_cylinders) {
-            if (out.size() >= max) break;
-            if (c.index >= objects.Num() || objects.GetByIndex(c.index) != c.component) continue;   // Gone since the walk
-            auto* pc = static_cast<Classes::UPrimitiveComponent*>(c.component);
-            if (pc->Owner && !pc->Owner->bDeleteMe) out.push_back(pc->Owner->GetName());
-        }
+        for (const bool mods : {true, false})       // Mods' triggers and pieces first, then pawns
+            for (const LiveCylinder& c : g_cylinders) {
+                if (out.size() >= max) break;
+                if ((c.category >= 0) != mods) continue;
+                if (c.index >= objects.Num() || objects.GetByIndex(c.index) != c.component) continue;   // Gone since the walk
+                auto* pc = static_cast<Classes::UPrimitiveComponent*>(c.component);
+                if (pc->Owner && !pc->Owner->bDeleteMe) out.push_back(pc->Owner->GetName());
+            }
         return out;
     }
 

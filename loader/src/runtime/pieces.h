@@ -14,7 +14,8 @@
 // the class defaults' bits are off for the spawn, as for triggers), and the runtime does the volume's part: each tick
 // it gives the player's pawn the piece as ActiveMovementVolume when the pawn comes within `reach` of the bar or cable,
 // and takes it back when the pawn goes away (unless a move took it already), as PawnEnteredVolume / PawnLeavingVolume
-// do. That check is a point-to-segment distance per piece per tick.
+// do. That check is a point-to-segment distance per piece per tick. A piece's Start and End are its bar's or cable's
+// ends (the swing never reads them), which is what the Collision View draws.
 //
 // Springboards need nothing: TdMove_SpringBoard is geometry (a step 64 units high, then a ledge 80 to 148 units high
 // 112 units further), so a mod places two meshes. Ladders, balance beams and ledge walks are refused for now (their

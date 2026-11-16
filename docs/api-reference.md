@@ -45,6 +45,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Physics and world queries](#physics-and-world-queries) (10)
 - [Triggers](#triggers) (2)
 - [Pieces](#pieces) (1)
+- [Movers](#movers) (3)
 - [Types](#types)
 
 ## Basics
@@ -1397,6 +1398,32 @@ A swing pole or zipline: the game's own volume class (without a brush), its spli
 MirageObject*(MIRAGE_CALL* piece_create)(MirageMod* mod, const MiragePieceDesc* desc);
 ```
 
+## Movers
+
+A moving platform, lift or door: the game's spawnable static-mesh actor moved like an InterpActor (an encroacher: it pushes what it moves into, and carries a pawn standing on it), by the runtime each tick at a constant speed toward where it was sent. Removed on revert and unload. NULL when it can't (the log says why).
+
+### `mover_create`
+
+```c
+MirageObject*(MIRAGE_CALL* mover_create)(MirageMod* mod, const MirageMoverDesc* desc);
+```
+
+### `mover_move`
+
+```c
+int32_t(MIRAGE_CALL* mover_move)(MirageObject* mover, const float* location, float seconds);
+```
+
+Sent toward `location`, arriving after `seconds` (0: at once; world time). 1, or 0 when it isn't a mover.
+
+### `mover_moving`
+
+```c
+int32_t(MIRAGE_CALL* mover_moving)(MirageObject* mover);
+```
+
+1 moving, 0 still, -1 not a mover
+
 ## Types
 
 ### `MirageLogLevel`
@@ -1615,6 +1642,20 @@ typedef struct MiragePieceDesc {
     float landing_strip;        /* Zipline: no getting on this near its end (0: the game's 500) */
     uint32_t flags;             /* MIRAGE_PIECE_THIN_GRIP, MIRAGE_PIECE_SHIMMY */
 } MiragePieceDesc;
+```
+
+### `MirageMoverDesc`
+
+mover_create (step 7): a moving platform, lift or door: a static mesh that blocks, that pawns stand on and ride *
+
+```c
+typedef struct MirageMoverDesc {
+    uint32_t size;              /* sizeof(MirageMoverDesc) */
+    const char* mesh;           /* A static mesh's path ("Package.Group.Name"), as physics_spawn takes it */
+    float location[3];
+    int32_t rotation[3];        /* Pitch, yaw, roll (65536 = a full turn) */
+    float scale[3];             /* The mesh's scale on each axis (0, 0, 0: 1) */
+} MirageMoverDesc;
 ```
 
 ### `MirageActorQuery`

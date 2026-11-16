@@ -296,6 +296,15 @@ typedef struct MiragePieceDesc {
     uint32_t flags;             /* MIRAGE_PIECE_THIN_GRIP, MIRAGE_PIECE_SHIMMY */
 } MiragePieceDesc;
 
+/* mover_create (step 7): a moving platform, lift or door: a static mesh that blocks, that pawns stand on and ride */
+typedef struct MirageMoverDesc {
+    uint32_t size;              /* sizeof(MirageMoverDesc) */
+    const char* mesh;           /* A static mesh's path ("Package.Group.Name"), as physics_spawn takes it */
+    float location[3];
+    int32_t rotation[3];        /* Pitch, yaw, roll (65536 = a full turn) */
+    float scale[3];             /* The mesh's scale on each axis (0, 0, 0: 1) */
+} MirageMoverDesc;
+
 /* actors_query: which actors (every field optional; zero = any). Actors of the levels in play (the persistent level and
  * the visible streaming levels), from the runtime's per-tick actor lists: no walk of the whole object list. */
 typedef struct MirageActorQuery {
@@ -1071,6 +1080,16 @@ typedef struct MirageApi {
      * from the two ends, given to the player as the volume the game's move uses when they come within reach. Removed
      * on revert and unload. NULL when it can't (the log says why). Level layers place them too ([[piece]]). */
     MirageObject*(MIRAGE_CALL* piece_create)(MirageMod* mod, const MiragePieceDesc* desc);
+
+    /* ---- Movers (step 7). A moving platform, lift or door: the game's spawnable static-mesh actor moved like an
+     * InterpActor (an encroacher: it pushes what it moves into, and carries a pawn standing on it), by the runtime each
+     * tick at a constant speed toward where it was sent. Removed on revert and unload. NULL when it can't (the log says
+     * why). */
+    MirageObject*(MIRAGE_CALL* mover_create)(MirageMod* mod, const MirageMoverDesc* desc);
+    /* Sent toward `location`, arriving after `seconds` (0: at once; world time). 1, or 0 when it isn't a mover. */
+    int32_t(MIRAGE_CALL* mover_move)(MirageObject* mover, const float* location, float seconds);
+    /* 1 moving, 0 still, -1 not a mover */
+    int32_t(MIRAGE_CALL* mover_moving)(MirageObject* mover);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

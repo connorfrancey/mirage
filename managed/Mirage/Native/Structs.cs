@@ -70,6 +70,17 @@ namespace Mirage.Native
         public uint flags;
     }
 
+    /// <summary>A moving platform (api.h MirageMoverDesc)</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public unsafe struct MirageMoverDesc
+    {
+        public uint size;
+        public byte* mesh;
+        public fixed float location[3];
+        public fixed int rotation[3];
+        public fixed float scale[3];
+    }
+
     /// <summary>A rigid body (api.h MirageBody)</summary>
     [StructLayout(LayoutKind.Sequential)]
     public unsafe struct MirageBody

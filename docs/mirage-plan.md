@@ -2016,7 +2016,7 @@ with a template and docs.
    next). The step goes back to where the level started before it runs: earlier steps reach later checkpoints, and
    the props need room. Rewinds and replays with props are step 24's.
 7. **Triggers, volumes and pieces.** As step 21, from code and from level layers.
-   **Status (2026-11-15): triggers and pieces done; the door or moving platform of Scenario F and the TAS side left.**
+   **Status (2026-11-15): done, Scenario F included (the TAS side is step 24's, with the menu).**
    Triggers (`runtime/triggers`): the engine's own Trigger actor as a cylinder, filtered by class and tag, with enter,
    leave and stay callbacks through the mod guard (`trigger_create`, `trigger_count`; Lua `mirage.trigger`, C#
    `Mod.Trigger`, C++). Mirror's Edge marks Trigger bNoDelete (Spawn refuses it until the class default's bit is off
@@ -2038,10 +2038,22 @@ with a template and docs.
    `[[actor]]` is refused with that pointer. Self-test "Mirage pieces" (tests/mods/pieces-layer, a layer written while
    the game runs): a swing pole and a zipline beside where the Prologue starts, a ladder refused with its reason; a jump
    at the pole starts the game's MOVE_Swing, a jump at the cable MOVE_IntoZipLine then MOVE_ZipLine, which carries the
-   player 1,254 units down the line in 2 s; the layer removed, the pieces go and the player holds no volume. Left: a
-   trigger wired to a door or moving platform (the test's trigger pushes a physics prop), the Collision View drawing
-   triggers and pieces, the Level Editor's piece placement (its palette offers the volume classes, which a layer
-   refuses), and recording and replaying the pieces under the TAS (step 24's, with the menu).
+   player 1,254 units down the line in 2 s; the layer removed, the pieces go and the player holds no volume. **Movers**
+   (`runtime/movers`, `mover_create`, `mover_move`, `mover_moving`; Lua `mirage.mover` / `move_to` / `mover_moving`, C#
+   `Mod.Mover` / `MoveTo`, C++): a moving platform, lift or door is a DynamicSMActor_Spawnable (blocks, pawns stand on
+   it) given PHYS_Interpolating like an InterpActor, so the engine treats it as an encroacher; the runtime moves it
+   each tick through Actor.Move toward where the mod sent it, at a constant speed in world time, and sets its Velocity
+   for the tick. **Scenario F** (self-test "Mirage triggers", tests/mods/triggers-lua): the mod's platform (the prop
+   mesh scaled 4 x 4 x 0.5) with a trigger over it; the player stands on it (its Base), the trigger fires once, the
+   mod sends it up 300 units in 1.5 s: it rises 300 and carries the player 287, still standing on it; the revert takes
+   it away. **The Collision View** remembered every volume it found in the level's cache, a mod's too, which then
+   stayed drawn after the mod went: actors spawned at runtime (NetIndex -1; a level's own get one when loaded:
+   measured, placed Triggers 442 and 448) are no longer remembered, and a mod's triggers are drawn live in the trigger
+   color and its pieces as their bar or cable (the volume's Start to End, which `runtime/pieces` fills for swings too)
+   in the movement color. The pieces step checks they are listed live when the Collision View is loaded (it was
+   switched off in the test install: not run yet). Left: piece placement in the Level Editor (in the menu now; the
+   layer API keeps `[[piece]]` entries when it saves, and refuses the volume classes its palette offers as actors), and
+   recording and replaying the pieces and movers under the TAS (step 24's, with the menu).
 8. **Input actions and custom moves.** As step 22. The experiment between a new `TdMove` subclass, a reused move
    slot and a "virtual move" comes first and decides the API. The replay part of step 24 stays with the menu. Mirage
    keeps `STATE_RESTORED` and adds what the menu's TAS needs to rewind a mod's move.

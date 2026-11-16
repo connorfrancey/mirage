@@ -652,6 +652,27 @@ namespace mirage
 		d.flags = flags;
 		return Api().piece_create(Mod(), &d);
 	}
+	// ---- Movers (step 7) -----------------------------------------------------------------------------------------------
+	// A moving platform, lift or door (api.h mover_create); sent with MoveTo
+	inline MirageObject* Mover(const char* mesh, const float (&location)[3], const float (&scale)[3] = {1.f, 1.f, 1.f}, int32_t yaw = 0)
+	{
+		if (!MIRAGE_API_HAS(&Api(), mover_create)) return nullptr;
+		MirageMoverDesc d{};
+		d.size = sizeof d;
+		d.mesh = mesh;
+		for (int i = 0; i < 3; ++i) {
+			d.location[i] = location[i];
+			d.scale[i] = scale[i];
+		}
+		d.rotation[1] = yaw;
+		return Api().mover_create(Mod(), &d);
+	}
+	inline bool MoveTo(MirageObject* mover, const float (&location)[3], float seconds)
+	{
+		return MIRAGE_API_HAS(&Api(), mover_move) && Api().mover_move(mover, location, seconds) == 1;
+	}
+	inline bool MoverMoving(MirageObject* mover) { return MIRAGE_API_HAS(&Api(), mover_moving) && Api().mover_moving(mover) == 1; }
+
 	// A zipline from `start` (the high end) to `end`
 	inline MirageObject* Zipline(const float (&start)[3], const float (&end)[3], float landingStrip = 0.f)
 	{

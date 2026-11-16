@@ -227,6 +227,9 @@ namespace mirage::mods
 		static int TriggerFn(lua_State* L);
 		static int TriggerCountFn(lua_State* L);
 		static int PieceFn(lua_State* L);
+		static int MoverFn(lua_State* L);
+		static int MoveToFn(lua_State* L);
+		static int MoverMovingFn(lua_State* L);
 		static void MIRAGE_CALL OnTrigger(void* user, MirageObject* trigger, MirageObject* other, int32_t kind);
 		static int32_t MIRAGE_CALL OnTest(void* user, char* message, uint32_t capacity);
 		static int Actors(lua_State* L);
@@ -1781,6 +1784,63 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.mover{mesh = "Package.Name", location = {x, y, z}, rotation = {pitch, yaw, roll}, scale = {x, y, z} or 2}:
+	// a moving platform (or door, or lift), or nil (the log says why). Removed on revert and unload.
+	int LuaMod::MoverFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, mover_create)) return luaL_error(L, "mirage.mover: this runtime has no movers");
+		luaL_checktype(L, 1, LUA_TTABLE);
+		MirageMoverDesc d{};
+		d.size = sizeof d;
+		lua_getfield(L, 1, "mesh");
+		const std::string mesh = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
+		lua_pop(L, 1);
+		d.mesh = mesh.c_str();
+		lua_getfield(L, 1, "location");
+		if (!ReadVec(L, -1, d.location)) return luaL_error(L, "mirage.mover: location = {x, y, z} is needed");
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "rotation");
+		if (lua_istable(L, -1)) {
+			static const char* keys[] = {"pitch", "yaw", "roll"};
+			for (int i = 0; i < 3; ++i) {
+				lua_getfield(L, -1, keys[i]);
+				d.rotation[i] = static_cast<int32_t>(lua_tointeger(L, -1));
+				lua_pop(L, 1);
+			}
+		}
+		lua_pop(L, 1);
+		lua_getfield(L, 1, "scale");
+		if (lua_isnumber(L, -1)) d.scale[0] = d.scale[1] = d.scale[2] = static_cast<float>(lua_tonumber(L, -1));
+		else if (lua_istable(L, -1)) ReadVec(L, -1, d.scale);
+		lua_pop(L, 1);
+		MirageObject* m = self.api_->mover_create(self.mod_, &d);
+		if (m) PushObject(L, m);
+		else lua_pushnil(L);
+		return 1;
+	}
+
+	// mirage.move_to(mover, {x, y, z}, seconds): sent there, arriving after `seconds`; true, or false if it isn't a mover
+	int LuaMod::MoveToFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, mover_move)) return luaL_error(L, "mirage.move_to: this runtime has no movers");
+		MirageObject* m = CheckObject(L, 1);
+		float at[3];
+		CheckVec(L, 2, at);
+		lua_pushboolean(L, self.api_->mover_move(m, at, static_cast<float>(luaL_optnumber(L, 3, 0.0))) == 1);
+		return 1;
+	}
+
+	// mirage.mover_moving(mover): true while it is on its way
+	int LuaMod::MoverMovingFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, mover_moving)) return luaL_error(L, "mirage.mover_moving: this runtime has no movers");
+		lua_pushboolean(L, self.api_->mover_moving(CheckObject(L, 1)) == 1);
+		return 1;
+	}
+
 	int LuaMod::Changes(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -2539,7 +2599,8 @@ namespace mirage::mods
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
-			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn}, {nullptr, nullptr}};
+			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn},
+			{"mover", MoverFn}, {"move_to", MoveToFn}, {"mover_moving", MoverMovingFn}, {nullptr, nullptr}};
 		set(fns);
 		lua_pushstring(L, api_->mod_id(mod_));
 		lua_setfield(L, -2, "id");

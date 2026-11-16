@@ -180,6 +180,10 @@ MIRAGE_AT(physics_joint, 668);
 MIRAGE_AT(trigger_create, 672);
 MIRAGE_AT(trigger_count, 676);
 MIRAGE_AT(piece_create, 680);
+MIRAGE_AT(mover_create, 684);
+MIRAGE_AT(mover_move, 688);
+MIRAGE_AT(mover_moving, 692);
+static_assert(sizeof(MirageMoverDesc) == 44 && offsetof(MirageMoverDesc, scale) == 32);
 static_assert(sizeof(MirageTriggerDesc) == 40 && offsetof(MirageTriggerDesc, stay) == 36);
 static_assert(sizeof(MiragePieceDesc) == 52 && offsetof(MiragePieceDesc, yaw) == 32 && offsetof(MiragePieceDesc, flags) == 48);
 static_assert(sizeof(MirageBody) == 68 && offsetof(MirageBody, mass_scale) == 52);  // mass_scale: read only

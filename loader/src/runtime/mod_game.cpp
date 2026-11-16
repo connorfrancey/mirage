@@ -24,6 +24,7 @@
 #include "runtime/physics.h"
 #include "runtime/triggers.h"
 #include "runtime/pieces.h"
+#include "runtime/movers.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/reflect.h"
@@ -255,6 +256,7 @@ namespace mirage::mods
 			kismet_trace::Forget(mod.id);
 			triggers::RemoveAll(mod.id);	// Its callbacks stop before its code goes (the change log removes them too)
 			pieces::RemoveAll(mod.id);
+			movers::RemoveAll(mod.id);
 		}
 		// Its transactions put back (step 15), on the game thread where the objects are
 		if (game::IsGameThread()) changes::RevertAndForget(mod.id);
@@ -1330,6 +1332,52 @@ namespace mirage::mods
 				return x != nullptr;
 			});
 			return h;
+		}
+
+		// ---- Movers (step 7) ----------------------------------------------------------------------------------------
+		MirageObject* MIRAGE_CALL MoverCreate(MirageMod* mod, const MirageMoverDesc* desc)
+		{
+			auto fail = [&](const std::string& why) -> MirageObject* {
+				spdlog::error("[mod {}] mover_create: {}", mod ? mod->id : "?", why);
+				return nullptr;
+			};
+			if (!mod) return fail("no mod");
+			if (!desc || desc->size < sizeof(MirageMoverDesc)) return fail("no description, or its size isn't set");
+			if (!game::IsGameThread()) return fail("only on the game thread");
+			auto* m = desc->mesh && *desc->mesh ? classes::LoadByName(desc->mesh, Classes::UStaticMesh::StaticClass()) : nullptr;
+			if (!m || !m->IsA(Classes::UStaticMesh::StaticClass())) return fail(std::string("no static mesh ") + (desc->mesh ? desc->mesh : ""));
+			movers::Desc d;
+			d.mesh = static_cast<Classes::UStaticMesh*>(m);
+			const bool unscaled = desc->scale[0] == 0.f && desc->scale[1] == 0.f && desc->scale[2] == 0.f;
+			for (int i = 0; i < 3; ++i) {
+				d.location[i] = desc->location[i];
+				d.rotation[i] = desc->rotation[i];
+				d.scale[i] = unscaled ? 1.f : desc->scale[i];
+			}
+			std::string why;
+			Classes::AActor* a = movers::Create(mod->id, d, &why);
+			if (!a) return fail(why);
+			MirageObject* h = Handle(a);
+			RecordEdit(mod, "mover " + a->GetName(), [ha = HandleOf(h)] {
+				Classes::AActor* x = ActorOf(HandleObject(&ha));
+				if (x) movers::Remove(x);
+				return x != nullptr;
+			});
+			return h;
+		}
+
+		int32_t MIRAGE_CALL MoverMove(MirageObject* mover, const float* location, float seconds)
+		{
+			if (!location || !game::IsGameThread()) return 0;
+			Classes::AActor* a = ActorOf(mover);
+			return a && movers::MoveTo(a, location, seconds) ? 1 : 0;
+		}
+
+		int32_t MIRAGE_CALL MoverMoving(MirageObject* mover)
+		{
+			if (!game::IsGameThread()) return -1;
+			Classes::AActor* a = ActorOf(mover);
+			return a ? movers::Moving(a) : -1;
 		}
 
 		int32_t MIRAGE_CALL MovementGet(MirageMovement* out)

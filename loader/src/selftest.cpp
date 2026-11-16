@@ -2601,6 +2601,8 @@ void TestPhysics()
 // stay) and a KActor-only trigger at one spot in front of the player. The player is put inside: enter (the player), stay
 // every tick, the mod's logic pushing its prop; the KActor trigger stays quiet; out again: leave. A box shape is refused.
 // The module off: the revert takes the triggers away.
+double GameSeconds();   // Below
+
 std::string TriggersShared(const char* key)
 {
     char v[256]{};
@@ -2687,14 +2689,73 @@ void TestTriggers()
     if (!TriggersShared("who").starts_with("TdPlayerPawn")) p.Problem("the trigger's other actor wasn't the player: " + TriggersShared("who"));
     if (launched != 1) p.Problem(fmt::format("the mod's logic ran {} times on entering, not once", launched));
 
+    // Scenario F's interactive object: the player put on the mod's platform; its trigger sends it up 300 units in 1.5 s,
+    // and the player rides it up, standing on it (its Base)
+    const std::string platformName = TriggersShared("platform");
+    Classes::AActor* platform = nullptr;
+    OnGameThread([&] {
+        for (auto* a : game::ActorsOf(Classes::ADynamicSMActor_Spawnable::StaticClass()))
+            if (a && a->GetName() == platformName) platform = static_cast<Classes::AActor*>(a);
+    });
+    if (!platform) p.Problem("the mod's platform isn't in play ('" + platformName + "'; the log says why)");
+    else {
+        Classes::FVector platStart{}, pawnStart{};
+        OnGameThread([&] {
+            platStart = platform->Location;
+            if (auto* pawn = game::Pawn()) {
+                pawn->SetLocation(Classes::FVector{platStart.X, platStart.Y, platStart.Z + 150.f});
+                pawn->Velocity = Classes::FVector{};
+            }
+        });
+        WaitGrounded();
+        bool based = false;
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) {
+                pawnStart = pawn->Location;
+                based = pawn->Base == platform;
+            }
+        });
+        WaitFor(5.0, [&] { return num("rides") >= 1; });
+        // Until it has stopped (1.5 s of game time, and a little more)
+        const double sent = GameSeconds();
+        while (!g_aborted && GameSeconds() - sent < 2.0) WaitTicks(1);
+        Classes::FVector platEnd{}, pawnEnd{};
+        bool basedEnd = false;
+        OnGameThread([&] {
+            platEnd = platform->Location;
+            if (auto* pawn = game::Pawn()) {
+                pawnEnd = pawn->Location;
+                basedEnd = pawn->Base == platform;
+            }
+        });
+        const float rose = platEnd.Z - platStart.Z, carried = pawnEnd.Z - pawnStart.Z;
+        s.notes.push_back(fmt::format("platform {}: the player stood on it (based {}), its trigger fired {} time(s) (sent {}); it rose "
+                                      "{:.0f}, the player {:.0f} (still on it: {})", platformName, based, num("rides"),
+                                      TriggersShared("sent"), rose, carried, basedEnd));
+        if (num("rides") != 1) p.Problem(fmt::format("the platform's trigger fired {} times, not once", num("rides")));
+        if (rose < 290.f || rose > 310.f) p.Problem(fmt::format("the platform rose {:.0f}, not 300", rose));
+        if (carried < 250.f) p.Problem(fmt::format("the player rose {:.0f} with the platform: it didn't carry them", carried));
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) pawn->SetLocation(home);
+        });
+        WaitGrounded();
+    }
+
     // Off: taken away
     OnRenderThread([m] { m->SetEnabled(false); });
     WaitFor(10.0, [] { return !TriggersShared("reverted").empty(); });
     WaitTicks(3);
     int left = -1;
-    OnGameThread([&] { left = static_cast<int>(game::ActorsOf(Classes::ATrigger::StaticClass()).size()); });
-    s.notes.push_back(fmt::format("module off: reverted {}, Trigger actors in play {} (before the mod: {})", TriggersShared("reverted"), left, before));
+    bool platformLeft = false;
+    OnGameThread([&] {
+        left = static_cast<int>(game::ActorsOf(Classes::ATrigger::StaticClass()).size());
+        for (auto* a : game::ActorsOf(Classes::ADynamicSMActor_Spawnable::StaticClass()))
+            if (a && !platformName.empty() && a->GetName() == platformName && !static_cast<Classes::AActor*>(a)->bDeleteMe) platformLeft = true;
+    });
+    s.notes.push_back(fmt::format("module off: reverted {}, Trigger actors in play {} (before the mod: {}); the platform still in play: {}",
+                                  TriggersShared("reverted"), left, before, platformLeft));
     if (left != before) p.Problem("the mod's triggers are still in play after the revert");
+    if (platformLeft) p.Problem("the mod's platform is still in play after the revert");
     p.Check(1, true);
     End(s);
 }
@@ -2704,8 +2765,6 @@ void TestTriggers()
 // into a jump at each (as a macro's jump would leave it: in the air, facing the piece, moving toward it) and the game's
 // own move has to start: MOVE_Swing for the pole, MOVE_IntoZipLine then MOVE_ZipLine for the cable, the player carried
 // down the cable. The file removed, the pieces go and the player holds no volume of theirs.
-double GameSeconds();   // Below
-
 struct PieceRun
 {
     std::vector<int> states;        // Each new MovementState seen, in order
@@ -2829,7 +2888,47 @@ void TestPieces()
     s.notes.push_back(fmt::format("layer: {} of {} pieces placed ({} volumes in play, {} before); refused: {}", made, placed.size(),
                                   volumes(), before, refused));
     if (made != 2) p.Problem(fmt::format("{} pieces placed, not 2 (the swing and the zipline)", made));
+    // How a level's own actor and one spawned at runtime differ (the Collision View remembers only the level's):
+    // NetIndex and Linker of a placed Trigger and of the pieces
+    OnGameThread([&] {
+        std::string t = "placed vs spawned:";
+        int shown = 0;
+        for (auto* a : game::ActorsOf(Classes::ATrigger::StaticClass()))
+            if (a && shown++ < 2) t += fmt::format(" {} NetIndex {} Linker {}", a->GetName(), a->NetIndex, static_cast<const void*>(a->Linker));
+        for (const auto& e : placed)
+            if (e.actor) t += fmt::format("; {} NetIndex {} Linker {}", e.actor->GetName(), e.actor->NetIndex, static_cast<const void*>(e.actor->Linker));
+        s.notes.push_back(t);
+    });
     if (refused.find("Ladder") == std::string::npos) p.Problem("the ladder wasn't refused with its reason");
+
+    // The Collision View draws a mod's pieces live (never remembered in the level's cache): both listed in its live actors
+    if (!ModLoaded("mirage-collision")) s.notes.push_back("Collision View: left out (mirage-collision isn't loaded)");
+    else if (Module* view = modules::Find("Collision View"); view && made == 2) {
+        auto* inspect = dynamic_cast<ctl::Checkbox*>(view->FindSetting("Inspect"));
+        const bool enabledWas = view->Enabled(), inspectWas = inspect && inspect->Get();
+        OnRenderThread([&] {
+            if (inspect) inspect->Set(true);
+            if (!view->Enabled()) view->SetEnabled(true);
+        });
+        std::string live;
+        int listed = 0;
+        WaitFor(5.0, [&] {
+            live.clear();
+            listed = 0;
+            for (const auto& n : CollisionShared("inspect").value("live", nlohmann::json::array())) {
+                const std::string name = n.get<std::string>();
+                live += " " + name;
+                for (const auto& e : placed) listed += e.actor && e.actor->GetName() == name ? 1 : 0;
+            }
+            return listed == 2;
+        });
+        OnRenderThread([&] {
+            if (inspect) inspect->Set(inspectWas);
+            if (view->Enabled() != enabledWas) view->SetEnabled(enabledWas);
+        });
+        s.notes.push_back(fmt::format("Collision View: {} of the 2 pieces drawn live (live:{})", listed, live));
+        if (listed != 2) p.Problem("the Collision View doesn't draw the pieces live");
+    }
 
     const auto states = [](const PieceRun& r) {
         std::string t;

@@ -157,6 +157,9 @@ namespace mirage::pieces
 			const Classes::FVector along{std::cos(yaw) * half, std::sin(yaw) * half, 0.f};
 			p->a = {at.X - along.X, at.Y - along.Y, at.Z};
 			p->b = {at.X + along.X, at.Y + along.Y, at.Z};
+			// The swing never reads Start and End: they hold the bar's ends, for whoever draws it (the Collision View)
+			v->Start = p->a;
+			v->End = p->b;
 			p->actor = a;
 		} else {
 			const Classes::FVector s = V(desc.location), e = V(desc.end), d = Sub(e, s);

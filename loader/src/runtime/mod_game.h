@@ -57,6 +57,9 @@ namespace mirage::mods::game_api
 	MirageObject* MIRAGE_CALL TriggerCreate(MirageMod* mod, const MirageTriggerDesc* desc, MirageTriggerFn fn, void* user);
 	int32_t MIRAGE_CALL TriggerCount(MirageObject* trigger);
 	MirageObject* MIRAGE_CALL PieceCreate(MirageMod* mod, const MiragePieceDesc* desc);
+	MirageObject* MIRAGE_CALL MoverCreate(MirageMod* mod, const MirageMoverDesc* desc);
+	int32_t MIRAGE_CALL MoverMove(MirageObject* mover, const float* location, float seconds);
+	int32_t MIRAGE_CALL MoverMoving(MirageObject* mover);
 	// The change log's writer (runtime/changes): wired once at startup
 	void WireChanges();
 	MirageHook* MIRAGE_CALL InjectFunction(MirageMod* mod, const char* function, const char* point, int32_t priority,
