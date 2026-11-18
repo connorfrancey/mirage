@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ABI and an in-game mod manager, a generated engine SDK, a CLI, and mods as folders with a manifest. It grew out of
 Mirror's Edge Menu (memenu); the menu's features (TAS, trainer, editors, console) stayed there. The README is the
 overview; `docs/mirage-plan.md` has the plan's steps, milestones and their status.
+`docs/AI-GUIDE.md` (concepts, rules, recipes) and `docs/FILE-MAP.md` (`python tools/file_map.py`) help assistants.
 
 ## Commands
 
