@@ -16,7 +16,7 @@ set(SPDLOG_VERSION v1.17.0)
 set(TOML_VERSION v4.4.0)
 
 # UnrealLib - https://github.com/connorfrancey/UnrealLib
-set(UNREALLIB_GIT_TAG 09e6a8904c5cde0c3216256a379277a403a921b3)   # branch uc-compiler: the UnrealScript compiler (step 12), on top of bytecode-encoder
+set(UNREALLIB_GIT_TAG ec007c6911bc4ed8734c1a8bb726c84bb5ab4a92)   # branch uc-compiler: the UnrealScript compiler (step 12) and the StaticMesh writer, on top of bytecode-encoder
 set(LUA_VERSION v5.4.8)   # Mod scripting (loader/src/runtime/lua_vm.cpp): built from source, as C++
 
 # Tracy profiler client - https://github.com/wolfpld/tracy
