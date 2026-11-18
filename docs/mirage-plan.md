@@ -1334,6 +1334,18 @@ sequence action opens a door); the HUD shows it; a checkpoint restart keeps it c
 checkpoint restarts keep it consistent, and the self-test plays it through; `MirageEditorRoom` gains a checkpoint from
 a mod and restarts from it.
 
+**Status (2026-11-18): checkpoints done; objectives and the HUD not started.** How a restart finds its spot:
+TdSPStoryGame.FindPlayerStart asks the checkpoint manager for the *active* checkpoint (a level's Kismet makes one active
+as the player reaches it, SeqAct_TdCheckpoint -> SetNewCheckpoint) and otherwise picks a PlayerStart from the world's
+navigation list, which only the editor's Build Paths fills: a map built without paths (MirageEditorRoom) has none there,
+so its restart found no start spot and left no player. A checkpoint from a mod is a `TdCheckpoint` subclass placed by a
+layer (spawnable: bStatic and bNoDelete off; the engine adds a spawned NavigationPoint to the navigation list itself)
+that makes itself the active checkpoint when it spawns, unless the map already has one (tests/mods/map-test:
+classes/MirageCheckpoint.uc, levels/MirageEditorRoom.toml). Self-test "Mirage editor map": a checkpoint restart puts the
+new player on the mod's checkpoint. Also: a mod's `packages/` folder holds packages its maps use (registered with the
+engine by name, not listed as maps), for maps with their own content package (map-test's `editortest_geo`). Next: a
+checkpoint reached by touch (the layer's checkpoint as SetNewCheckpoint does it), then objectives.
+
 ### 27. Script environment: editor, REPL, debugger and profiler (P1)
 
 **Objective.** Mod authors write, run, debug and profile code inside the running game.

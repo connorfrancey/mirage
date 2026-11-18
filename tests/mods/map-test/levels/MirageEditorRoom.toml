@@ -1,0 +1,7 @@
+# Self-test (step 26): a checkpoint for the editor's room, which has none, away from its player start: a checkpoint
+# restart puts the player here
+[[actor]]
+name = "RoomCheckpoint"
+class = "classes/MirageCheckpoint.uc"
+location = [512.0, -512.0, 0.0]
+rotation = [0, 16384, 0]

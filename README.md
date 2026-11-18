@@ -14,7 +14,8 @@ manager, the engine's types as a generated SDK, a CLI for building and testing, 
   injected into the middle of the game's own bytecode; bytecode patches; natives of your own.
 - **New classes:** UnrealScript (`.uc`) compiled in the game, or classes described from Lua and C#.
 - **Content:** replacement textures (`content/textures/*.png`), default-property overrides, actors placed into levels
-  (`levels/<map>.toml`), streamed sublevels, new maps in the level select (`maps/*.me1`).
+  (`levels/<map>.toml`), streamed sublevels, new maps in the level select (`maps/*.me1`, the packages they use in
+  `packages/`), checkpoints placed from a mod (a `TdCheckpoint` subclass in a layer).
 - **World access:** actors queried by class, tag and distance; handles that never point at the wrong object;
   events for actors coming and going, streaming and restarts.
 - **Reversible changes:** writes made in a transaction are put back when the mod asks, unloads, reloads or crashes.

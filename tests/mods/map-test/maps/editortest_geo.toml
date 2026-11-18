@@ -1,0 +1,3 @@
+title = "Editor Test"
+description = "A test map built in the game's 2008 editor (editortest_geo, its content in packages/editortest_geo_content.upk)"
+game = "TdGame.TdSPStoryGame"

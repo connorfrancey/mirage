@@ -5172,8 +5172,8 @@ bool HoldKey(const std::string& key, double seconds, const std::function<void()>
 // A map made with the game's own 2008 editor (step 13's milestone): tests/mods/map-test's maps/MirageEditorRoom.me1
 // (a room, a light and a player start, built in UnrealEd: tests/maps-src/MirageEditorRoom) is in the level select and
 // loads with the player standing in the room; walking forward (the forward key held for a second of game time) takes
-// the player across its floor, not off it. The room has no checkpoints: the game's Restart Checkpoint needs one (without
-// it, it leaves no player), so restarting it is loading its start again.
+// the player across its floor, not off it. The room has no checkpoints of its own (the game's Restart Checkpoint needs
+// one: without it, it leaves no player); the map-test mod's layer places one, and a restart brings the player there.
 void TestEditorMap()
 {
     Step& s = Begin("Mirage editor map");
@@ -5239,6 +5239,23 @@ void TestEditorMap()
         s.notes.push_back(fmt::format("walked {:.0f} units across the room", walked));
         if (walked < 100.f) p.Problem(fmt::format("walking forward moved the player only {:.0f} units", walked));
         else if (!inRoom(end.at) || !end.walking) p.Problem("the walk didn't end on the room's floor: " + end.text);
+
+        // The map-test mod's layer gives the room a checkpoint (levels/MirageEditorRoom.toml, at [512, -512]): the
+        // game's Restart Checkpoint brings a new player there (once spawned: its class compiles on a worker first)
+        if (!WaitFor(30.0, [] {
+                bool spawned = false;
+                OnGameThread([&] { spawned = mirage::layers::Find("map-test", "RoomCheckpoint") != nullptr; });
+                return spawned;
+            }))
+            p.Problem("the map-test mod's checkpoint didn't spawn in the room");
+        else if (!RestartAndWait()) p.Problem("no new player came after a checkpoint restart (the mod's checkpoint)");
+        else {
+            Where back;
+            WaitFor(10.0, [&] { back = where(); return back.walking; });
+            const float off = std::hypot(back.at.X - 512.f, back.at.Y + 512.f);
+            s.notes.push_back(fmt::format("after a checkpoint restart: {}, {:.0f} units from the mod's checkpoint", back.text, off));
+            if (off > 64.f) p.Problem("the restart didn't put the player at the mod's checkpoint: " + back.text);
+        }
     }
 
     // Back to the test level

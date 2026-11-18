@@ -222,6 +222,14 @@ namespace mirage::maps
 			for (const mods::Info& mod : list) {
 				if (!mod.loaded) continue;
 				std::error_code ec;
+				// The packages a mod's maps use (a map's own content package): known to the engine by name, not maps
+				for (const auto& e : fs::directory_iterator(mod.dir / "packages", ec)) {
+					const std::string ext = Lower(e.path().extension().string());
+					std::string problem;
+					if (e.is_regular_file() && (ext == ".upk" || ext == ".u") && !classes::CachePackage(e.path(), &problem))
+						spdlog::warn("[mod {}] packages/{}: {}", mod.id, e.path().filename().string(), problem);
+				}
+				ec.clear();
 				const fs::path dir = mod.dir / "maps";
 				if (!fs::is_directory(dir, ec)) continue;
 				std::vector<fs::path> files;
