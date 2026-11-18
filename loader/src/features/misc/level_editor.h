@@ -6,6 +6,7 @@
 //
 // The window and the self-test call the same functions below, on the game thread only (layers are game-thread state).
 // Actors() and the rest of the getters copy under a lock, so the window reads them from the render thread.
+#include "render/math.h"
 #include "runtime/layers.h"
 
 #include <string>
@@ -27,7 +28,19 @@ namespace level_editor
 	// The spawned actor of entry `i` (nullptr: not spawned, or changed since the last save). Game thread.
 	Classes::AActor* Live(int i);
 
+	// ---- Selection, picking and the gizmo (the level editor's second feature) ----------------------------------------
+	// The game's camera projected onto a w x h view: x, y in pixels; false behind the camera. Any thread.
+	bool Project(const rmath::Camera& camera, const float world[3], float w, float h, float& x, float& y);
+	// The entry whose spawned actor is nearest the ray from the camera through (x, y) of a w x h view, within 150 units
+	// of it, selected and returned (-1: none, the selection cleared). Game thread.
+	int Pick(float x, float y, float w, float h);
+	// The selected entry's coordinate on world axis `axis` (0 X, 1 Y, 2 Z) set to `value`, snapped to `grid` units when
+	// grid > 0; its spawned actor follows. Game thread.
+	void Drag(int axis, float value, float grid = 0.f);
+
 	// Any thread
+	int Selected();
+	void Select(int i);
 	std::string Mod();
 	std::vector<mirage::layers::EditActor> Actors();
 	bool Dirty();

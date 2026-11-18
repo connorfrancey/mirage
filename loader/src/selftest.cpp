@@ -5876,6 +5876,28 @@ void TestLevelEditor()
     s.notes.push_back(fmt::format("added {} at the view: {}", level_editor::Actors()[0].name, spawned ? "spawned" : "not spawned " + error));
     if (!spawned) p.Problem("the added actor didn't spawn after saving: " + error);
 
+    // Picked where it shows on screen (the game's camera, a 1280x720 view: the game runs minimized here, and the
+    // projection is the same for any size), then dragged 100 units along X by the gizmo's function: the actor follows
+    MirageCamera followed{};
+    followed.size = sizeof followed;
+    mirage::mods::world::CameraGet(&followed);      // Starts the camera being followed (valid from the next tick)
+    WaitTicks(2);
+    const ImVec2 screen{1280.f, 720.f};
+    float sx = 0.f, sy = 0.f;
+    const bool onScreen = level_editor::Project(game::GetCamera(), level_editor::Actors()[0].location, screen.x, screen.y, sx, sy);
+    int picked = -1;
+    float x0 = 0.f, x1 = 0.f;
+    OnGameThread([&] {
+        picked = level_editor::Pick(sx, sy, screen.x, screen.y);
+        if (auto* a = level_editor::Live(0)) x0 = a->Location.X;
+        level_editor::Drag(0, level_editor::Actors()[0].location[0] + 100.f);
+        if (auto* a = level_editor::Live(0)) x1 = a->Location.X;
+    });
+    s.notes.push_back(fmt::format("picked at ({:.0f}, {:.0f}) of {:.0f}x{:.0f}: entry {}; dragged 100 along X: moved {:.1f}", sx, sy,
+                                  screen.x, screen.y, picked, x1 - x0));
+    if (!onScreen || picked != 0) p.Problem("clicking where the actor shows didn't pick it");
+    if (std::abs(x1 - x0 - 100.f) > 1.f) p.Problem("the gizmo's drag didn't move the actor 100 units");
+
     // Moved: the spawned actor follows at once; saved, the file has the new place
     mirage::layers::EditActor moved = level_editor::Actors()[0];
     moved.location[0] += 200.f;

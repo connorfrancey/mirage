@@ -1455,6 +1455,13 @@ stayed there). In order, each with a self-test that drives it like a user:
    200.0 at once and is in the file once saved, deleted and saved it is gone.
 2. **3D gizmo and picking:** translate / rotate / scale handles in the world, click to select what is under the cursor,
    snapping to grid and surfaces.
+   **Done for translation (2026-11-18, step 28):** the Level Editor draws the selected entry's X, Y and Z axes in the
+   world (projected with the game's camera, `level_editor::Project`); dragging one moves the entry along it
+   (`level_editor::Drag`), snapped to the window's Grid when set; a click in the world, off the menu's windows, selects
+   the layer actor nearest the ray through the cursor (`level_editor::Pick`, within 150 units: actors without
+   collision too). Self-test "Mirage level editor": the added actor picked where it shows, then dragged 100 units (it
+   moves 100.0). Not yet: rotate and scale handles, snapping to surfaces, a check of the projection against the
+   rendered frame (the self-test runs minimized).
 3. **Properties:** the selected actor's properties through reflection (`runtime/reflect`), edited live and saved as
    `[actor.properties]`.
 4. **Class browser and pieces:** a searchable list of placeable classes and the mod's `.uc` classes, traversal pieces
