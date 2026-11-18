@@ -39,6 +39,7 @@ namespace mirage::hang
 			std::int64_t hungSince = 0;
 		};
 		Watched g_game{"game thread"}, g_render{"render thread"};
+		std::mutex g_sampleLock;		// Sample and Describe share the buffers below: one reader at a time
 
 		std::mutex g_lock;								// Settings, status
 		Settings g_settings;
@@ -180,6 +181,7 @@ namespace mirage::hang
 				w.thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, w.threadId.load());
 			std::string where = "(not sampled)";
 			std::wstring report;
+			std::unique_lock<std::mutex> sampling(g_sampleLock);
 			if (sample && Sample(w.thread)) {
 				where = Describe();
 				// A report like a crash's, from the sample (the process goes on)
@@ -191,6 +193,7 @@ namespace mirage::hang
 				report = crash::WriteReport(&ep, w.name == g_game.name ? "the game thread stopped responding" : "the render thread stopped responding",
 										   false);		// No minidump: a hang may pass, and tens of MB each time would add up
 			}
+			sampling.unlock();
 			spdlog::error("Hang: the {} hasn't made progress for {:.1f} s; it is at {}{}", w.name, since, where,
 						  report.empty() ? std::string() : ". Report: " + std::filesystem::path(report).string());
 			notify::Push(std::string("The game isn't responding (") + w.name + "). " + failsafe::kName + " quits it.");
@@ -258,6 +261,20 @@ namespace mirage::hang
 	{
 		std::lock_guard<std::mutex> l(g_lock);
 		return g_settings;
+	}
+
+	std::string WhereIsGameThread()
+	{
+		const DWORD id = g_game.threadId.load();
+		if (!id || id == GetCurrentThreadId()) return {};
+		HANDLE thread = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, id);
+		std::string where;
+		{
+			std::lock_guard<std::mutex> l(g_sampleLock);
+			if (Sample(thread)) where = Describe();
+		}
+		if (thread) CloseHandle(thread);
+		return where;
 	}
 
 	Status GetStatus()

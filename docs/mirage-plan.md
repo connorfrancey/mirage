@@ -1513,8 +1513,20 @@ on purpose, and the bot stops sliding and keeps fighting. Found on the way and f
 waits for it to be pushed): a mod class's `auto state` was never entered (the class copied its parent's Auto flag,
 which tells `GotoState('Auto')` the class has none) and state code never ran (`LabelTableOffset` pointed at the
 LabelTable token instead of past it). Self-test "Mirage class states" (tests/mods/layer-test/classes/StateProbe.uc);
-`class_source` builder version 3 rebuilds packages of older builds. Not yet: the ammo drops (`SetMainWeaponAmmoDrop` is private: from C++), a
-team shared by several bots, services over perception and movement, navigation and the TAS.
+`class_source` builder version 3 rebuilds packages of older builds. Navigation (2026-11-18, started): the editor's path builder ships in MirrorsEdge.exe and runs in the game
+(`runtime/navigation`: a TdScout's `Exec` "DEFINEPATHS", vtable +0x44c, 0x00ec1100 -> `DefinePaths` 0x00ec48e0). It is
+editor code: run with GIsGame on (0x02027fd8) it made the world's navigation list a loop and never finished
+(`ULevel::AddToNavList` 0x00e89990 splices a level into the world at its first point in the game, and the builder splices
+every level again); run with GIsGame off and the levels joined again the game's way after (`UWorld::AddLevelNavList`
+0x00b82c80), it defines the Prologue's paths in 0.7 s: 369 navigation points, 633 reach specs (the cooked level had
+1,085). Progress is logged through a tap on GWarn's StatusUpdatef and a sample of the game thread every 3 s. Self-test
+"Mirage path building": built, a garbage collection after it, and a patrol cop set up on the new paths still fights.
+Open: why fewer reach specs than the cooked level (long reach specs, the Scout's path sizes), whether the AI paths over
+them (a chase through the new paths), paths for a mod's added geometry only, and the octree's old reach specs (no crash
+after a collection, not proven clean).
+
+Not yet: the ammo drops (`SetMainWeaponAmmoDrop` is private: from C++), a
+team shared by several bots, services over perception and movement, and the TAS.
 
 **Milestone:** a mod sets up an ambush in an existing level with three enemies using a mod-defined flanking behaviour;
 they navigate a mod-added area, and the TAS replays the encounter verified (AI included in the determinism of step 24).

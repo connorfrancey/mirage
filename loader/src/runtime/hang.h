@@ -42,4 +42,8 @@ namespace mirage::hang
 		std::string last;				// The last hang: which thread, how long, where
 	};
 	Status GetStatus();
+
+	// Where the game thread is now (its instruction, then code addresses on its stack: "MirrorsEdge.exe+0x... < ..."),
+	// "" if it can't be read. For long calls that are allowed to run (SetLoading): what they are doing. Not the game thread.
+	std::string WhereIsGameThread();
 }

@@ -42,6 +42,7 @@
 #include "runtime/kismet_layers.h"
 #include "runtime/mod_profile.h"
 #include "runtime/mod_world.h"
+#include "runtime/navigation.h"
 #include "runtime/detours.h"
 #include "runtime/symbols.h"
 #include "runtime/natives.h"
@@ -6185,6 +6186,80 @@ void TestClassStates()
     End(s);
 }
 
+// Step 28's navigation, its first question: the editor's path builder (AScout::DefinePaths, through a TdScout's Exec)
+// run in the game on the loaded level. It must run, leave reach specs between the navigation points, and leave the game
+// playing: a garbage collection right after (the old reach specs freed: none may still be reachable from the
+// navigation octree) and a patrol cop that then moves on the new paths for a few seconds.
+void TestPathBuilding()
+{
+    Step& s = Begin("Mirage path building");
+    Probe p(s);
+    WaitPlayerReady(10.0);
+    mirage::nav::Stats before, after;
+    std::string error;
+    bool built = false;
+    const double t0 = GameSeconds();
+    OnGameThread([&] {
+        before = mirage::nav::Count();
+        built = mirage::nav::BuildPaths(&error);
+        after = mirage::nav::Count();
+    }, 120.0);
+    s.notes.push_back(fmt::format("{}: {} navigation points, reach specs {} -> {}, {:.1f} s of game time", built ? "built" : "not built: " + error,
+                                  after.points, before.reachSpecs, after.reachSpecs, GameSeconds() - t0));
+    if (!built) p.Problem("the path builder didn't run: " + error);
+    else if (after.points > 1 && after.reachSpecs == 0) p.Problem("no reach specs after building paths");
+    WaitPlayerReady(10.0);
+    bool playing = false;
+    OnGameThread([&] { playing = game::Pawn() != nullptr && !game::IsLoading(); });
+    if (!playing) p.Problem("the player isn't playing after building paths");
+
+    // The old reach specs collected, then an AI that queries the paths
+    std::string gc;
+    OnGameThread([&] { game::ConsoleCommand("obj garbage", &gc); });
+    mirage::layers::EditActor cop;
+    cop.name = "PathCop";
+    cop.cls = "mirage-ai:classes/MirageBot.uc";
+    std::string map;
+    OnGameThread([&] {
+        map = mirage::layers::CurrentMap();
+        if (auto* pawn = game::Pawn()) {
+            const float rad = static_cast<float>(pawn->Rotation.Yaw & 0xFFFF) * 6.2831853f / 65536.f;
+            cop.location[0] = pawn->Location.X + std::cos(rad) * 600.f;
+            cop.location[1] = pawn->Location.Y + std::sin(rad) * 600.f;
+            cop.location[2] = pawn->Location.Z + 40.f;
+        }
+        mirage::layers::Write("profile-lua", {cop}, &error);
+    });
+    Classes::FVector first{}, moved{};
+    bool fighting = false;
+    const auto bot = [&]() -> Classes::ATdBotPawn* {
+        for (auto* a : game::ActorsOf(Classes::ATdBotPawn::StaticClass()))
+            if (!a->bDeleteMe && !static_cast<Classes::ATdBotPawn*>(a)->bInitializing && static_cast<Classes::ATdBotPawn*>(a)->myController)
+                return static_cast<Classes::ATdBotPawn*>(a);
+        return nullptr;
+    };
+    WaitFor(15.0, [&] { bool there = false; OnGameThread([&] { if (auto* b = bot()) { there = true; first = b->Location; } }); return there; });
+    WaitTicks(300);         // Five seconds of the cop thinking and moving on the new paths
+    OnGameThread([&] {
+        if (auto* b = bot()) {
+            moved = b->Location;
+            fighting = b->myController->myEnemy == game::Pawn();
+        }
+    });
+    const float dx = moved.X - first.X, dy = moved.Y - first.Y;
+    s.notes.push_back(fmt::format("after a garbage collection, a cop for 5 s: {}, moved {:.0f} units", fighting ? "fighting" : "not fighting",
+                                  std::sqrt(dx * dx + dy * dy)));
+    OnGameThread([&] { mirage::layers::Write("profile-lua", {}, &error); });
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "profile-lua") {
+            std::error_code ec;
+            std::filesystem::remove(m.dir / "levels" / (map + ".toml"), ec);
+            std::filesystem::remove(m.dir / "levels", ec);
+        }
+    WaitPlayerReady(10.0);
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -7462,6 +7537,7 @@ const Named* FeatureList()
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage AI", &TestAI, false},
         {"Mirage class states", &TestClassStates, false},
+        {"Mirage path building", &TestPathBuilding, false},
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
