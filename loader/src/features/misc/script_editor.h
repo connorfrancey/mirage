@@ -4,8 +4,8 @@
 // reload picks them up (Lua mods reload by default), with the mod's load error marked on its line. "Run selection"
 // sends the selected lines (or the current line) to the console's REPL in the mod's state (runtime/mods.h Eval).
 //
-// The window and the self-test call the same functions below (render thread or any thread with the window closed: the
-// editor's state has its own lock).
+// The window and the self-test call the same functions below, on the render thread only: Zep lays text out with ImGui's
+// fonts (the self-test queues its calls there).
 #include <string>
 #include <vector>
 

@@ -338,6 +338,14 @@ namespace
                                                           static_cast<int>(font::MonoSize()), 15.f, &cfg);
         }
         if (!font::g_mono) font::g_mono = io.Fonts->AddFontDefault();
+        // The script editor's font: JetBrains Mono Nerd Font (a resource of this DLL)
+        if (font::EditorSize() != 0) {
+            ImFontConfig cfg;
+            cfg.FontDataOwnedByAtlas = false;
+            std::snprintf(cfg.Name, sizeof cfg.Name, "JetBrains Mono Nerd Font");
+            font::g_editor = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(font::EditorData()),
+                                                            static_cast<int>(font::EditorSize()), 15.f, &cfg);
+        }
     }
 
     // The menu's font, built into the DLL (font.h). ImGui's own font if the build has none.
@@ -353,6 +361,17 @@ namespace
                                                    static_cast<int>(font::MenuSize()), 15.f, &cfg);
         if (f) io.FontDefault = f;
         else HOOKS_LOG(warn, "The menu font could not be loaded: using ImGui's built-in font");
+        // The icons, merged into it: ICON_FA_* in any label (IconsFontAwesome6.h)
+        if (f && font::IconSize() != 0) {
+            ImFontConfig icons;
+            icons.FontDataOwnedByAtlas = false;
+            icons.MergeMode = true;
+            icons.PixelSnapH = true;
+            icons.GlyphMinAdvanceX = 15.f;     // Icons line up in columns
+            std::snprintf(icons.Name, sizeof icons.Name, "Font Awesome 6 Solid");
+            font::g_icons = io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(font::IconData()),
+                                                           static_cast<int>(font::IconSize()), 13.f, &icons) != nullptr;
+        }
         LoadMonoFont();
     }
 

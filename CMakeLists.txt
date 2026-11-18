@@ -219,7 +219,7 @@ endif()
 # The menu's font built into the DLL (hooks.cpp loads it): after the libraries, it comes from imgui's sources
 include(cmake/Fonts.cmake)
 mirage_embed_font(_font_cpp)
-target_sources(${PROJECT_NAME} PRIVATE ${_font_cpp})
+target_sources(${PROJECT_NAME} PRIVATE ${_font_cpp} ${_font_cpp_rc})
 source_group("Generated" FILES ${_font_cpp})
 
 # -------------------------------------------------------------------------------------------------

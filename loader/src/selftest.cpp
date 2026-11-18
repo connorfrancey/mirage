@@ -69,6 +69,7 @@
 #endif
 #if MIRAGE_FEATURE_SCRIPT_EDITOR
 #include "features/misc/script_editor.h"
+#include "font.h"
 #endif
 #include <shlobj.h>
 #if MIRAGE_FEATURE_INPUT
@@ -5688,31 +5689,49 @@ void TestScriptEditor()
             if (m.id == "profile-lua") return m;
         return mirage::mods::Info{};
     };
-    const auto files = script_editor::Files("profile-lua");
-    if (std::find(files.begin(), files.end(), "main.lua") == files.end() || !script_editor::Open("profile-lua", "main.lua")) {
+    // The editor's functions run on the render thread (Zep lays text out with ImGui's fonts)
+    std::vector<std::string> files;
+    bool opened = false;
+    std::string original;
+    OnRenderThread([&] {
+        files = script_editor::Files("profile-lua");
+        opened = script_editor::Open("profile-lua", "main.lua");
+        original = script_editor::Text();
+    });
+    if (std::find(files.begin(), files.end(), "main.lua") == files.end() || !opened) {
         p.Problem("profile-lua's main.lua isn't listed or doesn't open");
         End(s);
         return;
     }
-    const std::string original = script_editor::Text();
     if (original.find("mirage.on(\"tick\"") == std::string::npos) p.Problem("the opened text isn't profile-lua's main.lua");
+    // Its font (JetBrains Mono Nerd Font, a resource of the DLL) and the menu's icons (Font Awesome) were loaded
+    if (!font::g_editor) p.Problem("the script editor's font (JetBrains Mono Nerd Font, resource 901) wasn't loaded");
+    if (!font::Icons()) p.Problem("the icon font (Font Awesome) wasn't merged into the menu font");
     const int reloads = info().reloads;
 
-    script_editor::SetText(original + "\n-- edited in the game by the self-test\n");
-    if (!script_editor::Save()) p.Problem("saving failed");
+    bool saved = false;
+    OnRenderThread([&] {
+        script_editor::SetText(original + "\n-- edited in the game by the self-test\n");
+        saved = script_editor::Save();
+    });
+    if (!saved) p.Problem("saving failed");
     if (!WaitFor(15.0, [&] { const auto m = info(); return m.reloads > reloads && m.loaded; }))
         p.Problem("saving an edit didn't reload the mod");
 
-    script_editor::SetText("local broken = = 1\n" + original);
-    script_editor::Save();
+    OnRenderThread([&] {
+        script_editor::SetText("local broken = = 1\n" + original);
+        script_editor::Save();
+    });
     int line = 0;
     if (!WaitFor(15.0, [&] { line = script_editor::ErrorLine(); return line > 0; }))
         p.Problem("a broken file didn't fail to load with its line marked (problem: " + info().problem + ")");
     else s.notes.push_back(fmt::format("broken: error marked on line {} ({})", line, info().problem));
     if (line != 0 && line != 1) p.Problem(fmt::format("the error is marked on line {}, not 1", line));
 
-    script_editor::SetText(original);
-    script_editor::Save();
+    OnRenderThread([&] {
+        script_editor::SetText(original);
+        script_editor::Save();
+    });
     if (!WaitFor(15.0, [&] { return info().loaded && script_editor::ErrorLine() == 0; }))
         p.Problem("the original saved back didn't load again: " + info().problem);
     s.notes.push_back(fmt::format("profile-lua reloaded {} times by the step", info().reloads - reloads));

@@ -60,6 +60,14 @@ set(ZSTD_VERSION v1.5.7)
 set(IMGUI_VERSION v1.92.9b-docking)   # The docking branch (its tags carry -docking)
 set(IMGUIFILEBROWSER_GIT_COMMIT 47a1884524d6a3df5d99f70ecc82e1ed0ccd26cf)
 set(IMGUICOLORTEXTINPUT_GIT_COMMIT ca2f9f1462e3b60e56351bc466acda448c5ea50d)
+
+# Script editor: Zep (vim and notepad modes)
+set(ZEP_GIT_COMMIT 7aa7ed940d5c889dc6b27a2529a740c0bb2ad6af)
+
+# Icons: IconFontCppHeaders names the codepoints of Font Awesome 6, whose solid font is embedded (cmake/Fonts.cmake)
+set(ICONFONTCPPHEADERS_GIT_COMMIT 210b5a399a64270674560d633638952d1e8d804d)
+set(FONTAWESOME_VERSION 6.7.2)
+set(FONTAWESOME_SOLID_SHA256 af19d135d3a935b3ebfbd80320716ffe1202052c5f68dc2c5f1abc57005ac605)
 set(IMGUI_MARKDOWN_GIT_COMMIT 68fb679b1ab314940589445b36934682cd3e8027)      # https://github.com/enkisoftware/imgui_markdown
 set(IMGUI_FLAMEGRAPH_GIT_COMMIT aae0bd9665d1379c511d0b8a64d3752301a327a2)    # https://github.com/bwrsandman/imgui-flame-graph
 set(IMGUI_CLUB_GIT_COMMIT b083116866e05e0d4bccb2c7f28d94a76ee4965e)          # https://github.com/ocornut/imgui_club
