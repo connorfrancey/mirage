@@ -1163,6 +1163,13 @@ typedef struct MirageApi {
      * "sequences": [{"name", "length", "frames", "rate", "notifies": [{"time", "notify", "comment"}]}]}]}]. Copies up to
      * capacity, returns the full length. */
     uint32_t(MIRAGE_CALL* anim_sets)(MirageObject* actor, char* buffer, uint32_t capacity);
+
+    /* ---- Actors (step 28) */
+    /* An actor of class `cls` at `location`, `rotation` 3 ints (NULL: none): a .uc file of the mod ("classes/X.uc",
+     * compiled first: seconds the first time), another loaded mod's ("mirage-ai:classes/MirageBot.uc", built as that
+     * mod's), or a class path ("Engine.Trigger"). Destroyed on revert and unload (a checkpoint restart doesn't).
+     * Properties are set on the object after, before its first tick. NULL when it can't (the log says why). Game thread. */
+    MirageObject*(MIRAGE_CALL* actor_spawn)(MirageMod* mod, const char* cls, const float* location, const int32_t* rotation);
 } MirageApi;
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */

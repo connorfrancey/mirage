@@ -48,6 +48,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Movers](#movers) (3)
 - [Moves](#moves) (3)
 - [Animation](#animation) (4)
+- [Actors](#actors) (1)
 - [Types](#types)
 
 ## Basics
@@ -1485,6 +1486,16 @@ uint32_t(MIRAGE_CALL* anim_sets)(MirageObject* actor, char* buffer, uint32_t cap
 ```
 
 The AnimSets of the actor's skeletal meshes as JSON: [{"mesh": "Mesh1p", "sets": [{"slot", "name", "path", "sequences": [{"name", "length", "frames", "rate", "notifies": [{"time", "notify", "comment"}]}]}]}]. Copies up to capacity, returns the full length.
+
+## Actors
+
+### `actor_spawn`
+
+```c
+MirageObject*(MIRAGE_CALL* actor_spawn)(MirageMod* mod, const char* cls, const float* location, const int32_t* rotation);
+```
+
+An actor of class `cls` at `location`, `rotation` 3 ints (NULL: none): a .uc file of the mod ("classes/X.uc", compiled first: seconds the first time), another loaded mod's ("mirage-ai:classes/MirageBot.uc", built as that mod's), or a class path ("Engine.Trigger"). Destroyed on revert and unload (a checkpoint restart doesn't). Properties are set on the object after, before its first tick. NULL when it can't (the log says why). Game thread.
 
 ## Types
 

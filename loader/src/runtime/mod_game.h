@@ -47,6 +47,7 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL PhysicsImpulse(MirageMod* mod, MirageObject* actor, const float* impulse, const float* at, int32_t velocityChange);
 	int32_t MIRAGE_CALL PhysicsForce(MirageMod* mod, MirageObject* actor, const float* force, const float* at);
 	MirageObject* MIRAGE_CALL PhysicsSpawn(MirageMod* mod, const char* mesh, const float* location, const int32_t* rotation, float massScale);
+	MirageObject* MIRAGE_CALL ActorSpawn(MirageMod* mod, const char* cls, const float* location, const int32_t* rotation);
 	int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor);
 	int32_t MIRAGE_CALL PhysicsCollisionSet(MirageMod* mod, MirageObject* actor, uint32_t flags);
 	int32_t MIRAGE_CALL WorldTrace(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags,

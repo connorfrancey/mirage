@@ -258,6 +258,17 @@ namespace Mirage
             return new GameObject(Bridge.Api->physics_spawn(Handle, Utf8.Intern(mesh), at, null, massScale));
         }
 
+        /// <summary>
+        /// An actor of class <paramref name="cls"/>: the mod's "classes/X.uc", another mod's
+        /// "mirage-ai:classes/MirageBot.uc", or a class path "Engine.Trigger"; destroyed on revert and unload. Game thread.
+        /// </summary>
+        public GameObject Spawn(string cls, Vec3 location, int yaw = 0)
+        {
+            float* at = stackalloc float[3] { location.X, location.Y, location.Z };
+            int* rot = stackalloc int[3] { 0, yaw, 0 };
+            return new GameObject(Bridge.Api->actor_spawn(Handle, Utf8.Intern(cls), at, rot));
+        }
+
         /// <summary>A line trace (or a box sweep with <paramref name="extent"/>); null when nothing was hit. Game thread.</summary>
         public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default,
                                bool material = false)

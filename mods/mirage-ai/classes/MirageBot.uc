@@ -10,10 +10,13 @@
 //     location = [19509.0, -2809.0, 8520.0]
 //     [actor.properties]
 //     AIClass = "TdGame.AITemplate_Assault"        # default: TdGame.AITemplate_PatrolCop
+//
+// From Lua: local b = mirage.spawn("mirage-ai:classes/MirageBot.uc", at); b.AIClass = "AITemplate_Assault"
 class MirageBot extends Actor
     placeable;
 
-var() string AIClass;           // An AITemplate class by path
+var() name AIClass;             // An AITemplate class: a path, or a bare name for one of TdGame's ("AITemplate_Assault":
+                                // a name the engine already has, which is what Lua and C# can set)
 var() bool bGiveDefaultInventory;
 var TdBotPawn Bot;
 var TdAIController BotController;
@@ -27,10 +30,14 @@ function bool SpawnBot()
     local class<AITemplate> TemplateClass;
     local class<TdBotPawn> PawnClass;
     local class<TdAIController> ControllerClass;
+    local string Path;
 
-    TemplateClass = class<AITemplate>(DynamicLoadObject(AIClass, class'Class'));
+    Path = string(AIClass);
+    if (InStr(Path, ".") < 0)
+        Path = "TdGame." $ Path;
+    TemplateClass = class<AITemplate>(DynamicLoadObject(Path, class'Class'));
     if (TemplateClass == None)
-        return Fail("no AI template" @ AIClass);
+        return Fail("no AI template" @ Path);
     BotTemplate = new(self) TemplateClass;
     PawnClass = class<TdBotPawn>(DynamicLoadObject(BotTemplate.PawnClass, class'Class'));
     ControllerClass = class<TdAIController>(DynamicLoadObject(BotTemplate.ControllerClass, class'Class'));

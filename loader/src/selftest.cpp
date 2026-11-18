@@ -5953,12 +5953,12 @@ void TestAI()
     }
     // The bots near where the layer placed it, set up (shown, possessed, not initializing)
     struct Bot { Classes::ATdBotPawn* pawn; std::string pawnClass, controllerClass; int health; bool weapon; };
-    const auto bots = [&] {
+    const auto botsNear = [&](float x, float y) {
         std::vector<Bot> out;
         OnGameThread([&] {
             for (auto* a : game::ActorsOf(Classes::ATdBotPawn::StaticClass())) {
                 auto* b = static_cast<Classes::ATdBotPawn*>(a);
-                const float dx = b->Location.X - cop.location[0], dy = b->Location.Y - cop.location[1];
+                const float dx = b->Location.X - x, dy = b->Location.Y - y;
                 if (b->bDeleteMe || dx * dx + dy * dy > 500.f * 500.f) continue;
                 if (b->bHidden || b->bInitializing || !b->myController) continue;
                 out.push_back({b, b->Class->GetName(), b->myController->Class->GetName(), b->Health, b->Weapon != nullptr});
@@ -5966,6 +5966,7 @@ void TestAI()
         });
         return out;
     };
+    const auto bots = [&] { return botsNear(cop.location[0], cop.location[1]); };
     std::vector<Bot> found;
     WaitFor(10.0, [&] { found = bots(); return !found.empty(); });
     if (found.size() != 1) {
@@ -6035,6 +6036,27 @@ void TestAI()
     });
     s.notes.push_back(fmt::format("layer emptied: {}", gone ? "the bot is gone" : "the bot is still there"));
     if (!gone) p.Problem("the bot outlived its layer entry");
+
+    // Through the API (mirage.spawn, from profile-lua's Lua): an assault soldier where the cop was, its kind chosen by
+    // the MirageBot's AIClass set before its first tick; the mod's changes reverted take it away
+    const float* spot = cop.location;
+    mirage::mods::EvalResult spawned;
+    OnGameThread([&] {
+        spawned = mirage::mods::Eval("profile-lua", fmt::format(
+            "local b = mirage.spawn('mirage-ai:classes/MirageBot.uc', {{x = {:.1f}, y = {:.1f}, z = {:.1f}}}) "
+            "if b then b.AIClass = 'AITemplate_Assault' end ai_bot = b return b ~= nil", spot[0], spot[1], spot[2]));
+    });
+    std::vector<Bot> assault;
+    WaitFor(15.0, [&] { assault = botsNear(spot[0], spot[1]); return !assault.empty(); });
+    std::string apiProblem;
+    if (assault.empty()) OnGameThread([&] { apiProblem = mirage::mods::Eval("profile-lua", "return ai_bot and ai_bot.Problem").value; });
+    s.notes.push_back(fmt::format("mirage.spawn: {}{}", spawned.value + spawned.error,
+                                  assault.empty() ? ", no bot (MirageBot: '" + apiProblem + "')" : ", " + assault[0].pawnClass + " with " + assault[0].controllerClass));
+    if (assault.size() != 1 || assault[0].controllerClass != "TdAI_Assault")
+        p.Problem("mirage.spawn of a MirageBot with AIClass AITemplate_Assault didn't set up one assault bot");
+    OnGameThread([&] { mirage::mods::Eval("profile-lua", "mirage.revert()"); });
+    const bool reverted = WaitFor(5.0, [&] { return botsNear(spot[0], spot[1]).empty(); });
+    if (!reverted) p.Problem("the API's bot outlived the mod's revert");
     for (const auto& m : mirage::mods::List())
         if (m.id == "profile-lua") {
             std::error_code ec;

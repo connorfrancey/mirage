@@ -188,6 +188,7 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, int, float, int> anim_stop;
         public delegate* unmanaged[Cdecl]<void*, int, void*, int> anim_state;
         public delegate* unmanaged[Cdecl]<void*, byte*, uint, uint> anim_sets;
+        public delegate* unmanaged[Cdecl]<void*, byte*, void*, void*, void*> actor_spawn;
     }
 
     [StructLayout(LayoutKind.Sequential)]

@@ -30,6 +30,7 @@
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/mod_profile.h"
+#include "runtime/mods.h"
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
 
@@ -1125,6 +1126,62 @@ namespace mirage::mods
 			RecordEdit(mod, "spawn " + prop->GetName(), [hp = HandleOf(h)] {
 				Classes::AActor* a = ActorOf(HandleObject(&hp));
 				return a && a->Destroy();
+			});
+			return h;
+		}
+
+		MirageObject* MIRAGE_CALL ActorSpawn(MirageMod* mod, const char* cls, const float* location, const int32_t* rotation)
+		{
+			const std::string what = std::string("actor_spawn ") + (cls ? cls : "");
+			if (!mod || !cls || !location) return nullptr;
+			if (!game::IsGameThread()) {
+				PhysicsFail(mod, what.c_str(), "only on the game thread");
+				return nullptr;
+			}
+			Classes::AWorldInfo* world = game::World();
+			if (!world) {
+				PhysicsFail(mod, what.c_str(), "no level");
+				return nullptr;
+			}
+			// "classes/X.uc" (the mod's), "<mod id>:classes/X.uc" (another loaded mod's, built as its), or "Package.Class"
+			std::string name = cls, why;
+			Classes::UClass* c = nullptr;
+			if (name.size() > 3 && name.compare(name.size() - 3, 3, ".uc") == 0) {
+				const auto utf8 = [](std::string_view t) { return std::filesystem::path(std::u8string(t.begin(), t.end())); };
+				std::string ownerId = mod->id;
+				std::filesystem::path dir = utf8(mod->dir);
+				if (const std::size_t colon = name.find(':'); colon != std::string::npos) {
+					ownerId = name.substr(0, colon);
+					name = name.substr(colon + 1);
+					dir.clear();
+					for (const mirage::mods::Info& m : mirage::mods::List())
+						if (m.loaded && m.id == ownerId) dir = m.dir;
+					if (dir.empty()) {
+						PhysicsFail(mod, what.c_str(), "no loaded mod " + ownerId);
+						return nullptr;
+					}
+				}
+				classes::BuiltClass built;
+				c = classes::LoadSource(dir / utf8(name), &why, &built, ownerId);
+			} else {
+				c = static_cast<Classes::UClass*>(classes::LoadByName(name, Classes::UClass::StaticClass()));
+				if (!c) why = "no class " + name;
+			}
+			if (!c) {
+				PhysicsFail(mod, what.c_str(), why);
+				return nullptr;
+			}
+			const Classes::FRotator rot{rotation ? rotation[0] : 0, rotation ? rotation[1] : 0, rotation ? rotation[2] : 0};
+			const Classes::FVector at{location[0], location[1], location[2]};
+			Classes::AActor* a = world->Spawn(c, nullptr, Classes::FName{}, at, rot, nullptr, true);
+			if (!a) {
+				PhysicsFail(mod, what.c_str(), "the engine didn't spawn it (an abstract, static or bNoDelete class?)");
+				return nullptr;
+			}
+			MirageObject* h = Handle(a);
+			RecordEdit(mod, "spawn " + a->GetName(), [hp = HandleOf(h)] {
+				Classes::AActor* x = ActorOf(HandleObject(&hp));
+				return x && x->Destroy();
 			});
 			return h;
 		}

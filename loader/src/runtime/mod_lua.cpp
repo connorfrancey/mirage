@@ -253,6 +253,7 @@ namespace mirage::mods
 		static int ImpulseFn(lua_State* L);
 		static int ForceFn(lua_State* L);
 		static int SpawnPropFn(lua_State* L);
+		static int SpawnFn(lua_State* L);
 		static int CollisionFn(lua_State* L);
 		static int SetCollisionFn(lua_State* L);
 		static int TraceFn(lua_State* L);
@@ -1535,6 +1536,32 @@ namespace mirage::mods
 		const float mass = static_cast<float>(luaL_optnumber(L, 4, 1.0));
 		MirageObject* prop = self.api_->physics_spawn(self.mod_, mesh, at, hasRot ? rot : nullptr, mass);
 		if (prop) PushObject(L, prop);
+		else lua_pushnil(L);
+		return 1;
+	}
+
+	// mirage.spawn(class, {x, y, z}, {pitch, yaw, roll}): an actor (destroyed on revert and unload), or nil. class: the
+	// mod's "classes/X.uc", another mod's "mirage-ai:classes/MirageBot.uc", or "Engine.Trigger"
+	int LuaMod::SpawnFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, actor_spawn)) return luaL_error(L, "mirage.spawn: this runtime can't spawn actors");
+		const char* cls = luaL_checkstring(L, 1);
+		float at[3];
+		CheckVec(L, 2, at);
+		int32_t rot[3] = {};
+		bool hasRot = false;
+		if (lua_istable(L, 3)) {
+			static const char* keys[] = {"pitch", "yaw", "roll"};
+			for (int i = 0; i < 3; ++i) {
+				lua_getfield(L, 3, keys[i]);
+				rot[i] = static_cast<int32_t>(lua_tointeger(L, -1));
+				lua_pop(L, 1);
+			}
+			hasRot = true;
+		}
+		MirageObject* a = self.api_->actor_spawn(self.mod_, cls, at, hasRot ? rot : nullptr);
+		if (a) PushObject(L, a);
 		else lua_pushnil(L);
 		return 1;
 	}
@@ -2950,7 +2977,7 @@ namespace mirage::mods
 			{"kismet_link", KismetLinkFn}, {"kismet_unlink", KismetUnlinkFn}, {"kismet_create", KismetCreateFn},
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
-			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
+			{"spawn_prop", SpawnPropFn}, {"spawn", SpawnFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
 			{"camera", CameraFn}, {"world_to_screen", WorldToScreenFn},
 			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn},
 			{"mover", MoverFn}, {"move_to", MoveToFn}, {"mover_moving", MoverMovingFn}, {"move", MoveFn}, {"move_start", MoveStartFn},
