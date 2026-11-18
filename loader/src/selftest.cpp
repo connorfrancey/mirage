@@ -5996,6 +5996,22 @@ void TestAI()
         if (b.health <= 0) p.Problem("the bot has no health");
         if (!b.weapon) p.Problem("the bot has no weapon (the template's Colt 1911)");
 
+        // It fights: the player, 600 units in front of it, becomes its enemy and is seen (and is shot at, noted)
+        int healthBefore = 0, healthAfter = 0;
+        OnGameThread([&] { if (auto* pawn = game::Pawn()) healthBefore = pawn->Health; });
+        const bool engaged = WaitFor(8.0, [&] {
+            bool on = false;
+            OnGameThread([&] {
+                auto* c = b.pawn->bDeleteMe ? nullptr : b.pawn->myController;
+                on = c && c->myEnemy && c->myEnemy == game::Pawn() && c->EnemyVisible;
+            });
+            return on;
+        });
+        WaitTicks(60);
+        OnGameThread([&] { if (auto* pawn = game::Pawn()) healthAfter = pawn->Health; });
+        s.notes.push_back(fmt::format("engaged the player: {}; the player's health {} -> {}", engaged ? "yes" : "no", healthBefore, healthAfter));
+        if (!engaged) p.Problem("the bot didn't take the player as its enemy (seen) within 8 s");
+
         // A checkpoint restart: the layer spawns again, and the old bot goes with its MirageBot
         const game::ObjectId first = game::IdOf(b.pawn);
         if (!RestartAndWait()) p.Problem("the restart didn't come");
