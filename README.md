@@ -103,7 +103,7 @@ use its wrapper `mirage.hpp`, C# mods `managed/Mirage`, and the engine's types a
 | `loader/proxy/` | `dinput8.dll`: sits next to the game and loads `mirage\Mirage.dll` |
 | `sdk/` | The Mirror's Edge SDK, generated from the game's packages (`tools/sdkgen`; never edited by hand) |
 | `managed/` | `Mirage.dll` for C# mods (.NET 10, x86) |
-| `mods/` | Mirage's first-party mods, built into the loader: `mirage-levels` (level select, sublevels, restart), `mirage-collision` (Collision View) |
+| `mods/` | Mirage's first-party mods, built into the loader: `mirage-levels` (level select, sublevels, restart), `mirage-collision` (Collision View), `mirage-grapple` (Grappling Hook) |
 | `examples/mods/` | Example mods and the mod author's guide |
 | `installer/`, `launcher/` | `mirage_installer.exe`; `mirage_launcher.exe` (injects into a running game) |
 | `tests/` | Unit tests (GoogleTest), the self-test's test mods, the sources of test maps |

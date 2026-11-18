@@ -39,7 +39,7 @@ uv run mirage model <file>          # what a glTF/FBX/OBJ model holds for the ga
 - `loader/include/mirage/`: the public API (`api.h`, the C ABI; `mirage.hpp`, `sdk.hpp`, `imgui.hpp`).
 - `loader/src/`: the loader (`runtime/`, `game/`, `core/`, the UI and mod manager, `selftest.cpp`).
 - `loader/proxy/`: `dinput8.dll`, which loads `<Binaries>\mirage\Mirage.dll` once the game window is up.
-- `mods/`: first-party mods embedded in the DLL (`mirage-levels`, `mirage-collision`).
+- `mods/`: first-party mods embedded in the DLL (`mirage-levels`, `mirage-collision`, `mirage-grapple`).
 - `examples/mods/`, `tests/`, `tools/` (CLI, sdkgen, C# binding generator, test host), `managed/`, `installer/`,
   `launcher/`, `docs/`.
 

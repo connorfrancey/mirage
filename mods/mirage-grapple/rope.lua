@@ -1,5 +1,5 @@
 -- The rope's physics, one engine tick at a time. Pure Lua over vectors: no game calls here, so it is easy to read and to
--- try in the console (Misc > Console, mod "grapple": `require("rope").step(...)`).
+-- try in the console (Misc > Console, mod "mirage-grapple": `require("rope").step(...)`).
 --
 -- The rope is a constraint, not a spring: the player may be closer to the anchor than the rope is long (it goes slack),
 -- never farther. Each tick: the rope reels in or out, then a player beyond its length is put back on the sphere around

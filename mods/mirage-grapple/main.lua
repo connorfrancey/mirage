@@ -1,4 +1,5 @@
--- Grappling Hook: a Mirage showcase mod, all Lua, no build. Copy this folder into Binaries\mirage\mods\grapple.
+-- Grappling Hook: a first-party Mirage mod, all Lua, no build. It ships inside the menu's DLL and is written to
+-- Binaries\mirage\mods\mirage-grapple at startup: to change it, copy the folder under another id.
 --
 -- Hold the fire key (middle mouse) while aiming at a surface in range: the hook catches, a rope is drawn in the world,
 -- and you swing on it (Swing mode) or are reeled in (Pull mode). Z and X shorten and lengthen the rope; letting go of
@@ -16,7 +17,7 @@
 --   mirage.on(...)         level loads, deaths and checkpoint restarts let go of the rope
 --   mirage.share           what it is doing, for other mods and the self-test
 --   globals                grapple_at({x, y, z}), grapple_release() and grapple_status() for the console (Misc >
---                          Console, mod "grapple") and tests
+--                          Console, mod "mirage-grapple") and tests
 -- Its cost per tick is in the mod manager (the profiler), like any mod's.
 local vec = require("vec")
 local rope = require("rope")

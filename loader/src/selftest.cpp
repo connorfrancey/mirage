@@ -3440,7 +3440,7 @@ void TestConflicts()
             key |= o.kind == K::ActionKey && !o.conflict;
         }
         bool firstPartyOnly = !o.mods.empty();
-        for (const auto& m : o.mods) firstPartyOnly &= m == "mirage-levels" || m == "mirage-collision";
+        for (const auto& m : o.mods) firstPartyOnly &= m == "mirage-levels" || m == "mirage-collision" || m == "mirage-grapple";
         if (firstPartyOnly) p.Problem("an overlap between first-party mods only: " + o.text);
     }
     s.notes.push_back(fmt::format("{} overlaps, {} of them conflicts", overlaps.size(), conflicts));
@@ -5740,29 +5740,29 @@ void TestScriptEditor()
     End(s);
 }
 
-// The showcase mod examples/mods/grapple, driven through its console functions (runtime/mods.h Eval): hooked to a
+// The first-party mod mods/mirage-grapple, driven through its console functions (runtime/mods.h Eval): hooked to a
 // point above and ahead of the player, the rope holds (the player never gets farther than its length), lifts the player
 // and is drawn in the world; in Pull mode it reels the player in until it lets go by itself; released, the drawing is
 // gone and the mod's move ended with it.
 void TestGrapple()
 {
-    Step& s = Begin("Mirage grapple (example)");
+    Step& s = Begin("Mirage grapple");
     Probe p(s);
     Module* m = modules::Find("Grappling Hook");
     if (!m) {
-        p.Problem("the Grappling Hook module is missing (examples/mods/grapple)");
+        p.Problem("the Grappling Hook module is missing (mods/mirage-grapple)");
         End(s);
         return;
     }
     OnRenderThread([m] { m->SetEnabled(true); });
     const auto eval = [](const std::string& code) {
         mirage::mods::EvalResult r;
-        OnGameThread([&] { r = mirage::mods::Eval("grapple", code); });
+        OnGameThread([&] { r = mirage::mods::Eval("mirage-grapple", code); });
         return r;
     };
     const auto shared = [](const char* key) {
         char v[128]{};
-        mirage::mods::game_api::ShareGet("grapple", key, v, sizeof v);
+        mirage::mods::game_api::ShareGet("mirage-grapple", key, v, sizeof v);
         return std::string(v);
     };
     WaitPlayerReady(10.0);
@@ -7093,7 +7093,7 @@ const Named* FeatureList()
         {"Mirage console", &TestConsole, false},
         {"Mirage Kismet editor", &TestKismetEditor, false},
         {"Mirage script editor", &TestScriptEditor, false},
-        {"Mirage grapple (example)", &TestGrapple, false},
+        {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

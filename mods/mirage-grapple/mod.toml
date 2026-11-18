@@ -1,5 +1,6 @@
-# Grappling hook: a showcase of what a Lua mod can do with Mirage, in one folder and no build. See main.lua.
-id = "grapple"
+# A first-party mod: part of the menu, written against the public API only (Lua). It ships inside the menu's DLL and
+# is written to mirage\mods\mirage-grapple at startup: edit a copy under another id, not this folder. See main.lua.
+id = "mirage-grapple"
 name = "Grappling Hook"
 version = "1.0.0"
 description = "Fire a rope at any surface, swing on it or reel yourself in"
