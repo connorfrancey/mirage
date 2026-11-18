@@ -1492,13 +1492,14 @@ AnimationWalkSpeed`, `SpeedMinBaseVelocity = 1` and `UpdateAnimationBaseSpeed`, 
 done, the ammo drops (`SetMainWeaponAmmoDrop`), then `AITeam.AddMember`, the controller's `Initialize`, and the pawn
 shown. The templates (`AITemplate_PatrolCop`, `_Assault`, `_Riot`, `_Sniper`, ...) are classes in TdGame.u naming
 their pawn class, controller class, mesh, animations and weapons by path, all in standalone packages (TdSpContent.u,
-Characters/, Animations/, TdSharedContent.u), so any level can spawn any kind. `tests/mods/ai-test/classes/MirageBot.uc`
-does the same in UnrealScript from a layer entry (`AIClass = "TdGame.AITemplate_PatrolCop"`); the bot goes with its
+Characters/, Animations/, TdSharedContent.u), so any level can spawn any kind. The first-party `mods/mirage-ai`
+(`classes/MirageBot.uc`) does the same in UnrealScript from any mod's layer entry (`class =
+"mirage-ai:classes/MirageBot.uc"`: a layer names another mod's class with its id) (`AIClass = "TdGame.AITemplate_PatrolCop"`); the bot goes with its
 MirageBot (restart, unload). Self-test "Mirage AI": placed in front of the player in the Prologue, a
 TdBotPawn_PatrolCop with TdAI_PatrolCop, health 100, armed; a checkpoint restart gives one new bot; the layer emptied
-removes it. Found on the way: an `auto state` with latent code in a mod class never started (the spawner uses `Tick`
-instead; not yet investigated). Next: MirageBot as a class every mod can use (first-party), the ammo drops and team
-choice, then behaviour hooks.
+removes it; within 8 s it takes the player as its enemy, seen. Found on the way: an `auto state` with latent code in a mod class never started (the spawner uses `Tick`
+instead; not yet investigated). Not yet: the ammo drops (`SetMainWeaponAmmoDrop` is private: from C++), a
+team shared by several bots, behaviour hooks, navigation, the API and the TAS.
 
 **Milestone:** a mod sets up an ambush in an existing level with three enemies using a mod-defined flanking behaviour;
 they navigate a mod-added area, and the TAS replays the encounter verified (AI included in the determinism of step 24).

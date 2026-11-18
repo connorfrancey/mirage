@@ -4,7 +4,8 @@
 //
 //     [[actor]]
 //     name = "Pad1"                                   # optional: how scripts and the editor find it
-//     class = "classes/MirageBouncePad.uc"            # a .uc file of the mod (step 12), or a class path "Engine.Trigger"
+//     class = "classes/MirageBouncePad.uc"            # a .uc file of the mod (step 12), another mod's ("mirage-ai:classes/
+//                                                     # MirageBot.uc"), or a class path "Engine.Trigger"
 //     location = [19309.0, -3009.0, 8420.0]
 //     rotation = [0, 16384, 0]                        # optional: pitch, yaw, roll (65536 = a full turn)
 //     [actor.properties]                              # optional: dotted paths, as mirage.set takes them

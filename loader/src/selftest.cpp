@@ -3443,7 +3443,7 @@ void TestConflicts()
             key |= o.kind == K::ActionKey && !o.conflict;
         }
         bool firstPartyOnly = !o.mods.empty();
-        for (const auto& m : o.mods) firstPartyOnly &= m == "mirage-levels" || m == "mirage-collision" || m == "mirage-grapple";
+        for (const auto& m : o.mods) firstPartyOnly &= m == "mirage-levels" || m == "mirage-collision" || m == "mirage-grapple" || m == "mirage-ai";
         if (firstPartyOnly) p.Problem("an overlap between first-party mods only: " + o.text);
     }
     s.notes.push_back(fmt::format("{} overlaps, {} of them conflicts", overlaps.size(), conflicts));
@@ -5914,9 +5914,10 @@ void TestLevelEditor()
     End(s);
 }
 
-// Step 28's spawning, with tests/mods/ai-test (classes/MirageBot.uc): a MirageBot written into the mod's level layer in
-// front of the player sets up a patrol cop the way the game's Kismet spawner does: a TdBotPawn_PatrolCop possessed by
-// a TdAI_PatrolCop, shown, with the template's health and a weapon. A checkpoint restart replaces it (one bot, a new
+// Step 28's spawning, with the first-party mods/mirage-ai (classes/MirageBot.uc): a MirageBot written into another
+// mod's layer (profile-lua's, as "mirage-ai:classes/MirageBot.uc") in front of the player sets up a patrol cop the way
+// the game's Kismet spawner does: a TdBotPawn_PatrolCop possessed by a TdAI_PatrolCop, shown, with the template's health
+// and a weapon, and it takes the player as its enemy. A checkpoint restart replaces it (one bot, a new
 // one); the layer removed takes it away. The layer file is removed after, so no other step meets the cop.
 void TestAI()
 {
@@ -5937,16 +5938,16 @@ void TestAI()
     const float rad = static_cast<float>(yaw & 0xFFFF) * 6.2831853f / 65536.f;
     mirage::layers::EditActor cop;
     cop.name = "Cop";
-    cop.cls = "classes/MirageBot.uc";
+    cop.cls = "mirage-ai:classes/MirageBot.uc";
     cop.location[0] = at.X + std::cos(rad) * 600.f;
     cop.location[1] = at.Y + std::sin(rad) * 600.f;
     cop.location[2] = at.Z + 40.f;
     cop.rotation[1] = (yaw + 32768) & 0xFFFF;      // Facing the player
     std::string error;
     bool written = false;
-    OnGameThread([&] { written = mirage::layers::Write("ai-test", {cop}, &error); });
+    OnGameThread([&] { written = mirage::layers::Write("profile-lua", {cop}, &error); });
     if (!written) {
-        p.Problem("couldn't write ai-test's layer: " + error);
+        p.Problem("couldn't write profile-lua's layer: " + error);
         End(s);
         return;
     }
@@ -5971,7 +5972,7 @@ void TestAI()
         // Script logs go nowhere readable: what the MirageBot holds says how far it got
         std::string why;
         OnGameThread([&] {
-            auto* spawner = mirage::layers::Find("ai-test", "Cop");
+            auto* spawner = mirage::layers::Find("profile-lua", "Cop");
             if (!spawner) {
                 why = "no MirageBot in the level";
                 return;
@@ -6023,7 +6024,7 @@ void TestAI()
     }
 
     // The layer emptied: the bot goes
-    OnGameThread([&] { mirage::layers::Write("ai-test", {}, &error); });
+    OnGameThread([&] { mirage::layers::Write("profile-lua", {}, &error); });
     const bool gone = WaitFor(5.0, [&] {
         int n = 0;
         OnGameThread([&] {
@@ -6035,7 +6036,7 @@ void TestAI()
     s.notes.push_back(fmt::format("layer emptied: {}", gone ? "the bot is gone" : "the bot is still there"));
     if (!gone) p.Problem("the bot outlived its layer entry");
     for (const auto& m : mirage::mods::List())
-        if (m.id == "ai-test") {
+        if (m.id == "profile-lua") {
             std::error_code ec;
             fs::remove(m.dir / "levels" / (map + ".toml"), ec);
             fs::remove(m.dir / "levels", ec);

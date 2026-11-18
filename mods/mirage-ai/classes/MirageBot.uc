@@ -3,7 +3,13 @@
 // (SeqAct_TdActorFactory, native: found in MirrorsEdge.exe with Ghidra). The pawn starts hidden and in stasis, then one
 // step a tick: the pawn's SetupTemplate until it is done (mesh, animations, weapons), its animation speeds, the
 // controller's SetupTemplate, then the team, the controller's Initialize, and the pawn shown. The bot goes with this
-// actor: a checkpoint restart or the mod's unload destroys it.
+// actor: a checkpoint restart or the mod's unload destroys it. In a level layer of any mod:
+//
+//     [[actor]]
+//     class = "mirage-ai:classes/MirageBot.uc"
+//     location = [19509.0, -2809.0, 8520.0]
+//     [actor.properties]
+//     AIClass = "TdGame.AITemplate_Assault"        # default: TdGame.AITemplate_PatrolCop
 class MirageBot extends Actor
     placeable;
 

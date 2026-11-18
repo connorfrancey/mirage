@@ -1,0 +1,9 @@
+# A first-party mod: part of the menu, written against the public API only (UnrealScript classes). It ships inside the
+# menu's DLL and is written to mirage\mods\mirage-ai at startup: edit a copy under another id, not this folder.
+# Its classes are for other mods' level layers: class = "mirage-ai:classes/MirageBot.uc" (an enemy of the game's kinds).
+id = "mirage-ai"
+name = "AI"
+version = "1.0.0"
+description = "Enemies of the game's own kinds (patrol cops, assault, riot, snipers) for level layers: MirageBot"
+authors = ["Mirage"]
+mirage = "^0.1"

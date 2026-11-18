@@ -1,4 +1,0 @@
-# Self-test (step 28): enemies of the game's own kinds (classes/MirageBot.uc), placed by the self-test through a level layer
-id = "ai-test"
-version = "1.0.0"
-mirage = "^0.1"

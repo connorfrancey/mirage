@@ -167,8 +167,24 @@ namespace mirage::layers
 		// `pending`: the .uc is still compiling (nullptr now, ask again on a later tick).
 		Classes::UClass* ResolveClass(const mods::Info& mod, const std::string& name, std::string* why, bool* pending)
 		{
-			if (name.size() > 3 && Lower(name.substr(name.size() - 3)) == ".uc")
-				return BuiltClassOf(mod.dir / fs::path(std::u8string(name.begin(), name.end())), mod.id, why, pending);
+			if (name.size() > 3 && Lower(name.substr(name.size() - 3)) == ".uc") {
+				// "<mod id>:classes/X.uc": another mod's class (built once, as that mod's), the mod's own otherwise
+				const std::size_t colon = name.find(':');
+				const std::string file = colon == std::string::npos ? name : name.substr(colon + 1);
+				const mods::Info* owner = &mod;
+				std::vector<mods::Info> all;
+				if (colon != std::string::npos) {
+					all = mods::List();
+					owner = nullptr;
+					for (const mods::Info& m : all)
+						if (m.loaded && m.id == name.substr(0, colon)) owner = &m;
+					if (!owner) {
+						if (why) *why = "no loaded mod " + name.substr(0, colon);
+						return nullptr;
+					}
+				}
+				return BuiltClassOf(owner->dir / fs::path(std::u8string(file.begin(), file.end())), owner->id, why, pending);
+			}
 			// Cheap checks first: a lookup of something missing compares every object's full name, and asking the engine
 			// to load it searches the disk (seconds, on the game thread)
 			const std::string package = name.substr(0, name.find('.'));
