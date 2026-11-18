@@ -91,6 +91,19 @@ namespace mirage::mods
 	// Each loaded Lua mod's Lua memory, biggest first: {id, bytes}. Game thread (reloads replace the states there).
 	std::vector<std::pair<std::string, std::size_t>> LuaMemoryByMod();
 
+	// The console (step 27's REPL): a line of Lua run in a loaded Lua mod's own state, guarded like any call into the
+	// mod (a crash stops the mod, not the game) and timed by its profiler as "console line". Game thread.
+	struct EvalResult
+	{
+		bool ok = false;
+		std::string value;		// The first value it returned, as text ("" for none)
+		std::string error;		// Lua's message, or why it couldn't run
+		std::string printed;	// What it printed, a line per print
+	};
+	EvalResult Eval(const std::string& modId, const std::string& code);
+	// The loaded mods with a Lua state (for the console's list). Any thread.
+	std::vector<std::string> LuaMods();
+
 	// Every mod found, loaded or not, in load order then the rest
 	std::vector<Info> List();
 

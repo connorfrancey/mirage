@@ -1524,6 +1524,35 @@ namespace mirage::mods
 		return out;
 	}
 
+	EvalResult Eval(const std::string& modId, const std::string& code)
+	{
+		EvalResult out;
+		const auto it = std::find_if(g_mods.begin(), g_mods.end(), [&](const auto& m) { return m->id == modId; });
+		if (it == g_mods.end() || !(*it)->lua || (*it)->state.load() != State::Active) {
+			out.error = "no running Lua mod " + modId;
+			return out;
+		}
+		MirageMod& mod = **it;
+		struct Args { MirageMod* mod; const std::string* code; EvalResult* out; } args{&mod, &code, &out};
+		const bool ran = detail::Enter(mod, "console", "console line", [](void* p) {
+			auto* a = static_cast<Args*>(p);
+			const lua::Result r = EvalLua(*a->mod->lua, *a->code, a->out->printed);
+			a->out->ok = r.ok;
+			a->out->value = r.value;
+			a->out->error = r.error;
+		}, &args);
+		if (!ran && out.error.empty()) out.error = "the mod crashed or stopped (see its log)";
+		return out;
+	}
+
+	std::vector<std::string> LuaMods()
+	{
+		std::vector<std::string> out;
+		for (const auto& i : List())
+			if (i.loaded && i.kind.find("lua") != std::string::npos) out.push_back(i.id);
+		return out;
+	}
+
 	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key)
 	{
 		const auto same = [](const std::string& a, const std::string& b) {

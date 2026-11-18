@@ -85,6 +85,39 @@ namespace mirage::mods
 		bool Load(const std::filesystem::path& file, std::string& error);
 		std::size_t Memory() const { return state_.MemoryUsed(); }
 
+		// The console (step 27's REPL): `code` run in this mod's own state, as an expression first ("1 + 2",
+		// "mirage.pawn()") and as statements when it isn't one; what it prints comes back in `printed`. Game thread.
+		lua::Result Eval(const std::string& code, std::string& printed)
+		{
+			std::lock_guard lock(lock_);
+			lua_State* L = state_.Get();
+			if (!L) return {false, "", "no Lua state"};
+			lua_getglobal(L, "print");
+			const int saved = luaL_ref(L, LUA_REGISTRYINDEX);
+			lua_pushlightuserdata(L, &printed);
+			lua_pushcclosure(L, [](lua_State* L) -> int {
+				auto* out = static_cast<std::string*>(lua_touserdata(L, lua_upvalueindex(1)));
+				for (int i = 1, n = lua_gettop(L); i <= n; ++i) {
+					std::size_t len = 0;
+					const char* s = luaL_tolstring(L, i, &len);
+					if (i > 1) *out += "\t";
+					out->append(s, len);
+					lua_pop(L, 1);
+				}
+				*out += "\n";
+				return 0;
+			}, 1);
+			lua_setglobal(L, "print");
+			const std::string expression = "return " + code;
+			const bool isExpression = luaL_loadbufferx(L, expression.data(), expression.size(), "=console", "t") == LUA_OK;
+			lua_pop(L, 1);		// The compiled chunk, or the message
+			const lua::Result r = state_.Run(isExpression ? expression : code, "console");
+			lua_rawgeti(L, LUA_REGISTRYINDEX, saved);
+			lua_setglobal(L, "print");
+			luaL_unref(L, LUA_REGISTRYINDEX, saved);
+			return r;
+		}
+
 	private:
 		static LuaMod& Self(lua_State* L) { return *static_cast<LuaMod*>(lua_touserdata(L, lua_upvalueindex(1))); }
 		void Bind();
@@ -301,6 +334,7 @@ namespace mirage::mods
 	void LuaModDeleter::operator()(LuaMod* m) const { delete m; }
 
 	std::size_t LuaMemory(const LuaMod& m) { return m.Memory(); }
+	lua::Result EvalLua(LuaMod& m, const std::string& code, std::string& printed) { return m.Eval(code, printed); }
 
 	// ---- mirage.module{...} ----------------------------------------------------------------------------------------
 	int LuaMod::LuaModule(lua_State* L)

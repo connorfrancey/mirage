@@ -156,6 +156,7 @@ mirage_feature(self_test         debug      STAGE 4  FILES features/debug/self_t
 
 # Misc
 mirage_feature(mod_manager       misc GAME STAGE 9 FILES features/misc/mod_manager.cpp)
+mirage_feature(console           misc GAME STAGE 9 FILES features/misc/console.cpp)
 
 # -------------------------------------------------------------------------------------------------
 # The game integration layer, only when something uses it

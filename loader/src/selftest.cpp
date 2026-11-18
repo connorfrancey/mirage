@@ -5486,6 +5486,52 @@ void TestProfiler()
     End(s);
 }
 
+// Step 27's REPL (runtime/mods.h Eval; the Console window runs the same): lines of Lua in profile-lua's own state. An
+// expression gives its value, a statement none, a global set by one line is there for the next, print is captured,
+// the game is reachable (mirage.pawn()), errors come back as Lua's message without stopping the mod, and the profiler
+// counts the lines.
+void TestConsole()
+{
+    Step& s = Begin("Mirage console");
+    Probe p(s);
+    if (!modules::Find("Console")) p.Problem("the Console module is missing");
+    struct Case { const char* code; bool ok; const char* value; const char* printed; };
+    const Case cases[] = {
+        {"1 + 2", true, "3", ""},
+        {"selftestX = 41", true, "", ""},
+        {"selftestX + 1", true, "42", ""},
+        {"print('hi', 2)", true, "", "hi\t2\n"},
+        {"mirage.pawn() ~= nil", true, "true", ""},
+        {"error('boom')", false, "", ""},
+        {"local t = {} ; t.x.y = 1", false, "", ""},
+    };
+    int passed = 0;
+    for (const Case& c : cases) {
+        mirage::mods::EvalResult r;
+        OnGameThread([&] { r = mirage::mods::Eval("profile-lua", c.code); });
+        const bool good = r.ok == c.ok && (!c.ok || (r.value == c.value && r.printed == c.printed)) &&
+                          (c.ok || !r.error.empty());
+        if (good) ++passed;
+        else p.Problem(fmt::format("`{}`: ok {}, value \"{}\", printed \"{}\", error \"{}\"", c.code, r.ok, r.value, r.printed, r.error));
+        if (!c.ok && std::string(c.code).find("boom") != std::string::npos && r.error.find("boom") == std::string::npos)
+            p.Problem("the error's message didn't come back: " + r.error);
+    }
+    s.notes.push_back(fmt::format("{} of {} lines as expected", passed, std::size(cases)));
+    // The mod still runs after the errors, and its lines were profiled
+    mirage::mods::EvalResult after;
+    OnGameThread([&] { after = mirage::mods::Eval("profile-lua", "selftestX"); });
+    if (after.value != "41") p.Problem("profile-lua's state after the errors: selftestX is \"" + after.value + "\"");
+    bool profiled = false;
+    for (const auto& m : mirage::mods::profile::List())
+        if (m.id == "profile-lua")
+            for (const auto& c : m.callbacks) profiled |= c.what == "console line" && c.calls >= std::size(cases);
+    if (!profiled) p.Problem("the profiler didn't count the console lines");
+    mirage::mods::EvalResult missing;
+    OnGameThread([&] { missing = mirage::mods::Eval("no-such-mod", "1"); });
+    if (missing.ok) p.Problem("a line ran in a mod that doesn't exist");
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -6757,6 +6803,7 @@ const Named* FeatureList()
         {"Mirage editor map", &TestEditorMap, false},
         {"Mirage mission", &TestMission, false},
         {"Mirage profiler", &TestProfiler, false},
+        {"Mirage console", &TestConsole, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

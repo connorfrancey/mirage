@@ -22,6 +22,7 @@
 // call:skip(). Both return a handle with :remove(); a callback that errors is removed (and logged).
 
 #include "mirage/api.h"
+#include "runtime/lua_vm.h"
 
 #include <filesystem>
 #include <memory>
@@ -40,4 +41,6 @@ namespace mirage::mods
 	LuaModPtr LoadLua(const MirageApi* api, MirageMod* mod, const std::filesystem::path& file, std::string& error);
 	// Lua's memory use (bytes) of a loaded mod
 	std::size_t LuaMemory(const LuaMod& m);
+	// The console's line run in the mod's state (an expression first, else statements; print captured). Game thread.
+	lua::Result EvalLua(LuaMod& m, const std::string& code, std::string& printed);
 }

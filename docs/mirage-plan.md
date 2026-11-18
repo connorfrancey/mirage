@@ -1389,8 +1389,8 @@ mod's Kismet layer added out of its package comparison.
 
 **Depends on.** Hard: 9, 16. Soft: 24.
 
-**Status (2026-11-18): the profiler per mod done; the editor, REPL, debugger, Kismet node editor and native hot reload
-not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
+**Status (2026-11-18): the profiler per mod and the Lua REPL done; the editor, debugger, Kismet node editor, C# in the
+REPL and native hot reload not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
 The profiler (`runtime/mod_profile`): both gates into a mod's code (`detail::Enter` for hooks, events, natives,
 triggers and moves; `ModModule::Call` for module callbacks) time each call; once a second the calls are summed per mod
 and per callback into milliseconds per engine tick, the slowest callback first, shown in the mod manager's details
@@ -1400,6 +1400,15 @@ loads. Lua memory stays in the log (`LuaMemoryByMod` is game-thread only; the ma
 Unit tests `ModProfile.*`; self-test "Mirage profiler" (tests/mods/profile-lua): idle 0.03 ms per tick; busy work every
 tick puts it at 2.97 ms, over the budget with its tick event named; it drops under again when the work stops. Found by
 it: `mirage-levels`'s tick event took 7.1 ms per tick for a second during a level load.
+
+The REPL: the Console window (`features/misc/console.cpp`, Misc tab) runs a line of Lua in a chosen Lua mod's own state
+(`mods::Eval` -> `LuaMod::Eval`), on the game thread and through the same guarded gate as the mod's callbacks (a crash
+stops the mod, not the game; the profiler counts "console line"). A line is tried as an expression first (`return
+<line>`), so `mirage.pawn().Location` shows its value, and run as statements when it isn't one; `print` is captured
+for the line; errors show Lua's message and leave the mod running; Up and Down walk the history. The mod's `local`s at
+its top level aren't reachable (a chunk of its own), its globals are. Self-test "Mirage console": seven lines in
+profile-lua's state (values, a global kept between lines, print, the pawn, two errors), then the state intact and the
+lines profiled.
 
 **Milestone.** A mod author breaks in a Lua hook from VS Code, inspects a locals table and the player object, changes a
 property in the inspector, reloads a native DLL without losing state, and the profiler names the slowest callback; a
