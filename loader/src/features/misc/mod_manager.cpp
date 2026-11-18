@@ -11,6 +11,7 @@
 #include "runtime/changes.h"
 #include "runtime/inject.h"
 #include "runtime/mods.h"
+#include "runtime/mod_profile.h"
 #include "theme.h"
 
 #include <Windows.h>
@@ -200,6 +201,39 @@ namespace
 			}
 		}
 
+		// The time its code takes (runtime/mod_profile.h), slowest callback first
+		void DrawProfile(const mirage::mods::Info& m)
+		{
+			namespace pr = mirage::mods::profile;
+			const auto all = pr::List();
+			const auto it = std::find_if(all.begin(), all.end(), [&](const pr::Mod& p) { return p.id == m.id; });
+			if (it == all.end()) return;
+			ImGui::Separator();
+			ImGui::TextDisabled("Performance");
+			ImGui::SameLine();
+			if (it->overBudget) ImGui::TextColored({0.95f, 0.55f, 0.3f, 1.f}, "%.3f ms per tick, over the %.1f ms budget", it->msPerTick, pr::kBudgetMs);
+			else ImGui::Text("%.3f ms per tick", it->msPerTick);
+			if (ImGui::BeginTable("##profile", 4, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+				ImGui::TableSetupColumn("Callback", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableSetupColumn("Last second");
+				ImGui::TableSetupColumn("Calls");
+				ImGui::TableSetupColumn("Longest");
+				ImGui::TableHeadersRow();
+				for (const auto& c : it->callbacks) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(c.what.c_str());
+					ImGui::TableNextColumn();
+					ImGui::Text("%.3f ms", c.lastSecondMs);
+					ImGui::TableNextColumn();
+					ImGui::Text("%llu", static_cast<unsigned long long>(c.calls));
+					ImGui::TableNextColumn();
+					ImGui::Text("%.3f ms", c.maxMs);
+				}
+				ImGui::EndTable();
+			}
+		}
+
 		void DrawDetails(const mirage::mods::Info& m)
 		{
 			ImGui::TextUnformatted((m.name.empty() ? m.id : m.name).c_str());
@@ -246,6 +280,7 @@ namespace
 					}
 			}
 			DrawActions(m);
+			DrawProfile(m);
 			// Where it overlaps with other mods (its touch set against theirs, read before any of them ran)
 			{
 				bool header = false;

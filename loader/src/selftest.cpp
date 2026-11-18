@@ -40,6 +40,7 @@
 #include "runtime/physics.h"
 #include "runtime/kismet_trace.h"
 #include "runtime/kismet_layers.h"
+#include "runtime/mod_profile.h"
 #include "runtime/detours.h"
 #include "runtime/symbols.h"
 #include "runtime/natives.h"
@@ -5434,6 +5435,57 @@ void TestMission()
     End(s);
 }
 
+// Step 27's profiler per mod (runtime/mod_profile.h), with tests/mods/profile-lua: idle, the mod's tick event is listed
+// and cheap; asked to do busy work every tick, its tick event becomes its slowest callback and the mod goes over the
+// budget within two seconds; asked to stop, it is under again. Every loaded mod with code is listed (none with negative
+// times).
+void TestProfiler()
+{
+    Step& s = Begin("Mirage profiler");
+    Probe p(s);
+    namespace pr = mirage::mods::profile;
+    static MirageMod self;      // The self-test's shares
+    self.id = "selftest";
+    const auto busy = [](int rounds) { mirage::mods::game_api::ShareSet(&self, "busy", std::to_string(rounds).c_str()); };
+    const auto mod = [] {
+        for (auto& m : pr::List())
+            if (m.id == "profile-lua") return std::optional<pr::Mod>(m);
+        return std::optional<pr::Mod>();
+    };
+    busy(0);
+    if (!WaitFor(5.0, [&] { const auto m = mod(); return m && !m->callbacks.empty(); })) {
+        p.Problem("profile-lua's tick event isn't in the profiler (is the mod loaded?)");
+        End(s);
+        return;
+    }
+    Wait(2.5);      // Two full seconds idle
+    const auto idle = *mod();
+    s.notes.push_back(fmt::format("idle: {:.3f} ms per tick, {} ({} calls)", idle.msPerTick, idle.callbacks[0].what,
+                                  idle.callbacks[0].calls));
+    if (idle.callbacks[0].what != "tick event") p.Problem("profile-lua's slowest callback is " + idle.callbacks[0].what + ", not its tick event");
+    if (idle.overBudget) p.Problem("profile-lua is over the budget while idle");
+
+    busy(400000);
+    const bool over = WaitFor(5.0, [&] { const auto m = mod(); return m && m->overBudget; });
+    const auto working = *mod();
+    s.notes.push_back(fmt::format("busy: {:.2f} ms per tick (budget {:.1f}), its tick event {:.1f} ms in the last second, longest "
+                                  "call {:.2f} ms", working.msPerTick, pr::kBudgetMs, working.callbacks[0].lastSecondMs,
+                                  working.callbacks[0].maxMs));
+    if (!over) p.Problem(fmt::format("busy work every tick didn't put profile-lua over the budget ({:.2f} ms per tick)", working.msPerTick));
+    else if (working.callbacks[0].what != "tick event") p.Problem("the busy mod's slowest callback isn't its tick event");
+
+    busy(0);
+    if (!WaitFor(5.0, [&] { const auto m = mod(); return m && !m->overBudget; })) p.Problem("profile-lua stayed over the budget after its work stopped");
+    int listed = 0;
+    for (const auto& m : pr::List()) {
+        ++listed;
+        for (const auto& c : m.callbacks)
+            if (c.totalMs < 0.0 || c.maxMs < 0.0) p.Problem(m.id + ": negative time for " + c.what);
+    }
+    s.notes.push_back(fmt::format("{} mods with code in the profiler; the most per tick: {}", listed, pr::List().front().id));
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -6704,6 +6756,7 @@ const Named* FeatureList()
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
         {"Mirage mission", &TestMission, false},
+        {"Mirage profiler", &TestProfiler, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

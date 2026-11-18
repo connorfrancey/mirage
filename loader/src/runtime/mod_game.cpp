@@ -29,6 +29,7 @@
 #include "runtime/anim.h"
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
+#include "runtime/mod_profile.h"
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
 
@@ -305,6 +306,7 @@ namespace mirage::mods
 	void DispatchTick(float seconds)
 	{
 		++g_ticks;
+		profile::Tick(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
 		CheckHookFaults();
 		DispatchPlayerState(false);		// A move change the physics step's hook didn't see
 		MirageEvent e = Event(MIRAGE_EVENT_TICK);

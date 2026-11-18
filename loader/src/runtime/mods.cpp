@@ -8,6 +8,7 @@
 #include "runtime/content.h"
 #include "runtime/manifest.h"
 #include "runtime/mod_lua.h"
+#include "runtime/mod_profile.h"
 #include "runtime/mod_ui.h"
 #include "runtime/mod_io.h"
 #include "runtime/mod_world.h"
@@ -307,7 +308,9 @@ namespace mirage::mods
 			return;
 		}
 		Fault f;
+		const auto start = std::chrono::steady_clock::now();
 		const bool ok = Guarded(cb, desc_.user, &f);
+		profile::Record(mod_->id, Name() + " " + what, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
 		mod_->inflight.fetch_sub(1);
 		if (ok) return;
 		Crashed(*mod_, Name(), what, f);
@@ -361,7 +364,10 @@ namespace mirage::mods
 			return false;
 		}
 		Fault f;
+		const auto start = std::chrono::steady_clock::now();
 		const bool ok = Guarded(fn, arg, &f);
+		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		profile::Record(mod.id, where.find(what) != std::string::npos ? where : what + " " + where, ms);	// "tick event", "hook <fn>"
 		mod.inflight.fetch_sub(1);
 		if (ok) return true;
 		Crashed(mod, where, what, f);
@@ -1070,6 +1076,7 @@ namespace mirage::mods
 			if (mod.content && content::Applied(*mod.content)) content::Restore(*mod.content);
 			if (!mod.manifest.dotnet.empty()) dotnet::UnloadMod(&mod);	// OnUnload, then its assembly context goes
 			mod.lua.reset();
+			profile::Forget(mod.id);		// A reload counts from zero
 			if (mod.unload) {
 				Fault f;
 				if (!GuardedUnload(mod.unload, &f))

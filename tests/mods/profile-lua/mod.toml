@@ -1,0 +1,6 @@
+# Self-test (step 27, "Mirage profiler"): a mod whose tick does as much work as the self-test asks, so the profiler per
+# mod must name it, its tick event as the slowest callback, and over the budget while it works
+id = "profile-lua"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): busy work on request, for the profiler"
+mirage = "^0.1"

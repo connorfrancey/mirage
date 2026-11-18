@@ -18,6 +18,8 @@ add_executable(mirage_tests
         test_touch.cpp
         test_abi.cpp
         test_resolve.cpp
+        test_mod_profile.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mod_profile.cpp
         test_detours.cpp
         test_crashhandler.cpp
         test_symbols.cpp

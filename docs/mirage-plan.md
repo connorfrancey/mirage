@@ -1383,13 +1383,49 @@ mod's Kismet layer added out of its package comparison.
   manager and warnings when a mod costs frames.
 - **Native hot reload with state:** a native mod's DLL rebuilt by the CLI is swapped in at a frame boundary with its
   state carried over (a serialise / restore pair, like step 24's).
+- **Kismet node editor** (added 2026-11-18, brought forward from step 19, whose editor part it is; the debugger part
+  stays there): the loaded level's sequences as a node graph over step 18's reads (`kismet::Read`), with ops created,
+  linked and unlinked through the Kismet API and saved as the mod's Kismet layer.
 
 **Depends on.** Hard: 9, 16. Soft: 24.
+
+**Status (2026-11-18): the profiler per mod done; the editor, REPL, debugger, Kismet node editor and native hot reload
+not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
+The profiler (`runtime/mod_profile`): both gates into a mod's code (`detail::Enter` for hooks, events, natives,
+triggers and moves; `ModModule::Call` for module callbacks) time each call; once a second the calls are summed per mod
+and per callback into milliseconds per engine tick, the slowest callback first, shown in the mod manager's details
+(calls, last second, longest call). A mod over 2 ms per tick for a second is named in the log with its slowest
+callback, once until it is under again. Not counted: a native mod's own detours and mid-function hooks (no gate), and
+loads. Lua memory stays in the log (`LuaMemoryByMod` is game-thread only; the manager draws on the render thread).
+Unit tests `ModProfile.*`; self-test "Mirage profiler" (tests/mods/profile-lua): idle 0.03 ms per tick; busy work every
+tick puts it at 2.97 ms, over the budget with its tick event named; it drops under again when the work stops. Found by
+it: `mirage-levels`'s tick event took 7.1 ms per tick for a second during a level load.
 
 **Milestone.** A mod author breaks in a Lua hook from VS Code, inspects a locals table and the player object, changes a
 property in the inspector, reloads a native DLL without losing state, and the profiler names the slowest callback; a
 new C# mod is written in the game from template to a working HUD with completion only, and the editor never drops the
 frame rate below the 62 cap.
+
+### The in-game level editor, a feature every stage
+
+Decided 2026-11-18: besides its own work, every stage from 27 on finishes one major feature of a complete in-game
+level editor, so the editor grows steadily instead of waiting for step 25. Mirage has the layer side
+(`runtime/layers.h`: `Read`, `Write`, `Place`, `Find`; levels/<map>.toml) but no editor window of its own (memenu's
+stayed there). In order, each with a self-test that drives it like a user:
+
+1. **Layer actors** (step 27): a Level Editor window listing a mod's layer actors for the current level; select one,
+   move, rotate and scale it with fields (applied live through `Place`), add an actor of a class at the view, delete,
+   and save to the mod's levels/<map>.toml.
+2. **3D gizmo and picking:** translate / rotate / scale handles in the world, click to select what is under the cursor,
+   snapping to grid and surfaces.
+3. **Properties:** the selected actor's properties through reflection (`runtime/reflect`), edited live and saved as
+   `[actor.properties]`.
+4. **Class browser and pieces:** a searchable list of placeable classes and the mod's `.uc` classes, traversal pieces
+   (ziplines, swing poles) and props with their meshes.
+5. **Undo and redo** through the change log (step 15), multi-select, copy and paste, duplicate.
+6. **Kismet in the editor:** the selected actor's events and the step 27 node editor opened on them.
+7. **Play-test loop:** play from here, checkpoint placement, objectives (step 26) and routes (step 13) placed visually.
+8. **Sublevels and new maps:** streamed areas placed and toggled, a new mod map started from a template.
 
 ## Phase 3: more game systems (steps 28–31)
 
