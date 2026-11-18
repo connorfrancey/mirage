@@ -1,0 +1,8 @@
+# Self-test (step 26, "Mirage mission"): an objective added to the Prologue. The objective is a checkpoint the player
+# reaches by touch (classes/MirageObjective.uc); reaching it shows the game's own HUD message, makes it the active
+# checkpoint and fires the mod's Kismet event, which the Kismet layer (kismet/edge_p.toml) wires to the mod's action
+# that opens the door. The self-test writes the level layer (levels/edge_p.toml) in front of the player and removes it.
+id = "mission-test"
+version = "1.0.0"
+description = "Self-test mod (tests/mods): an objective, a checkpoint and a door in the Prologue"
+mirage = "^0.1"

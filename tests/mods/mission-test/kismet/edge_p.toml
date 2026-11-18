@@ -1,0 +1,13 @@
+# The objective's event (fired when the player reaches a MirageObjective, and again after a restart from it) opens the
+# door: both ops are the mod's own classes, in the Prologue's root sequence
+[[op]]
+name = "Reached"
+class = "classes/MirageSeqEvent_ObjectiveReached.uc"
+
+[[op]]
+name = "OpenDoor"
+class = "classes/MirageSeqAct_OpenDoor.uc"
+
+[[link]]
+from = "Reached"
+to = "OpenDoor"

@@ -2031,16 +2031,26 @@ sampled:
             ++same;
             if (linksOf(*it->second) != l && !linksDiffer++) firstDiff = op.path;
         }
-        int onlyMemory = 0;
+        // Ops a mod's Kismet layer added at load (mission-test's) are the engine's graph but not the file's: by the object
+        // names its applied "op <name> (<class>) = <object>" entries give
+        std::set<std::string> layerOps;
+        OnGameThread([&] {
+            for (const auto& e : mirage::kismet_layers::List())
+                if (const auto at = e.what.rfind(" = "); e.problem.empty() && e.what.starts_with("op ") && at != std::string::npos)
+                    layerOps.insert(lower(e.what.substr(at + 3)));
+        });
+        int onlyMemory = 0, fromLayers = 0;
         for (const auto& [key, op] : inMemory)
-            if (!seen.count(key)) {
+            if (!seen.count(key) && layerOps.count(key.substr(key.rfind('.') + 1))) ++fromLayers;
+            else if (!seen.count(key)) {
                 ++onlyMemory;
                 spdlog::info("Self-test: Kismet only in memory: {} ({})", op->path, op->cls);
             }
         s.notes.push_back(fmt::format("the package file (UnrealLib, {:.1f} s): {} objects, {} links; {} the same in memory, "
-                                      "{} only in the file{}, {} only in memory, {} with other links{}", fileSeconds,
-                                      file.size(), fileLinks, same, onlyFile, onlyFile ? " (" + firstMissing + ")" : "",
-                                      onlyMemory, linksDiffer, linksDiffer ? " (" + firstDiff + ")" : ""));
+                                      "{} only in the file{}, {} only in memory (and {} from mods' Kismet layers), {} with other "
+                                      "links{}", fileSeconds, file.size(), fileLinks, same, onlyFile,
+                                      onlyFile ? " (" + firstMissing + ")" : "", onlyMemory, fromLayers, linksDiffer,
+                                      linksDiffer ? " (" + firstDiff + ")" : ""));
         s.notes.push_back(fmt::format("{} streamed sublevels' root sequences are nested in the level's root at load", nestedAtLoad));
         if (file.empty()) p.Problem("UnrealLib read nothing from Edge_p: " + why);
         else if (onlyFile || onlyMemory || linksDiffer) p.Problem("the package file and the engine's graph differ");
@@ -5268,6 +5278,162 @@ void TestEditorMap()
     End(s);
 }
 
+// Step 26, with tests/mods/mission-test: an objective in the Prologue. The step writes the mod's level layer (an objective
+// 350 units in front of the player, a door behind it) and the mod's Kismet layer wires the objective's event to its
+// door-opening action. The game's own HUD message shows the goal; walking in (the forward key held) makes the objective
+// the active checkpoint, shows the game's message for it, fires the event and opens the door; a checkpoint restart puts
+// the new player on the objective, which counts itself reached again and opens the new door. The level's own checkpoint
+// is put back and the layer removed at the end.
+void TestMission()
+{
+    Step& s = Begin("Mirage mission");
+    Probe p(s);
+    std::filesystem::path dir;
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "mission-test" && m.loaded) dir = m.dir;
+    if (dir.empty()) {
+        p.Problem("the mission-test mod isn't loaded (tests/mods/mission-test)");
+        End(s);
+        return;
+    }
+    const std::filesystem::path file = dir / "levels" / "edge_p.toml";
+    std::error_code ec;
+    std::filesystem::remove(file, ec);      // One left by a run that stopped halfway
+
+    // The game's checkpoint manager (one, in the TdGameData data store) and the level's checkpoint, put back at the end
+    const auto manager = [] {
+        Classes::UTdCheckpointManager* m = nullptr;
+        const auto& objects = Classes::UObject::GetGlobalObjects();
+        for (std::size_t i = 0; i < objects.Num() && !m; ++i) {
+            auto* o = objects.GetByIndex(i);
+            if (o && o->IsA(Classes::UTdCheckpointManager::StaticClass()) && o->GetName().rfind("Default__", 0) != 0)
+                m = static_cast<Classes::UTdCheckpointManager*>(o);
+        }
+        return m;
+    };
+    const auto active = [&] {
+        std::string name;
+        OnGameThread([&] { if (auto* m = manager()) name = m->ActiveCheckpoint.IsValid() ? m->ActiveCheckpoint.ToString() : ""; });
+        return name;
+    };
+    std::string map;
+    Classes::FVector start{};
+    int yaw = 0;
+    OnGameThread([&] {
+        map = Lower(game::MapName());
+        if (auto* pawn = game::Pawn()) {
+            start = pawn->Location;
+            yaw = pawn->Rotation.Yaw;
+        }
+    });
+    const std::string before = active();
+    if (map != "edge_p" || before.empty()) {
+        p.Problem("needs the Prologue with a checkpoint active (map " + map + ", checkpoint \"" + before + "\")");
+        End(s);
+        return;
+    }
+    const float rad = static_cast<float>(yaw & 0xFFFF) * 6.2831853f / 65536.f;
+    const float fx = std::cos(rad), fy = std::sin(rad);
+    const Classes::FVector goal{start.X + fx * 350.f, start.Y + fy * 350.f, start.Z};
+    const Classes::FVector door{start.X + fx * 800.f, start.Y + fy * 800.f, start.Z};
+    {
+        std::filesystem::create_directories(file.parent_path(), ec);
+        std::ofstream out(file, std::ios::binary);
+        out << "# Written by the self-test (Mirage mission) in front of the player; removed when it ends\n"
+            << fmt::format("[[actor]]\nname = \"Objective\"\nclass = \"classes/MirageObjective.uc\"\n"
+                           "location = [{:.1f}, {:.1f}, {:.1f}]\nrotation = [0, {}, 0]\n\n", goal.X, goal.Y, goal.Z, yaw & 0xFFFF)
+            << fmt::format("[[actor]]\nname = \"Door\"\nclass = \"classes/MirageDoor.uc\"\nlocation = [{:.1f}, {:.1f}, {:.1f}]\n",
+                           door.X, door.Y, door.Z);
+    }
+    // A property of a layer actor of the mod's classes, read by name
+    const auto prop = [](const char* name, const char* member) {
+        int v = -1;
+        OnGameThread([&] {
+            if (auto* a = mirage::layers::Find("mission-test", name))
+                v = mirage::reflect::GetInt(mirage::reflect::Resolve(a->Class, a, member));
+        });
+        return v;
+    };
+    const auto doorAt = [] {
+        Classes::FVector at{};
+        bool blocks = false;
+        OnGameThread([&] {
+            if (auto* a = mirage::layers::Find("mission-test", "Door")) {
+                at = a->Location;
+                blocks = a->bCollideActors && a->bBlockActors;
+            }
+        });
+        return std::pair{at, blocks};
+    };
+    // The game's on-screen message: a Supers message scene open with this text
+    const auto hudShows = [](const std::string& text) {
+        bool shown = false;
+        OnGameThread([&] {
+            const auto& objects = Classes::UObject::GetGlobalObjects();
+            for (std::size_t i = 0; i < objects.Num() && !shown; ++i) {
+                auto* o = objects.GetByIndex(i);
+                if (!o || !o->IsA(Classes::UTdUIScene_SupersMessage::StaticClass()) || o->GetName().rfind("Default__", 0) == 0) continue;
+                auto* scene = static_cast<Classes::UTdUIScene_SupersMessage*>(o);
+                auto* client = static_cast<Classes::UGameUISceneClient*>(scene->SceneClient);
+                bool open = false;
+                if (client)
+                    for (std::size_t k = 0; k < client->ActiveScenes.Num(); ++k) open |= client->ActiveScenes[k] == scene;
+                shown = open && scene->SupersLabel && scene->SupersLabel->DataSource.MarkupString.IsValid() &&
+                        scene->SupersLabel->DataSource.MarkupString.ToString() == text;
+            }
+        });
+        return shown;
+    };
+
+    if (!WaitFor(30.0, [&] { return prop("Objective", "bReached") >= 0 && doorAt().second; }))
+        p.Problem("the objective and its door didn't spawn (their classes compile first; the log says why)");
+    else {
+        const Classes::FVector closed = doorAt().first;
+        if (!WaitFor(5.0, [&] { return hudShows("Reach the marker"); })) p.Problem("the game's HUD doesn't show the objective's goal");
+        else s.notes.push_back("the game's HUD shows the goal");
+
+        // Walked in: reached, the active checkpoint, the game's message, the door open
+        std::string forward;
+        OnGameThread([&] { forward = KeyFor(game::Controller(), "GBA_MoveForward", "W"); });
+        HoldKey(forward, 2.0, {});
+        if (!WaitFor(5.0, [&] { return prop("Objective", "bReached") == 1; })) p.Problem("walking into the objective didn't reach it");
+        else {
+            const auto [opened, blocks] = doorAt();
+            s.notes.push_back(fmt::format("reached: checkpoint \"{}\" (was \"{}\"), {} event(s) fired, the door {:.0f} units up{}",
+                                          active(), before, prop("Objective", "Fired"), opened.Z - closed.Z,
+                                          blocks ? ", still blocking" : ""));
+            if (active() != "Mirage_Objective") p.Problem("the objective isn't the active checkpoint: " + active());
+            if (prop("Objective", "Fired") < 1) p.Problem("the objective fired no MirageSeqEvent_ObjectiveReached (the Kismet layer)");
+            if (opened.Z - closed.Z < 200.f || blocks) p.Problem("the mod's action didn't open the door");
+            if (!WaitFor(5.0, [&] { return hudShows("Objective reached: the door is open"); }))
+                p.Problem("the game's HUD doesn't show the objective reached");
+
+            // A restart from the objective: the player on it, the objective reached again and the new door open
+            if (!RestartAndWait()) p.Problem("no new player came after a checkpoint restart (from the objective)");
+            else {
+                Classes::FVector at{};
+                OnGameThread([&] { if (auto* pawn = game::Pawn()) at = pawn->Location; });
+                const float off = std::hypot(at.X - goal.X, at.Y - goal.Y);
+                const bool again = WaitFor(30.0, [&] { return prop("Objective", "bReached") == 1 && prop("Objective", "Fired") >= 1; });
+                const auto [door2, blocks2] = doorAt();
+                s.notes.push_back(fmt::format("after a restart: the player {:.0f} units from the objective; it is {}reached, the door {:.0f} "
+                                              "units up", off, again ? "" : "not ", door2.Z - closed.Z));
+                if (off > 64.f) p.Problem(fmt::format("the restart put the player {:.0f} units from the objective", off));
+                if (!again) p.Problem("the restarted objective didn't count itself reached (from the active checkpoint)");
+                if (door2.Z - closed.Z < 200.f || blocks2) p.Problem("the door is closed after the restart");
+            }
+        }
+    }
+
+    // The level's own checkpoint back, the layer gone
+    std::filesystem::remove(file, ec);
+    const std::wstring back(before.begin(), before.end());
+    OnGameThread([&] { if (auto* m = manager()) m->SetActiveCheckpoint(Classes::FString(back.c_str())); });
+    if (!WaitFor(10.0, [&] { return prop("Objective", "bReached") < 0; })) p.Problem("the objective stayed after its layer was removed");
+    if (active() != before) p.Problem("the level's checkpoint wasn't put back: " + active());
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -6537,6 +6703,7 @@ const Named* FeatureList()
         {"Mirage level additions", &TestLevelLayers, false},
         {"Mirage maps", &TestModMaps, false},
         {"Mirage editor map", &TestEditorMap, false},
+        {"Mirage mission", &TestMission, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

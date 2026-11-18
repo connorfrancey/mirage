@@ -1334,7 +1334,8 @@ sequence action opens a door); the HUD shows it; a checkpoint restart keeps it c
 checkpoint restarts keep it consistent, and the self-test plays it through; `MirageEditorRoom` gains a checkpoint from
 a mod and restarts from it.
 
-**Status (2026-11-18): checkpoints done; objectives and the HUD not started.** How a restart finds its spot:
+**Status (2026-11-18): done, except feeding objectives to the speedrun timer (routes, step 13, already split by
+points).** How a restart finds its spot:
 TdSPStoryGame.FindPlayerStart asks the checkpoint manager for the *active* checkpoint (a level's Kismet makes one active
 as the player reaches it, SeqAct_TdCheckpoint -> SetNewCheckpoint) and otherwise picks a PlayerStart from the world's
 navigation list, which only the editor's Build Paths fills: a map built without paths (MirageEditorRoom) has none there,
@@ -1343,8 +1344,25 @@ layer (spawnable: bStatic and bNoDelete off; the engine adds a spawned Navigatio
 that makes itself the active checkpoint when it spawns, unless the map already has one (tests/mods/map-test:
 classes/MirageCheckpoint.uc, levels/MirageEditorRoom.toml). Self-test "Mirage editor map": a checkpoint restart puts the
 new player on the mod's checkpoint. Also: a mod's `packages/` folder holds packages its maps use (registered with the
-engine by name, not listed as maps), for maps with their own content package (map-test's `editortest_geo`). Next: a
-checkpoint reached by touch (the layer's checkpoint as SetNewCheckpoint does it), then objectives.
+engine by name, not listed as maps), for maps with their own content package (map-test's `editortest_geo`).
+
+Objectives are mod content, with no new API: a `TdCheckpoint` subclass a level layer places (tests/mods/mission-test:
+classes/MirageObjective.uc) is the objective. While it is open, the game's own on-screen message shows its goal (the
+HUD's Supers message, opened as the levels' Kismet opens it: a `SeqAct_TdSupersMessage` activated from script, so no
+Scaleform or menu HUD is needed). Touched by the player, it becomes the active checkpoint as `SeqAct_TdCheckpoint` makes
+one (`SetNewCheckpoint`, not saved to the profile; a weight over the level's own checkpoints), shows its "reached"
+message and fires the level's `MirageSeqEvent_ObjectiveReached` events; the mod's Kismet layer (kismet/edge_p.toml)
+links that event to a mod-defined action, `MirageSeqAct_OpenDoor`, which opens the mod's door. Consistency over a
+restart comes from the game's own state: the level's sequences outlive a restart and its spawned actors don't, so the
+respawned objective finds itself the active checkpoint, counts as reached and fires the event again, and the new door
+opens again. Each mod `.uc` file is its own package, so the classes find each other by name (`IsA('MirageDoor')`), not
+by class reference. The game's objectives list (the pause menu's Objectives tab) is config-driven
+(`UIDataStore_TdGameObjectivesData`, localized providers keyed by checkpoint name) and is not extended. Self-test
+"Mirage mission": the step writes the level layer in front of the player in the Prologue; the HUD shows the goal;
+walking in (the forward key held) makes the objective the active checkpoint, fires one event and raises the door 256
+units; the HUD shows the reached message; a checkpoint restart puts the new player on the objective (0 units off) with
+the objective reached and the new door open; the level's checkpoint is put back. "Mirage Kismet (read)" now leaves ops a
+mod's Kismet layer added out of its package comparison.
 
 ### 27. Script environment: editor, REPL, debugger and profiler (P1)
 
@@ -1440,6 +1458,31 @@ below as self-tests. **Costs (targets):** a full-screen pass under 0.5 ms at 108
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (Scaleform), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.
+
+### 50. Player-drivable vehicles (P2)
+
+*Added 2026-11-18, numbered after the last step so the others keep their numbers.* **Depends on:** 14, 20, 22 (hard:
+world access, physics, input actions); 29, 30 (soft: a chase camera, engine sound). **Tests:** "Mirage vehicle": a
+test mod spawns a car in a level, the player gets in, the self-test drives it forward and steers (keys held, as the
+other gameplay steps do), gets out, and a checkpoint restart and the mod's unload leave no vehicle and the player on
+foot. **Costs (targets):** a vehicle's simulation within PhysX's own step; a Lua vehicle's per-tick logic under 50 µs.
+**TAS:** driving input is recorded like keys; whether PhysX wheel simulation replays deterministically is step 20's
+open question. **Failure:** a vehicle whose mod crashes ejects the player and is destroyed.
+
+- **The engine has the parts:** UE3's `SVehicle` with `SVehicleSimCar` (PhysX wheels, suspension, engine torque and
+  steering curves), `SVehicleWheel`, `Vehicle.DriverEnter` / `DriverLeave` and the player controller's `PlayerDriving`
+  state; Mirror's Edge adds `TdVehicle` and `TdVehicleSeatPawn` (to investigate: what the game uses them for and
+  whether a cooked package still has a wheeled vehicle's skeletal mesh and physics asset).
+- **A vehicle from a mod:** a class extending `SVehicle` (UnrealScript, or `define_class` from Lua/C#) with the mod's
+  mesh and physics asset (step 31's runtime models, or a game mesh), wheels and tuning as data, placed by a level layer
+  or spawned from code.
+- **Getting in and out:** a use key bound through step 22's actions; the player's pawn hidden and attached while
+  driving (Faith's first-person body and TdMove states must not run), the camera a chase camera (step 29), the HUD
+  told; leaving puts the player back on foot at a free spot.
+- **Driving:** throttle, brake, steering and handbrake from the player's input; gamepad axes (step 30).
+
+**Milestone:** a mod adds a drivable car to a level: the player walks up, gets in with a key, drives and steers it
+through the level with a chase camera and engine sound, gets out, and the car is gone after the mod unloads.
 
 ## Phase 4: platform infrastructure, as gameplay needs it (steps 32–39)
 
@@ -1771,6 +1814,7 @@ whether PhysX state rewinds and replays deterministically (step 20's investigati
 | Player and controller (health, damage, state, abilities) | 14, 17 | P0 | Through world access and the movement work; health and damage hooks are step 6's |
 | Missions, objectives, checkpoints, timed challenges | 26 (routes: 13) | P1 | Checkpoints in mod maps are part of it |
 | AI and enemies | 28 | P1 | Spawning, behaviour hooks, navigation for new geometry |
+| Player-drivable vehicles | 50 | P2 | UE3's `SVehicle` / `SVehicleSimCar` (PhysX wheels) are in the engine |
 | Cameras | 29 | P1 | Photo mode and cinematics: 48 |
 | Audio, controllers | 30 | P1 | Input actions are in 22 |
 | Rendering, materials, post process, Scaleform UI, models | 31 | P1 | Texture replacement exists (7) |
