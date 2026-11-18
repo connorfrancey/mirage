@@ -5113,20 +5113,20 @@ void TestModMaps()
         // checkpoint spawned the first one, in the same map
         if (Module* restart = modules::Find("Restart Checkpoint")) {
             Classes::FVector spawn{};
-            const void* pawnBefore = nullptr;
+            game::ObjectId pawnBefore{};    // By identity: the new pawn can get the old one's memory
             OnGameThread([&] {
                 if (auto* pawn = game::Pawn()) {
                     spawn = pawn->Location;
-                    pawnBefore = pawn;
+                    pawnBefore = game::IdOf(pawn);
                     pawn->Location.X += 600.f;
                 }
             });
             const int loadsBefore = g_loadsFinished.load();
             OnRenderThread([restart] { restart->Toggle(); });
-            const void* pawnAfter = nullptr;
+            game::ObjectId pawnAfter{};
             WaitFor(60.0, [&] {
-                OnGameThread([&] { pawnAfter = game::Pawn(); }, 1.0);
-                return pawnAfter && pawnAfter != pawnBefore && !game::IsLoading();
+                OnGameThread([&] { pawnAfter = game::IdOf(game::Pawn()); }, 1.0);
+                return pawnAfter.address && !(pawnAfter == pawnBefore) && !game::IsLoading();
             });
             // Walking again, with no cutscene or input hold. Not WaitPlayerReady(): the engine leaves the controller's
             // bFrozen set after its own checkpoint restart (see the death test)
@@ -5148,7 +5148,7 @@ void TestModMaps()
             const float off = std::hypot(at.X - spawn.X, at.Y - spawn.Y);
             s.notes.push_back(fmt::format("restarted from the checkpoint{}: {:.0f} units from the first spawn",
                                           g_loadsFinished.load() > loadsBefore ? " (a level load)" : "", off));
-            if (!pawnAfter || pawnAfter == pawnBefore) p.Problem("Restart Checkpoint didn't respawn the player in MirageTestMap");
+            if (!pawnAfter.address || pawnAfter == pawnBefore) p.Problem("Restart Checkpoint didn't respawn the player in MirageTestMap");
             else if (Lower(after) != "miragetestmap") p.Problem("Restart Checkpoint left MirageTestMap for " + after);
             else if (off > 150.f) p.Problem(fmt::format("the restart put the player {:.0f} units from the checkpoint's spawn", off));
         } else {
@@ -5313,16 +5313,7 @@ void TestWorldAccessCs()
     else if (num("Handle after") != 0) p.Problem("the kept probe's handle still resolved after it was destroyed");
 
     const int restarts = num("Restarts");
-    const void* pawnBefore = nullptr;
-    OnGameThread([&] {
-        pawnBefore = game::Pawn();
-        levels::RestartFromLastCheckpoint();
-    });
-    WaitFor(30.0, [&] {
-        const void* now = nullptr;
-        OnGameThread([&] { now = game::Pawn(); }, 1.0);
-        return now && now != pawnBefore && !game::IsLoading();
-    });
+    RestartAndWait();
     if (!WaitFor(10.0, [&] { return num("Restarts") > restarts; })) p.Problem("no Restart event after the checkpoint restart");
     WaitPlayerReady(10.0);
     s.notes.push_back(fmt::format("{} actors added, {} removed, PlayerStarts {}, restarts {}", num("Added"), num("Removed"),
@@ -5404,17 +5395,8 @@ void TestWorldAccess()
     MirageHandle oldPawn{};
     oldPawn.size = sizeof oldPawn;
     const float restartsBefore = WorldSharedNum("restarts");
-    const void* pawnBefore = nullptr;
-    OnGameThread([&] {
-        pawnBefore = game::Pawn();
-        ga::ObjectHandle(reinterpret_cast<MirageObject*>(game::Pawn()), &oldPawn);
-        levels::RestartFromLastCheckpoint();
-    });
-    WaitFor(30.0, [&] {
-        const void* now = nullptr;
-        OnGameThread([&] { now = game::Pawn(); }, 1.0);
-        return now && now != pawnBefore && !game::IsLoading();
-    });
+    OnGameThread([&] { ga::ObjectHandle(reinterpret_cast<MirageObject*>(game::Pawn()), &oldPawn); });
+    RestartAndWait();
     WaitFor(10.0, [&] { return WorldSharedNum("restarts") > restartsBefore; });
     MirageObject* oldBack = reinterpret_cast<MirageObject*>(1);
     OnGameThread([&] { oldBack = ga::HandleObject(&oldPawn); });
@@ -6318,8 +6300,8 @@ void TestModule(Module& m)
     const bool loadsLevel = m.Name() == "Main Menu";
     const bool respawns = m.Name() == "Restart Checkpoint";
     const int loadsBefore = g_loadsFinished.load();
-    const void* pawnBefore = nullptr;
-    if (respawns) OnGameThread([&] { pawnBefore = game::Pawn(); });
+    game::ObjectId pawnBefore{};    // By identity: the new pawn can get the old one's memory
+    if (respawns) OnGameThread([&] { pawnBefore = game::IdOf(game::Pawn()); });
     if (expect.setup) OnGameThread(expect.setup);
 #endif
 
@@ -6369,12 +6351,12 @@ void TestModule(Module& m)
     if (game::IsLoading() || g_loadsFinished.load() > loadsBefore) SettleAfterLoad(120.0);
     if (loadsLevel && g_loadsFinished.load() <= loadsBefore) p.Problem("no level load happened");
     if (respawns) {
-        const void* pawnAfter = nullptr;
+        game::ObjectId pawnAfter{};
         WaitFor(30.0, [&] {
-            OnGameThread([&] { pawnAfter = game::Pawn(); }, 1.0);
-            return pawnAfter && (pawnAfter != pawnBefore || g_loadsFinished.load() > loadsBefore);
+            OnGameThread([&] { pawnAfter = game::IdOf(game::Pawn()); }, 1.0);
+            return pawnAfter.address && (!(pawnAfter == pawnBefore) || g_loadsFinished.load() > loadsBefore);
         });
-        if (!pawnAfter) p.Problem("no player 30 s after restarting");
+        if (!pawnAfter.address) p.Problem("no player 30 s after restarting");
         else if (pawnAfter == pawnBefore && g_loadsFinished.load() <= loadsBefore) p.Problem("the player was not respawned");
     }
 #endif
