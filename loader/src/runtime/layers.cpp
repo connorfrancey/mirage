@@ -10,6 +10,7 @@
 #include "runtime/call.h"
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
+#include "runtime/models.h"
 #include "runtime/mods.h"
 #include "runtime/pieces.h"
 #include "runtime/reflect.h"
@@ -510,7 +511,28 @@ namespace mirage::layers
 				std::string why;
 				bool pending = false;
 				Classes::UClass* cls = s.info.cls.empty() ? nullptr : ResolveClass(mod, s.info.cls, &why, &pending);
-				if (pending) {		// Compiling: the whole layer waits for it (spawned on a later tick, in order)
+				// A mod's model (runtime/models.h): "models/x.glb", or "<mod id>:models/x.glb" for another mod's
+				Classes::UStaticMesh* mesh = nullptr;
+				std::string meshWhy;
+				if (cls && entry.contains("mesh")) {
+					const toml::value& v = toml::find(entry, "mesh");
+					if (!v.is_string()) {
+						meshWhy = "mesh needs a model file (\"models/x.glb\")";
+					} else {
+						const std::string name = v.as_string();
+						const std::size_t colon = name.find(':');
+						const std::string model = colon == std::string::npos ? name : name.substr(colon + 1);
+						fs::path dir = mod.dir;
+						if (colon != std::string::npos) {
+							dir.clear();
+							for (const mods::Info& m : mods::List())
+								if (m.loaded && m.id == name.substr(0, colon)) dir = m.dir;
+						}
+						if (dir.empty()) meshWhy = "no loaded mod " + name.substr(0, colon);
+						else mesh = models::MeshOf(dir / fs::path(std::u8string(model.begin(), model.end())), &meshWhy, &pending);
+					}
+				}
+				if (pending) {		// Compiling or building: the whole layer waits for it (spawned on a later tick, in order)
 					for (Spawned& done : layer.actors)
 						if (Alive(done)) done.info.actor->Destroy();
 					layer.actors.clear();
@@ -551,6 +573,17 @@ namespace mirage::layers
 				}
 				if (s.info.actor) {
 					s.objectIndex = SlotOf(s.info.actor);
+					if (!meshWhy.empty()) {
+						s.info.problem = meshWhy;
+					} else if (mesh) {
+						if (!s.info.actor->IsA(Classes::ADynamicSMActor::StaticClass()))
+							s.info.problem = "a mesh is given to a DynamicSMActor (Engine.DynamicSMActor_Spawnable), not a " + s.info.cls;
+						else {
+							auto* sm = static_cast<Classes::ADynamicSMActor*>(s.info.actor);
+							sm->SetStaticMesh(mesh, Classes::FVector{}, Classes::FRotator{}, Classes::FVector{1.f, 1.f, 1.f});
+							sm->bPawnCanBaseOn = true;		// The player stands on it
+						}
+					}
 					if (entry.contains("scale")) {
 						const toml::value& v = toml::find(entry, "scale");
 						if (v.is_floating() || v.is_integer()) SetScale(s.info.actor, Number(v));
@@ -740,6 +773,7 @@ namespace mirage::layers
 					for (std::size_t i = 0; i < 3 && i < v.size(); ++i) a.rotation[i] = static_cast<int>(Number(v[i]));
 				}
 				if (entry.contains("scale")) a.scale = Number(toml::find(entry, "scale"));
+				a.mesh = toml::find_or<std::string>(entry, "mesh", "");
 				if (entry.contains("properties"))
 					for (const auto& [key, value] : toml::find<toml::table>(entry, "properties")) a.properties.emplace_back(key, ValueText(value));
 				out.push_back(std::move(a));
@@ -777,6 +811,7 @@ namespace mirage::layers
 			if (a.rotation[0] || a.rotation[1] || a.rotation[2])
 				entry["rotation"] = toml::array{a.rotation[0], a.rotation[1], a.rotation[2]};
 			if (a.scale != 1.f) entry["scale"] = a.scale;
+			if (!a.mesh.empty()) entry["mesh"] = a.mesh;
 			if (!a.properties.empty()) {
 				toml::value props = toml::table{};
 				for (const auto& [key, text] : a.properties) props[key] = TextValue(text);

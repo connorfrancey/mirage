@@ -6186,6 +6186,100 @@ void TestClassStates()
     End(s);
 }
 
+// Step 31's models, with tests/mods/model-test: Blender's Suzanne (glTF, converted by `mirage model --convert`) placed by
+// a level layer as a DynamicSMActor_Spawnable at twice her size. The runtime builds her package on a worker and the
+// engine loads it; the actor shows the mesh named after the file. Then the player is dropped onto her head: standing
+// on her (the pawn's Base is her actor, above the floor she rests over) proves the engine collides with the mesh's own
+// triangles (its kDOP tree): without it the player falls through to the floor.
+void TestModels()
+{
+    Step& s = Begin("Mirage models");
+    Probe p(s);
+    WaitPlayerReady(10.0);
+    mirage::layers::EditActor monkey;
+    monkey.name = "Suzanne";
+    monkey.cls = "Engine.DynamicSMActor_Spawnable";
+    monkey.scale = 2.f;
+    monkey.mesh = "model-test:models/suzanne.glb";
+    std::string map, error;
+    Classes::FVector home{};
+    OnGameThread([&] {
+        map = mirage::layers::CurrentMap();
+        if (auto* pawn = game::Pawn()) {
+            home = pawn->Location;
+            const float rad = static_cast<float>(pawn->Rotation.Yaw & 0xFFFF) * 6.2831853f / 65536.f;
+            monkey.location[0] = pawn->Location.X + std::cos(rad) * 400.f;
+            monkey.location[1] = pawn->Location.Y + std::sin(rad) * 400.f;
+            monkey.location[2] = pawn->Location.Z;
+        }
+        mirage::layers::Write("profile-lua", {monkey}, &error);
+    });
+    Classes::AActor* actor = nullptr;
+    std::string meshName;
+    float top = 0.f;
+    const double t0 = GameSeconds();
+    // The first build reads the game's Engine package with UnrealLib (seconds)
+    WaitFor(60.0, [&] {
+        OnGameThread([&] {
+            auto* a = mirage::layers::Find("profile-lua", monkey.name);
+            if (!a || !a->IsA(Classes::ADynamicSMActor::StaticClass())) return;
+            auto* sm = static_cast<Classes::ADynamicSMActor*>(a);
+            if (!sm->StaticMeshComponent || !sm->StaticMeshComponent->StaticMesh) return;
+            actor = a;
+            meshName = sm->StaticMeshComponent->StaticMesh->GetName();
+        });
+        return actor != nullptr;
+    });
+    WaitTicks(3);       // The component's bounds follow its mesh and scale on its next update
+    OnGameThread([&] {
+        if (actor) {
+            auto* c = static_cast<Classes::ADynamicSMActor*>(actor)->StaticMeshComponent;
+            top = c->Bounds.Origin.Z + c->Bounds.BoxExtent.Z;
+        }
+    });
+    s.notes.push_back(fmt::format("the layer's Suzanne: {} after {:.1f} s, mesh '{}', top at {:.0f} ({:.0f} above the player's middle)",
+                                  actor ? "in play" : "not in play", GameSeconds() - t0, meshName, top, top - home.Z));
+    if (!actor) p.Problem("the layer's model didn't come into play: " + (error.empty() ? std::string("the log says why") : error));
+    else {
+        if (meshName != "suzanne") p.Problem("the actor's mesh is '" + meshName + "', not suzanne");
+        // Converted at 50 units a meter, her top is 49 units above her middle; at scale 2, 98
+        if (std::fabs(top - home.Z - 98.f) > 6.f)
+            p.Problem(fmt::format("her top is {:.0f} above her middle, not 98 (Suzanne at twice her size)", top - home.Z));
+        Classes::FVector at{};
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) {
+                at = {actor->Location.X, actor->Location.Y, top + 150.f};
+                pawn->SetLocation(at);
+                pawn->Velocity = Classes::FVector{};
+            }
+        });
+        WaitGrounded();
+        bool based = false;
+        Classes::FVector landed{};
+        OnGameThread([&] {
+            if (auto* pawn = game::Pawn()) {
+                landed = pawn->Location;
+                based = pawn->Base == actor;
+            }
+        });
+        s.notes.push_back(fmt::format("dropped from {:.0f} above her top: landed at {:.0f} ({:.0f} above her top), standing on her: {}", 150.f,
+                                      landed.Z, landed.Z - top, based));
+        if (!based) p.Problem(fmt::format("the player isn't standing on the model (landed {:.0f} below its top): no collision", top - landed.Z));
+    }
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) pawn->SetLocation(home);
+        mirage::layers::Write("profile-lua", {}, &error);
+    });
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "profile-lua") {
+            std::error_code ec;
+            std::filesystem::remove(m.dir / "levels" / (map + ".toml"), ec);
+            std::filesystem::remove(m.dir / "levels", ec);
+        }
+    WaitPlayerReady(10.0);
+    End(s);
+}
+
 // Step 28's navigation, its first question: the editor's path builder (AScout::DefinePaths, through a TdScout's Exec)
 // run in the game on the loaded level. It must run, leave reach specs between the navigation points, and leave the game
 // playing: a garbage collection right after (the old reach specs freed: none may still be reachable from the
@@ -7587,7 +7681,8 @@ const Named* FeatureList()
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage AI", &TestAI, false},
         {"Mirage class states", &TestClassStates, false},
-        {"Mirage path building", &TestPathBuilding, false, true},     // Opt-in: fails until every point gets reach specs (step 28)
+        {"Mirage path building", &TestPathBuilding, false, true},
+        {"Mirage models", &TestModels, false},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},

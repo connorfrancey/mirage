@@ -801,13 +801,18 @@ def unreallib(ctx: click.Context, config: str, no_build: bool, cooked_pc: Path |
 @click.argument("model_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option("--json", "as_json", is_flag=True, help="The report as JSON.")
 @click.option("--strict", is_flag=True, help="Exit with 1 when the model has problems for the game.")
+@click.option("--convert", is_flag=True, help="Also write <file>.mmesh, the model in the game's space, which a mod's "
+              "level layer places as a mesh (mesh = \"models/x.glb\").")
+@click.option("--scale", type=float, default=50.0, show_default=True,
+              help="With --convert: game units per file unit (glTF is in meters; a game unit is about 2 cm).")
 @click.option("--no-build", is_flag=True, help="Run mirage_model as it was last built.")
 @verbose_option
 @click.pass_context
-def model(ctx: click.Context, model_file: Path, as_json: bool, strict: bool, no_build: bool, verbose: bool) -> None:
+def model(ctx: click.Context, model_file: Path, as_json: bool, strict: bool, convert: bool, scale: float, no_build: bool,
+          verbose: bool) -> None:
     """What a 3D model (glTF, FBX, OBJ) holds for the game: meshes, vertices, triangles, UVs, materials, size, and what
-    a game static mesh can't take. Read with assimp by tools/model (its own build folder, always release: assimp never
-    goes into Mirage.dll); the first build takes a few minutes."""
+    a game static mesh can't take; with --convert, the model written for the game. Read with assimp by tools/model (its
+    own build folder, always release: assimp never goes into Mirage.dll); the first build takes a few minutes."""
     tc = _toolchain(ctx)
     folder = b.ROOT / "cmake-build-x86-model"
     exe = folder / "mirage_model.exe"
@@ -827,6 +832,8 @@ def model(ctx: click.Context, model_file: Path, as_json: bool, strict: bool, no_
         console.print(f"[red]{exe} not found[/]: build it first (without --no-build).")
         ctx.exit(2)
     args = [str(exe), str(model_file)] + (["--json"] if as_json else []) + (["--strict"] if strict else [])
+    if convert:
+        args += ["--convert", "--scale", str(scale)]
     ctx.exit(subprocess.run(args, cwd=b.ROOT).returncode)
 
 

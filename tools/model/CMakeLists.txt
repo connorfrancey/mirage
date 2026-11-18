@@ -24,7 +24,8 @@ CPMAddPackage(
                 "ASSIMP_WARNINGS_AS_ERRORS OFF" "ASSIMP_BUILD_ZLIB ON" "ASSIMP_INJECT_DEBUG_POSTFIX OFF"
 )
 
-add_executable(mirage_model src/main.cpp src/model_report.cpp)
+add_executable(mirage_model src/main.cpp src/model_report.cpp src/model_convert.cpp)
+target_include_directories(mirage_model PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../loader/src)   # runtime/mesh_file.h
 target_link_libraries(mirage_model PRIVATE assimp::assimp)
 if(MSVC)
   target_compile_options(mirage_model PRIVATE /W4 /permissive- /utf-8)
@@ -40,3 +41,7 @@ add_test(NAME ModelTriangleGltf COMMAND mirage_model --json ${CMAKE_CURRENT_LIST
 set_tests_properties(ModelTriangleGltf PROPERTIES PASS_REGULAR_EXPRESSION "\"triangles\": 1,.*has no UVs")
 add_test(NAME ModelTriangleGltfStrict COMMAND mirage_model --strict ${CMAKE_CURRENT_LIST_DIR}/test/triangle.gltf)
 set_tests_properties(ModelTriangleGltfStrict PROPERTIES WILL_FAIL TRUE)
+# Converted: the cube's 12 triangles written for the game (from a copy in the build folder, not into the source tree)
+configure_file(${CMAKE_CURRENT_LIST_DIR}/test/cube.obj ${CMAKE_CURRENT_BINARY_DIR}/cube.obj COPYONLY)
+add_test(NAME ModelCubeConvert COMMAND mirage_model ${CMAKE_CURRENT_BINARY_DIR}/cube.obj --convert --scale 100)
+set_tests_properties(ModelCubeConvert PROPERTIES PASS_REGULAR_EXPRESSION "converted: .*cube.obj.mmesh .*vertices, 12 triangles")

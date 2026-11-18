@@ -1,0 +1,6 @@
+# Self-test (step 31, "Mirage models"): a mod's model in the game. models/suzanne.glb is Blender's Suzanne, exported
+# from Blender 5.3 (glTF); models/suzanne.glb.mmesh is it converted (`mirage model models/suzanne.glb --convert`). The
+# self-test writes a level layer placing it and stands the player on it.
+id = "model-test"
+version = "1.0.0"
+mirage = "^0.1"

@@ -70,6 +70,7 @@ namespace mirage::layers
 		float location[3]{};
 		int rotation[3]{};
 		float scale = 1.f;
+		std::string mesh;		// A mod's model file ("models/x.glb", "<mod id>:models/x.glb"; runtime/models.h), "" for none
 		std::vector<std::pair<std::string, std::string>> properties;	// Path, the value as TOML text ("1800.0", "\"Name\"")
 	};
 	// The level the layers are for ("edge_p"; empty before one loaded). Game thread, like the rest of this.

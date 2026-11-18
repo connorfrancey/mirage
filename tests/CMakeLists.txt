@@ -119,6 +119,8 @@ if(MIRAGE_UNREALLIB)
   add_executable(unreallib_tests
           test_unreallib.cpp
           test_textures.cpp
+          test_models.cpp
+          ${CMAKE_SOURCE_DIR}/loader/src/runtime/model_files.cpp
           ${CMAKE_SOURCE_DIR}/loader/src/runtime/texture_files.cpp
           ${CMAKE_SOURCE_DIR}/loader/src/runtime/stb_impl.cpp
           ${CMAKE_SOURCE_DIR}/launcher/src/detect.cpp)

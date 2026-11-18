@@ -381,9 +381,9 @@ namespace mirage::mods
 		else if (!m.dotnet.empty() && !std::filesystem::is_regular_file(dir / FromUtf8(m.dotnet)))
 			fail("dotnet " + m.dotnet + " is not in the folder");
 		else if (m.entry.empty() && m.lua.empty() && m.dotnet.empty() && m.content.empty() &&
-				 !std::filesystem::is_directory(dir / "levels") &&	// Level additions, maps, routes (step 13) and Kismet layers: what a mod does too
-				 !std::filesystem::is_directory(dir / "maps") && !std::filesystem::is_directory(dir / "routes") &&
-				 !std::filesystem::is_directory(dir / "kismet"))
+				 !std::filesystem::is_directory(dir / "levels") &&	// Level additions, maps, routes (step 13), Kismet layers and models
+				 !std::filesystem::is_directory(dir / "maps") && !std::filesystem::is_directory(dir / "routes") &&	// (step 31, other
+				 !std::filesystem::is_directory(dir / "kismet") && !std::filesystem::is_directory(dir / "models"))	// mods' layers use them)
 			out.warnings.push_back(Utf8(file) + ": no entry, no Lua, no C# and no content: the mod does nothing");
 		return out;
 	}
