@@ -63,7 +63,12 @@
 #include "runtime/packages.h"
 #if MIRAGE_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
+#endif
+#if MIRAGE_FEATURE_KISMET_EDITOR
 #include "features/misc/kismet_editor.h"
+#endif
+#if MIRAGE_FEATURE_SCRIPT_EDITOR
+#include "features/misc/script_editor.h"
 #endif
 #include <shlobj.h>
 #if MIRAGE_FEATURE_INPUT
@@ -5541,6 +5546,9 @@ void TestKismetEditor()
 {
     Step& s = Begin("Mirage Kismet editor");
     Probe p(s);
+#if !MIRAGE_FEATURE_KISMET_EDITOR
+    p.Problem("built without the Kismet Editor feature");
+#else
     namespace ki = mirage::kismet;
     std::filesystem::path dir;
     for (const auto& m : mirage::mods::List())
@@ -5661,6 +5669,54 @@ void TestKismetEditor()
     });
     if (!back) p.Problem("removing the layer didn't put the event's link back: " + restored);
     OnGameThread([&] { kismet_editor::Open(""); });
+#endif
+    End(s);
+}
+
+// Step 27's script editor (features/misc/script_editor.h), on profile-lua's main.lua: listed and opened; an edit saved
+// reloads the mod (Lua mods hot reload); a broken line saved makes the load fail with the error marked on that line;
+// the original saved back loads it again.
+void TestScriptEditor()
+{
+    Step& s = Begin("Mirage script editor");
+    Probe p(s);
+#if !MIRAGE_FEATURE_SCRIPT_EDITOR
+    p.Problem("built without the Script Editor feature");
+#else
+    const auto info = [] {
+        for (const auto& m : mirage::mods::List())
+            if (m.id == "profile-lua") return m;
+        return mirage::mods::Info{};
+    };
+    const auto files = script_editor::Files("profile-lua");
+    if (std::find(files.begin(), files.end(), "main.lua") == files.end() || !script_editor::Open("profile-lua", "main.lua")) {
+        p.Problem("profile-lua's main.lua isn't listed or doesn't open");
+        End(s);
+        return;
+    }
+    const std::string original = script_editor::Text();
+    if (original.find("mirage.on(\"tick\"") == std::string::npos) p.Problem("the opened text isn't profile-lua's main.lua");
+    const int reloads = info().reloads;
+
+    script_editor::SetText(original + "\n-- edited in the game by the self-test\n");
+    if (!script_editor::Save()) p.Problem("saving failed");
+    if (!WaitFor(15.0, [&] { const auto m = info(); return m.reloads > reloads && m.loaded; }))
+        p.Problem("saving an edit didn't reload the mod");
+
+    script_editor::SetText("local broken = = 1\n" + original);
+    script_editor::Save();
+    int line = 0;
+    if (!WaitFor(15.0, [&] { line = script_editor::ErrorLine(); return line > 0; }))
+        p.Problem("a broken file didn't fail to load with its line marked (problem: " + info().problem + ")");
+    else s.notes.push_back(fmt::format("broken: error marked on line {} ({})", line, info().problem));
+    if (line != 0 && line != 1) p.Problem(fmt::format("the error is marked on line {}, not 1", line));
+
+    script_editor::SetText(original);
+    script_editor::Save();
+    if (!WaitFor(15.0, [&] { return info().loaded && script_editor::ErrorLine() == 0; }))
+        p.Problem("the original saved back didn't load again: " + info().problem);
+    s.notes.push_back(fmt::format("profile-lua reloaded {} times by the step", info().reloads - reloads));
+#endif
     End(s);
 }
 
@@ -6937,6 +6993,7 @@ const Named* FeatureList()
         {"Mirage profiler", &TestProfiler, false},
         {"Mirage console", &TestConsole, false},
         {"Mirage Kismet editor", &TestKismetEditor, false},
+        {"Mirage script editor", &TestScriptEditor, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

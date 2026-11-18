@@ -1389,8 +1389,8 @@ mod's Kismet layer added out of its package comparison.
 
 **Depends on.** Hard: 9, 16. Soft: 24.
 
-**Status (2026-11-18): the profiler per mod, the Lua REPL and the Kismet node editor done; the script editor, the Lua
-debugger, C# in the REPL and native hot reload not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
+**Status (2026-11-18): the profiler per mod, the Lua REPL, the Kismet node editor and the script editor done; the Lua
+debugger, C# in the REPL, completion and native hot reload not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
 The profiler (`runtime/mod_profile`): both gates into a mod's code (`detail::Enter` for hooks, events, natives,
 triggers and moves; `ModModule::Call` for module callbacks) time each call; once a second the calls are summed per mod
 and per callback into milliseconds per engine tick, the slowest callback first, shown in the mod manager's details
@@ -1422,6 +1422,14 @@ own level) and undoes them live, so the layer applies them from then on; "Discar
 Kismet editor" (tests/mods/kismet-editor-test): an op added, a touch event linked to it and one of its links unlinked,
 saved (the layer applies 3 entries, 0 skipped), another op discarded, and the layer removed puts the graph back. Not
 yet: editing an op's properties, deleting level ops, saving node positions, copy and paste, the debugger (step 19).
+
+The script editor (`features/misc/script_editor`, ImGuiColorTextEdit, already a dependency): a loaded mod's `.lua`
+files opened from the menu bar, edited with Lua highlighting and line numbers, saved with Ctrl+S into the mod's folder,
+where the hot reload loads them (Lua mods reload by default); the mod's load error is marked on the line it names;
+Ctrl+Enter runs the selection (or the current line) through the REPL in the mod's state. Self-test "Mirage script
+editor" (profile-lua's main.lua): an edit saved reloads the mod; a broken first line saved fails the load with line 1
+marked; the original saved back loads again. Not yet: find and replace, completion, signature help, go to definition,
+templates, C#.
 
 **Milestone.** A mod author breaks in a Lua hook from VS Code, inspects a locals table and the player object, changes a
 property in the inspector, reloads a native DLL without losing state, and the profiler names the slowest callback; a
