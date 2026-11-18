@@ -9,6 +9,11 @@
 //   - every texture whose mips are all inline is NeverStream or small enough to stay resident.
 // So a replaced texture is written as NeverStream with all its mips inline, into every package that has a copy of it
 // (BuildOverlay). Storage packages are never rewritten, and no other package's streamed mips move.
+//
+// Static meshes are replaced the same way (step 31): maps hold copies of them too, and a replacement is a mod's model
+// file (glTF, FBX or OBJ) converted by `mirage model <file> --convert` (runtime/mesh_file.h), written in place of every
+// copy (runtime/model_files.h's layout), keeping the original's materials (section by section), its RB_BodySetup and
+// its properties, with UseSimpleLineCollision and UseSimpleBoxCollision off: the player collides with the new triangles.
 
 #include <UnrealLib/Assets/Texture.hpp>
 
@@ -48,18 +53,22 @@ namespace mirage::textures
 	// A DDS file's surfaces (throws std::runtime_error for anything else).
 	Encoded ParseDds(const std::vector<std::byte>& file);
 
-	// The paths of the Texture2D exports (and subclasses) of a package, read from its header only (the chunks that
-	// hold the tables, not the whole file), lowercase: "b_c_01.facade.t_x". A copy keeps its original path; a
-	// texture of the package itself gets the package's name in front ("edge_p.lightmaps.lm_1").
-	std::vector<std::string> ScanTextures(const std::filesystem::path& package);
+	// The paths of the exports a mod can replace, Texture2D (and subclasses) and StaticMesh, of a package, read from
+	// its header only (the chunks that hold the tables, not the whole file), lowercase: "b_c_01.facade.t_x". A copy
+	// keeps its original path; an object of the package itself gets the package's name in front
+	// ("edge_p.lightmaps.lm_1").
+	std::vector<std::string> ScanReplaceable(const std::filesystem::path& package);
 
-	// The object path a mod names a texture by, lowercase (see ScanTextures).
+	// The object path a mod names a texture or mesh by, lowercase (see ScanReplaceable).
 	std::string NormalizePath(std::string path);
+
+	// A model file (.glb, .gltf, .fbx, .obj): a mesh's replacement, read from its converted <file>.mmesh
+	bool IsModelFile(const std::filesystem::path& file);
 
 	struct Replacement
 	{
 		std::string path;					// Lowercase object path (NormalizePath)
-		std::filesystem::path file;			// The mod's image
+		std::filesystem::path file;			// The mod's image, or its model (IsModelFile)
 	};
 	struct Overlay
 	{
@@ -67,8 +76,8 @@ namespace mirage::textures
 		std::vector<std::string> replaced;	// Paths written
 		std::vector<std::string> problems;	// Replacements that couldn't be used, and why
 	};
-	// `package` with every replacement it holds a copy of rewritten (NeverStream, all mips inline, sizes and format
-	// from the image). Throws std::runtime_error if the package itself can't be read or written.
+	// `package` with every replacement it holds a copy of rewritten (textures: NeverStream, all mips inline, sizes and
+	// format from the image; meshes: the model, see above). Throws std::runtime_error if the package itself can't be read or written.
 	// `compress`: LZO like the original (slow: seconds per map), else uncompressed (the engine reads both; the game's
 	// own storage packages are uncompressed).
 	Overlay BuildOverlay(const std::filesystem::path& package, const std::vector<Replacement>& replacements,

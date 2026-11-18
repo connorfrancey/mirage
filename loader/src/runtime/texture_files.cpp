@@ -1,6 +1,9 @@
 #include "runtime/texture_files.h"
 
+#include "runtime/model_files.h"
+
 #include <UnrealLib/Assets/BulkData.hpp>
+#include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Core/Error.hpp>
 #include <UnrealLib/Linker/Linker.hpp>
 #include <UnrealLib/Names/NameTable.hpp>
@@ -327,7 +330,13 @@ namespace mirage::textures
 		}
 	}
 
-	std::vector<std::string> ScanTextures(const fs::path& package)
+	bool IsModelFile(const fs::path& file)
+	{
+		const std::string ext = Lower(file.extension().string());
+		return ext == ".glb" || ext == ".gltf" || ext == ".fbx" || ext == ".obj";
+	}
+
+	std::vector<std::string> ScanReplaceable(const fs::path& package)
 	{
 		std::vector<std::byte> head = ReadFile(package, 0, 64 * 1024);
 		BinaryReader sr{std::span<const std::byte>(head)};
@@ -397,7 +406,8 @@ namespace mirage::textures
 		std::vector<std::string> out;
 		for (std::size_t i = 0; i < exports.size(); ++i) {
 			const ObjectIndex idx = ObjectIndex::from_export(i);
-			if (!Assets::is_texture2d_class(className(idx))) continue;
+			const std::string cls = className(idx);
+			if (!Assets::is_texture2d_class(cls) && cls != "StaticMesh") continue;
 			out.push_back(ObjectPath(idx, packageName, name, outer, className));
 		}
 		return out;
@@ -431,17 +441,65 @@ namespace mirage::textures
 			BulkData sourceArt;
 			Encoded encoded;
 			PixelFormat original = PixelFormat::Unknown;
+			std::shared_ptr<Assets::StaticMesh> mesh;		// A mesh's replacement (else a texture's)
 			std::string path;
 		};
 		std::vector<Edit> edits;
 		for (std::size_t i = 0; i < pkg.exports().size(); ++i) {
 			const ObjectIndex idx = ObjectIndex::from_export(i);
-			if (!Assets::is_texture2d_class(pkg.class_name(idx))) continue;
+			const std::string cls = pkg.class_name(idx);
+			const bool isMesh = cls == "StaticMesh";
+			if (!isMesh && !Assets::is_texture2d_class(cls)) continue;
 			const std::string path = ObjectPath(idx, packageName, [&](ObjectIndex o) { return pkg.object_name(o); },
 												[&](ObjectIndex o) { return pkg.outer(o); },
 												[&](ObjectIndex o) { return pkg.class_name(o); });
 			const auto it = wanted.find(path);
 			if (it == wanted.end()) continue;
+			if (isMesh != IsModelFile(it->second->file)) {
+				result.problems.push_back(path + ": " + (isMesh ? "a mesh is replaced by a model file (glb, gltf, fbx, obj)"
+																 : "a texture is replaced by an image, not a model"));
+				continue;
+			}
+			if (isMesh) {
+				try {
+					const Assets::StaticMesh original = Assets::read_static_mesh(linker, ObjectRef{&pkg, idx});
+					const fs::path model = it->second->file;
+					models::MeshData data;
+					std::string error;
+					if (!models::ReadMeshFile(model.string() + ".mmesh", data, &error))
+						throw Fail(model.filename().string() + " isn't converted: run `mirage model " + model.filename().string() +
+								   " --convert` (" + error + ")");
+					if (data.sourceHash != models::HashFile(model.string()))
+						throw Fail(model.filename().string() + " changed since it was converted: run `mirage model " +
+								   model.filename().string() + " --convert` again");
+					// Section by section the original's materials (the last one for any more sections than it had)
+					std::vector<ObjectIndex> materials;
+					if (!original.lods.empty())
+						for (const auto& sec : original.lods.front().sections) materials.push_back(sec.material);
+					auto mesh = std::make_shared<Assets::StaticMesh>(models::MakeStaticMesh(
+						data, original.name, [&](std::size_t i, const std::string&) {
+							return materials.empty() ? ObjectIndex{} : materials[std::min(i, materials.size() - 1)];
+						}));
+					mesh->body_setup = original.body_setup;
+					mesh->internal_version = original.internal_version;
+					mesh->thumbnail_angle = original.thumbnail_angle;
+					mesh->thumbnail_distance = original.thumbnail_distance;
+					mesh->trailing_float = original.trailing_float;
+					ObjectProperties op = linker.read_properties(ObjectRef{&pkg, idx});
+					Edit e;
+					e.index = idx;
+					e.path = path;
+					e.propertiesOffset = op.header.properties_offset;
+					e.propertiesEnd = op.end_offset;
+					e.oldNative = pkg.export_data(i).size() - op.end_offset;
+					e.properties = std::move(op.properties);
+					e.mesh = std::move(mesh);
+					edits.push_back(std::move(e));
+				} catch (const std::exception& ex) {
+					result.problems.push_back(path + ": " + ex.what());
+				}
+				continue;
+			}
 			try {
 				const Assets::Texture2D tex = Assets::read_texture2d(linker, ObjectRef{&pkg, idx});
 				ObjectProperties op = linker.read_properties(ObjectRef{&pkg, idx});
@@ -463,7 +521,22 @@ namespace mirage::textures
 		if (edits.empty()) return result;
 
 		PackageModel model = PackageModel::from_package(pkg);
+		const auto native = [&](const Edit& e, std::uint64_t base) {
+			return e.mesh ? Assets::write_static_mesh(*e.mesh, ctx, base) : NativeData(ctx, e.sourceArt, e.encoded, base);
+		};
 		for (Edit& e : edits) {
+			if (e.mesh) {
+				// The new triangles are the collision, not the original's simple shapes
+				SetBool(e.properties, model, "UseSimpleLineCollision", false);
+				SetBool(e.properties, model, "UseSimpleBoxCollision", false);
+				replace_properties(model, e.index, e.propertiesOffset, e.propertiesEnd, e.properties);
+				auto& data = model.export_data[e.index.export_index()];
+				e.nativeStart = data.size() - e.oldNative;
+				data.resize(e.nativeStart);
+				const auto bytes = native(e, 0);
+				data.insert(data.end(), bytes.begin(), bytes.end());
+				continue;
+			}
 			const Mip& top = e.encoded.mips.front();
 			SetInt(e.properties, model, "SizeX", top.width);
 			SetInt(e.properties, model, "SizeY", top.height);
@@ -478,8 +551,8 @@ namespace mirage::textures
 			auto& data = model.export_data[e.index.export_index()];
 			e.nativeStart = data.size() - e.oldNative;
 			data.resize(e.nativeStart);
-			const auto native = NativeData(ctx, e.sourceArt, e.encoded, 0);
-			data.insert(data.end(), native.begin(), native.end());
+			const auto bytes = native(e, 0);
+			data.insert(data.end(), bytes.begin(), bytes.end());
 		}
 
 		// The bulk data offsets are absolute: lay the package out once to learn where each export lands, then write
@@ -490,9 +563,9 @@ namespace mirage::textures
 			for (Edit& e : edits) {
 				const std::uint64_t base = static_cast<std::uint64_t>(laid.exports()[e.index.export_index()].serial_offset) + e.nativeStart;
 				auto& data = model.export_data[e.index.export_index()];
-				const auto native = NativeData(ctx, e.sourceArt, e.encoded, base);
+				const auto bytes = native(e, base);
 				data.resize(e.nativeStart);
-				data.insert(data.end(), native.begin(), native.end());
+				data.insert(data.end(), bytes.begin(), bytes.end());
 			}
 		}
 		WriteOptions options;

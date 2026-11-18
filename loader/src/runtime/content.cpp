@@ -163,6 +163,27 @@ namespace mirage::content
 				std::erase_if(set->textures, [&](const textures::Replacement& r) { return r.path == path; });
 				set->textures.push_back({path, e.path()});
 			}
+			// meshes/<full path of the static mesh>.<model> (step 31), with its converted .mmesh next to it
+			for (const auto& e : std::filesystem::directory_iterator(folder / "meshes", ec)) {
+				if (!e.is_regular_file(ec)) continue;
+				const std::string name = e.path().filename().string();
+				if (e.path().extension() == ".mmesh") continue;
+				if (!textures::IsModelFile(e.path())) {
+					problems.push_back("meshes/" + name + " isn't a model (glb, gltf, fbx or obj)");
+					continue;
+				}
+				const std::string path = textures::NormalizePath(e.path().stem().string());
+				if (path.find('.') == std::string::npos) {
+					problems.push_back("meshes/" + name + ": name it by the mesh's full path, like P_Waste.GarbageBag_01.S_GarbageBag_01.glb");
+					continue;
+				}
+				if (!std::filesystem::is_regular_file(std::filesystem::path(e.path()).concat(".mmesh"), ec)) {
+					problems.push_back("meshes/" + name + " isn't converted: run `mirage model " + name + " --convert`");
+					continue;
+				}
+				std::erase_if(set->textures, [&](const textures::Replacement& r) { return r.path == path; });
+				set->textures.push_back({path, e.path()});
+			}
 			const auto file = folder / "defaults.toml";
 			if (!std::filesystem::exists(file)) continue;
 			try {

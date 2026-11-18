@@ -30,7 +30,7 @@ namespace mirage::textures
 		bool busy = false;					// Indexing or building
 		int packages = 0;					// Packages holding a replaced texture (opened as copies)
 		int ready = 0;						// ... whose copy existed already when the replacements were turned on
-		int textures = 0;					// Replacements found in some package
+		int textures = 0;					// Replacements (textures and meshes, of every mod) found in some package
 		std::size_t indexedPackages = 0;	// Packages in the index
 		double indexSeconds = 0.0;			// The last index update
 		double buildSeconds = 0.0;			// Making copies, so far

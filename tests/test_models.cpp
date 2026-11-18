@@ -3,6 +3,7 @@
 
 #include "detect.h"
 #include "runtime/model_files.h"
+#include "runtime/texture_files.h"
 
 #include <UnrealLib/UnrealLib.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
@@ -11,6 +12,8 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iostream>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -131,5 +134,61 @@ TEST(Models, BuildsAPackageTheGameCouldLoad)
     EXPECT_EQ(covered.size(), 12u);
     EXPECT_EQ(m.properties.get_bool("UseSimpleLineCollision"), std::optional<bool>(false));
     EXPECT_EQ(m.properties.get_bool("UseSimpleBoxCollision"), std::optional<bool>(false));
+    fs::remove_all(dir);
+}
+
+// A game mesh replaced (runtime/texture_files.h's BuildOverlay, step 31): the Prologue's garbage bag in its art map
+// becomes the cube, keeping the original's material and RB_BodySetup, with its own collision tree and the simple
+// collision switched off
+TEST(Models, ReplacesAMeshInAMapPackage)
+{
+    const fs::path cooked = Cooked();
+    if (cooked.empty()) GTEST_SKIP() << "Mirror's Edge not found";
+    const fs::path map = cooked / "Maps" / "SP01" / "Edge_Pt1_Art.me1";
+    const std::string target = "p_waste.garbagebag_01.s_garbagebag_01";
+
+    // The model: any file, its converted cube beside it with the file's hash
+    const fs::path dir = fs::temp_directory_path() / "mirage_test_mesh_replacement";
+    fs::create_directories(dir);
+    const fs::path model = dir / "cube.obj";
+    std::ofstream(model) << "# the cube's source\n";
+    auto cube = Cube();
+    cube.sourceHash = mirage::models::HashFile(model.string());
+    std::string error;
+    ASSERT_TRUE(mirage::models::WriteMeshFile(model.string() + ".mmesh", cube, &error)) << error;
+
+    const auto overlay = mirage::textures::BuildOverlay(map, {{target, model}});
+    ASSERT_TRUE(overlay.problems.empty()) << overlay.problems.front();
+    ASSERT_EQ(overlay.replaced, std::vector<std::string>{target});
+    const fs::path copy = dir / map.filename();
+    std::ofstream(copy, std::ios::binary).write(reinterpret_cast<const char*>(overlay.bytes.data()),
+                                                static_cast<std::streamsize>(overlay.bytes.size()));
+
+    const auto read = [&](const fs::path& file) {
+        Linker linker;
+        linker.add_search_path(cooked, true);
+        const Package& p = linker.load(file);
+        const auto e = p.find_export("P_Waste.GarbageBag_01.S_GarbageBag_01");
+        EXPECT_TRUE(e.has_value());
+        StaticMesh m = read_static_mesh(linker, {&p, *e});
+        const std::string material = p.object_path(m.lods[0].sections[0].material);
+        return std::pair{std::move(m), material};
+    };
+    const auto [before, beforeMaterial] = read(map);
+    const auto [after, afterMaterial] = read(copy);
+    EXPECT_NEAR(before.bounds.sphere_radius, 39.6f, 0.1f);    // The bag's, as the self-test expects it
+    EXPECT_NEAR(after.bounds.sphere_radius, 86.6f, 0.1f);     // The cube's corner: 50 * sqrt(3)
+    EXPECT_EQ(after.lods[0].num_vertices, 24);
+    EXPECT_EQ(after.kdop_triangles.size(), 12u);
+    EXPECT_EQ(afterMaterial, beforeMaterial);
+    EXPECT_EQ(after.body_setup.value, before.body_setup.value);
+    EXPECT_EQ(after.properties.get_bool("UseSimpleLineCollision"), std::optional<bool>(false));
+    EXPECT_EQ(after.properties.get_bool("UseSimpleBoxCollision"), std::optional<bool>(false));
+
+    // A stale conversion: refused with the reason
+    std::ofstream(model, std::ios::app) << "# edited after converting\n";
+    const auto stale = mirage::textures::BuildOverlay(map, {{target, model}});
+    ASSERT_EQ(stale.problems.size(), 1u);
+    EXPECT_NE(stale.problems[0].find("changed since it was converted"), std::string::npos) << stale.problems[0];
     fs::remove_all(dir);
 }

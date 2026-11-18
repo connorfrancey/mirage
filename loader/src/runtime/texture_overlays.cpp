@@ -22,8 +22,8 @@ namespace mirage::textures
 
 	namespace
 	{
-		constexpr const char* kIndexHeader = "mirage-texture-index 1";
-		constexpr const char* kOverlayVersion = "mirage-texture-overlay 2";	// Change when the copies' format changes
+		constexpr const char* kIndexHeader = "mirage-texture-index 2";		// 2: static meshes too
+		constexpr const char* kOverlayVersion = "mirage-texture-overlay 3";	// Change when the copies' format changes
 
 		std::mutex g_lock;
 		std::condition_variable g_cv;
@@ -121,7 +121,7 @@ namespace mirage::textures
 				e.size = size;
 				e.time = time;
 				try {
-					e.textures = ScanTextures(it->path());
+					e.textures = ScanReplaceable(it->path());
 				} catch (const std::exception& ex) {
 					e.textures.clear();
 					if (++failed <= 5) spdlog::warn("Content: {} can't be read for its textures: {}", rel, ex.what());
@@ -151,9 +151,14 @@ namespace mirage::textures
 			const fs::path original = cooked / FromUtf8(rel);
 			std::error_code ec;
 			h = Fnv(h, std::to_string(fs::file_size(original, ec)) + "/" + std::to_string(TimeOf(original)));
-			for (const Replacement& r : reps)
+			for (const Replacement& r : reps) {
 				h = Fnv(h, r.path + "|" + Utf8(fs::absolute(r.file)) + "|" + std::to_string(fs::file_size(r.file, ec)) + "/" +
 							   std::to_string(TimeOf(r.file)));
+				if (IsModelFile(r.file)) {		// What is written is its converted model
+					const fs::path mmesh = fs::path(r.file).concat(".mmesh");
+					h = Fnv(h, std::to_string(fs::file_size(mmesh, ec)) + "/" + std::to_string(TimeOf(mmesh)));
+				}
+			}
 			char hex[17];
 			std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(h));
 			return CacheDir() / "overlays" / (FromUtf8(rel).stem().string() + "-" + hex + FromUtf8(rel).extension().string());
@@ -201,7 +206,7 @@ namespace mirage::textures
 					return std::any_of(kv.second.begin(), kv.second.end(), [&](const Replacement& r) { return r.path == path; });
 				});
 				if (any) ++found;
-				else problems[or_.first].push_back(path + " isn't in any package of the game (check the file's name: the texture's full path)");
+				else problems[or_.first].push_back(path + " isn't in any package of the game (check the file's name: the object's full path)");
 			}
 
 			// Copies already built are used right away; the others are made the first time the game opens the package

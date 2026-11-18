@@ -14,6 +14,7 @@
 #include <cfloat>
 #include <cmath>
 #include <map>
+#include <stdexcept>
 #include <utility>
 
 namespace mirage::models
@@ -106,7 +107,7 @@ namespace mirage::models
 			return out;
 		}
 
-		StaticMesh Mesh(PackageModel& model, Linker& linker, const MeshData& data, const std::string& name, const std::string& defaultMaterial)
+		StaticMesh Mesh(const MeshData& data, const std::string& name, const MaterialFor& material)
 		{
 			const std::size_t n = data.vertices.size();
 			StaticMesh mesh;
@@ -137,14 +138,8 @@ namespace mirage::models
 			if (sections.empty()) sections.push_back({0, static_cast<std::uint32_t>(data.indices.size() / 3), ""});
 			for (std::size_t s = 0; s < sections.size(); ++s) {
 				const MeshSection& in = sections[s];
-				std::string material = in.material, cls = MaterialClass(linker, material);
-				if (cls.empty()) {
-					material = defaultMaterial;
-					cls = MaterialClass(linker, material);
-					if (cls.empty()) cls = "Material";
-				}
 				StaticMeshSection out;
-				out.material = ImportPath(model, material, "Engine", cls);
+				out.material = material(s, in.material);
 				out.enable_collision = out.old_enable_collision = out.enable_shadow_casting = true;
 				out.first_index = static_cast<std::int32_t>(in.firstIndex);
 				out.num_triangles = static_cast<std::int32_t>(in.triangles);
@@ -181,6 +176,15 @@ namespace mirage::models
 		}
 	}
 
+	UnrealLib::Assets::StaticMesh MakeStaticMesh(const MeshData& data, const std::string& name, const MaterialFor& material)
+	{
+		if (data.vertices.empty() || data.indices.empty()) throw std::runtime_error("the model has no triangles");
+		if (data.vertices.size() > kMaxVertices)
+			throw std::runtime_error("the model has " + std::to_string(data.vertices.size()) + " vertices; a game mesh holds at most " +
+									 std::to_string(kMaxVertices) + " (split it)");
+		return Mesh(data, name, material);
+	}
+
 	bool BuildPackage(UnrealLib::Linker& linker, const MeshData& data, const std::string& meshName, const std::filesystem::path& out,
 					  std::string* error, const std::string& defaultMaterial)
 	{
@@ -188,10 +192,6 @@ namespace mirage::models
 			if (error) *error = why;
 			return false;
 		};
-		if (data.vertices.empty() || data.indices.empty()) return fail("the model has no triangles");
-		if (data.vertices.size() > kMaxVertices)
-			return fail("the model has " + std::to_string(data.vertices.size()) + " vertices; a game mesh holds at most " +
-						std::to_string(kMaxVertices) + " (split it)");
 		try {
 			const Package* engine = linker.find_package("Engine");
 			if (!engine) return fail("the game's Engine package wasn't found");
@@ -211,7 +211,16 @@ namespace mirage::models
 			(void)model.make_name(packageName);
 			const ObjectIndex meshClass = ImportPath(model, "Engine.StaticMesh", "Core", "Class");
 
-			StaticMesh mesh = Mesh(model, linker, data, meshName, defaultMaterial);
+			// Each section's material: the game material its file names, else the default
+			StaticMesh mesh = MakeStaticMesh(data, meshName, [&](std::size_t, const std::string& name) {
+				std::string material = name, cls = MaterialClass(linker, material);
+				if (cls.empty()) {
+					material = defaultMaterial;
+					cls = MaterialClass(linker, material);
+					if (cls.empty()) cls = "Material";
+				}
+				return ImportPath(model, material, "Engine", cls);
+			});
 			ExportEntry e;
 			e.class_index = meshClass;
 			e.object_name = model.make_name(meshName);

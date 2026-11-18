@@ -76,7 +76,7 @@ Verified on 2026-11-13 against the repository and the self-tests.
 | 4. Mod format, ABI v1 | Done | `loader/include/mirage/api.h`: 137 functions in `MirageApi` (frozen by `tests/test_abi.cpp`), `mirage.hpp`, `mod.toml` |
 | 5. Lifecycle | Done, one gap | Resolver, phases, crash isolation, hot reload; crashes on a mod's own thread attributed but not tested |
 | 6. Hooks and events | Done | Script function hooks (0.7-0.8 ns unhooked), native detours, 7 events, objects by path from Lua/C++/C# |
-| 7. Content mods | Defaults and textures done | Sounds, meshes and T3D map edits not done |
+| 7. Content mods | Defaults, textures and meshes done | Sounds and T3D map edits not done (meshes: step 31, 2026-11-18) |
 | 8. Script patching | Done | Byte-identical encoder over 13,770 scripts; live patching |
 | 9. Menu as mods | Mostly done | 10 first-party mods, UI layer (`MirageUi`), mod manager; the runtime's own tools stay in the runtime |
 | 10. Tooling and distribution | Not started | Split into steps 35 and 40 |
@@ -1587,8 +1587,8 @@ below as self-tests. **Costs (targets):** a full-screen pass under 0.5 ms at 108
 - **Models and materials at runtime:** load a mesh and textures from a mod's files (glTF/FBX converted by the CLI
   through UnrealLib), swap the player's arms and body (step 7's texture path extended to meshes).
 
-**Status (2026-11-18): static models from mods work; materials, mesh replacement, skeletal meshes and the rest not
-started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
+**Status (2026-11-18): static models from mods and mesh replacement work; materials, skeletal meshes and the rest
+not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
 which stays out of Mirage.dll) to `<file>.mmesh` (runtime/mesh_file.h: the game's space, 50 units a meter by default,
 and a hash of the source so a changed model must be converted again). The runtime builds it on a worker into a package
 holding one StaticMesh (runtime/model_files, UnrealLib's new `write_static_mesh` and `build_kdop`; every cooked mesh
@@ -1598,8 +1598,13 @@ and the engine loads it like a cooked mesh. A level layer places it: an actor en
 `"<mod id>:models/x.glb"`) on a DynamicSMActor_Spawnable. Sections get the game material their file names
 ("Package.Name"), else EngineMaterials.DefaultMaterial. Self-test "Mirage models" (tests/mods/model-test: Blender's
 Suzanne): built in 0.35 s, in play at twice her size, and the player dropped on her head stands on her (its Base: the
-mesh's own triangles collide). Next: replacing the game's meshes (`content/meshes/`, the same writer), the model's own
-textures as materials, a rigid body (RB_BodySetup) for physics props.
+mesh's own triangles collide). Mesh replacement: a content mod's `meshes/<Package.Group.Name>.glb` (converted the
+same way) replaces that StaticMesh in every package holding a copy, through step 7's rewritten copies (the index now
+lists static meshes too; runtime/texture_files' BuildOverlay writes the model laid out as above, keeping the original's
+materials section by section, its RB_BodySetup and properties, with UseSimpleLineCollision and UseSimpleBoxCollision
+off). Self-test "Mirage mesh replacement": the Prologue's garbage bag (P_Waste.GarbageBag_01.S_GarbageBag_01, 123
+packages) is Suzanne in all 9 places the level draws it. Next: the model's own textures as materials, a rigid body
+for a replaced or new mesh from its own shape (the replaced bag keeps the bag's RB_BodySetup).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.

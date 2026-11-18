@@ -4465,7 +4465,7 @@ void TestMirageTextures()
                   static_cast<unsigned long long>(mirage::files::Built()), st.buildSeconds,
                   static_cast<unsigned long long>(mirage::files::Redirected()));
     s.notes.push_back(line);
-    if (st.textures != 1 || st.packages < 1) p.Problem("the texture should be found in at least one package");
+    if (st.textures < 1 || st.packages < 1) p.Problem("the texture should be found in at least one package");   // Counts every mod's
 
     const auto on = size();
     if (on != std::pair{256, 256}) p.Problem("on: the texture is " + describe(on) + ", not the mod's 256x256");
@@ -6289,6 +6289,46 @@ void TestModels()
     End(s);
 }
 
+// Step 31's mesh replacement, with tests/mods/model-test's content/meshes/: the Prologue's garbage bag
+// (P_Waste.GarbageBag_01.S_GarbageBag_01) replaced by Blender's Suzanne, on from the start like any content mod. The
+// level loaded before this step opened the packages holding the bag as rewritten copies: every component drawing it
+// now has Suzanne's size. The engine's world box is the box around the mesh's own box turned with the actor: its
+// half-diagonal is at least the mesh box's (so its largest axis at least that over sqrt(3)) and no axis passes it.
+// The bag's box (25.7, 22.9, 34.4) has a half-diagonal of 48.7; Suzanne's (68.4, 42.6, 49.2), 94.4: a world box whose
+// largest axis is between 54.5 and 94.4 is Suzanne's, and can't be the bag's.
+void TestMeshReplacement()
+{
+    Step& s = Begin("Mirage mesh replacement");
+    Probe p(s);
+    if (!mirage::textures::WaitIdle(120.0)) p.Problem("the replacement index took more than 2 minutes");
+    const auto st = mirage::textures::GetStatus("model-test");
+    for (const auto& problem : st.problems) p.Problem(problem);
+    constexpr float kBagDiagonal = 48.7f, kSuzanneDiagonal = 94.4f;
+    int count = 0, suzannes = 0;
+    float other = 0.f, reach = 0.f;
+    OnGameThread([&] {
+        for (auto* c : game::ObjectsOf<Classes::UStaticMeshComponent>()) {
+            if (!c->StaticMesh || c->StaticMesh->GetName() != "S_GarbageBag_01" || !c->Owner) continue;
+            const Classes::AActor* a = c->Owner;
+            const float scale = a->DrawScale * std::max({a->DrawScale3D.X, a->DrawScale3D.Y, a->DrawScale3D.Z}) * c->Scale *
+                                std::max({c->Scale3D.X, c->Scale3D.Y, c->Scale3D.Z});
+            if (!(scale > 0.f) || c->Bounds.SphereRadius <= 0.f) continue;
+            ++count;
+            const auto& e = c->Bounds.BoxExtent;
+            const float largest = std::max({e.X, e.Y, e.Z}) / scale;
+            reach = largest;
+            if (largest > kSuzanneDiagonal / std::sqrt(3.f) - 0.5f && largest < kSuzanneDiagonal + 0.5f) ++suzannes;
+            else other = largest;
+        }
+    });
+    s.notes.push_back(fmt::format("{} component(s) draw the bag, {} at Suzanne's size (the last reaches {:.1f} on its longest axis: "
+                                  "the bag can't pass {:.1f})", count, suzannes, reach, kBagDiagonal));
+    if (count == 0) p.Problem("no component in the level draws S_GarbageBag_01 (is the Prologue's art map loaded?)");
+    else if (suzannes != count)
+        p.Problem(fmt::format("{} of {} garbage bags aren't Suzanne (one reaches {:.1f})", count - suzannes, count, other));
+    End(s);
+}
+
 // Step 28's navigation, its first question: the editor's path builder (AScout::DefinePaths, through a TdScout's Exec)
 // run in the game on the loaded level. It must run, leave reach specs between the navigation points, and leave the game
 // playing: a garbage collection right after (the old reach specs freed: none may still be reachable from the
@@ -7691,7 +7731,8 @@ const Named* FeatureList()
         {"Mirage AI", &TestAI, false},
         {"Mirage class states", &TestClassStates, false},
         {"Mirage path building", &TestPathBuilding, false, true},
-        {"Mirage models", &TestModels, false},     // Opt-in: fails until every point gets reach specs (step 28)
+        {"Mirage models", &TestModels, false},
+        {"Mirage mesh replacement", &TestMeshReplacement, false},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},

@@ -171,8 +171,14 @@ TEST(Textures, RewritesAMapPackage)
 	fs::path file;
 	std::string target;
 	for (const fs::path& m : maps) {
-		for (const std::string& t : ScanTextures(m))
-			if (t.rfind(mirage::textures::NormalizePath(m.stem().string()) + ".", 0) != 0) { target = t; break; }
+		// A texture (the scan lists static meshes too)
+		Package p = Package::open(m);
+		for (std::size_t i = 0; i < p.exports().size() && target.empty(); ++i) {
+			const ObjectIndex idx = ObjectIndex::from_export(i);
+			if (!Assets::is_texture2d_class(p.class_name(idx))) continue;
+			const std::string t = mirage::textures::NormalizePath(p.object_path(idx));
+			if (t.rfind(mirage::textures::NormalizePath(m.stem().string()) + ".", 0) != 0) target = t;
+		}
 		if (!target.empty()) { file = m; break; }
 	}
 	ASSERT_FALSE(target.empty()) << "no Prologue package has a copied texture";
@@ -182,8 +188,9 @@ TEST(Textures, RewritesAMapPackage)
 	Package original = Package::open(file);
 	std::set<std::string> full;
 	for (std::size_t i = 0; i < original.exports().size(); ++i)
-		if (Assets::is_texture2d_class(original.class_name(ObjectIndex::from_export(i)))) full.insert(original.object_path(ObjectIndex::from_export(i)));
-	const auto scanned = ScanTextures(file);
+		if (const std::string cls = original.class_name(ObjectIndex::from_export(i)); Assets::is_texture2d_class(cls) || cls == "StaticMesh")
+			full.insert(original.object_path(ObjectIndex::from_export(i)));
+	const auto scanned = ScanReplaceable(file);
 	EXPECT_EQ(scanned.size(), full.size());
 
 	// Replace it with a 64x32 picture
