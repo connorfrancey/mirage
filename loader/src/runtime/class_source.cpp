@@ -58,7 +58,7 @@ namespace mirage::classes
 		}
 
 		// Bumped whenever UnrealLib's class builder changes what it writes (packages of older builds are rebuilt)
-		constexpr const char* kBuilderVersion = "builder 2 (own component templates);";
+		constexpr const char* kBuilderVersion = "builder 3 (auto states, label table offset);";
 
 		// FNV-1a: the package name follows the source
 		std::uint32_t Hash(const std::string& s)

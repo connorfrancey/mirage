@@ -6045,6 +6045,61 @@ void TestAI()
     End(s);
 }
 
+// States in a mod's class (tests/mods/layer-test/classes/StateProbe.uc, placed through profile-lua's layer): its auto
+// state is entered when it spawns (BeginState), and the state's code runs, on across a latent Sleep.
+void TestClassStates()
+{
+    Step& s = Begin("Mirage class states");
+    Probe p(s);
+    WaitPlayerReady(10.0);
+    mirage::layers::EditActor probe;
+    probe.name = "StateProbe";
+    probe.cls = "layer-test:classes/StateProbe.uc";
+    std::string map, error;
+    OnGameThread([&] {
+        map = mirage::layers::CurrentMap();
+        if (auto* pawn = game::Pawn()) {
+            probe.location[0] = pawn->Location.X;
+            probe.location[1] = pawn->Location.Y;
+            probe.location[2] = pawn->Location.Z + 400.f;
+        }
+        mirage::layers::Write("profile-lua", {probe}, &error);
+    });
+    namespace r = mirage::reflect;
+    std::string atStart, now;
+    int began = 0, ran = 0, ticks = 0;
+    const auto read = [&] {
+        OnGameThread([&] {
+            auto* a = mirage::layers::Find("profile-lua", probe.name);
+            if (!a) return;
+            atStart = r::GetText(r::Resolve(a->Class, a, "AtStart"));
+            now = r::GetText(r::Resolve(a->Class, a, "Now"));
+            began = r::GetInt(r::Resolve(a->Class, a, "Began"));
+            ran = r::GetInt(r::Resolve(a->Class, a, "Ran"));
+            ticks = r::GetInt(r::Resolve(a->Class, a, "Ticks"));
+        });
+    };
+    WaitFor(15.0, [&] { read(); return ticks > 5; });       // The class compiles first (seconds)
+    WaitTicks(5);
+    read();
+    s.notes.push_back(fmt::format("state at PostBeginPlay '{}', now '{}'; BeginState {} time(s), state code {} of 2 lines, {} ticks",
+                                  atStart, now, began, ran, ticks));
+    if (ticks == 0) p.Problem("the probe didn't spawn or tick: " + error);
+    else {
+        if (now != "Probing") p.Problem("the auto state isn't the actor's state ('" + now + "')");
+        if (began != 1) p.Problem(fmt::format("BeginState ran {} time(s)", began));
+        if (ran != 2) p.Problem(fmt::format("the state code ran {} of 2 lines", ran));
+    }
+    OnGameThread([&] { mirage::layers::Write("profile-lua", {}, &error); });
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "profile-lua") {
+            std::error_code ec;
+            std::filesystem::remove(m.dir / "levels" / (map + ".toml"), ec);
+            std::filesystem::remove(m.dir / "levels", ec);
+        }
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -7321,6 +7376,7 @@ const Named* FeatureList()
         {"Mirage script editor", &TestScriptEditor, false},
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage AI", &TestAI, false},
+        {"Mirage class states", &TestClassStates, false},
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},

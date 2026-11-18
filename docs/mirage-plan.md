@@ -1497,8 +1497,11 @@ Characters/, Animations/, TdSharedContent.u), so any level can spawn any kind. T
 "mirage-ai:classes/MirageBot.uc"`: a layer names another mod's class with its id) (`AIClass = "TdGame.AITemplate_PatrolCop"`); the bot goes with its
 MirageBot (restart, unload). Self-test "Mirage AI": placed in front of the player in the Prologue, a
 TdBotPawn_PatrolCop with TdAI_PatrolCop, health 100, armed; a checkpoint restart gives one new bot; the layer emptied
-removes it; within 8 s it takes the player as its enemy, seen. Found on the way: an `auto state` with latent code in a mod class never started (the spawner uses `Tick`
-instead; not yet investigated). Not yet: the ammo drops (`SetMainWeaponAmmoDrop` is private: from C++), a
+removes it; within 8 s it takes the player as its enemy, seen. Found on the way and fixed in UnrealLib's compiler (local commit on `uc-compiler`; the pin
+waits for it to be pushed): a mod class's `auto state` was never entered (the class copied its parent's Auto flag,
+which tells `GotoState('Auto')` the class has none) and state code never ran (`LabelTableOffset` pointed at the
+LabelTable token instead of past it). Self-test "Mirage class states" (tests/mods/layer-test/classes/StateProbe.uc);
+`class_source` builder version 3 rebuilds packages of older builds. Not yet: the ammo drops (`SetMainWeaponAmmoDrop` is private: from C++), a
 team shared by several bots, behaviour hooks, navigation, the API and the TAS.
 
 **Milestone:** a mod sets up an ambush in an existing level with three enemies using a mod-defined flanking behaviour;
