@@ -5914,6 +5914,120 @@ void TestLevelEditor()
     End(s);
 }
 
+// Step 28's spawning, with tests/mods/ai-test (classes/MirageBot.uc): a MirageBot written into the mod's level layer in
+// front of the player sets up a patrol cop the way the game's Kismet spawner does: a TdBotPawn_PatrolCop possessed by
+// a TdAI_PatrolCop, shown, with the template's health and a weapon. A checkpoint restart replaces it (one bot, a new
+// one); the layer removed takes it away. The layer file is removed after, so no other step meets the cop.
+void TestAI()
+{
+    Step& s = Begin("Mirage AI");
+    Probe p(s);
+    namespace fs = std::filesystem;
+    WaitPlayerReady(10.0);
+    Classes::FVector at{};
+    int yaw = 0;
+    std::string map;
+    OnGameThread([&] {
+        map = mirage::layers::CurrentMap();
+        if (auto* pawn = game::Pawn()) {
+            at = pawn->Location;
+            yaw = pawn->Rotation.Yaw;
+        }
+    });
+    const float rad = static_cast<float>(yaw & 0xFFFF) * 6.2831853f / 65536.f;
+    mirage::layers::EditActor cop;
+    cop.name = "Cop";
+    cop.cls = "classes/MirageBot.uc";
+    cop.location[0] = at.X + std::cos(rad) * 600.f;
+    cop.location[1] = at.Y + std::sin(rad) * 600.f;
+    cop.location[2] = at.Z + 40.f;
+    cop.rotation[1] = (yaw + 32768) & 0xFFFF;      // Facing the player
+    std::string error;
+    bool written = false;
+    OnGameThread([&] { written = mirage::layers::Write("ai-test", {cop}, &error); });
+    if (!written) {
+        p.Problem("couldn't write ai-test's layer: " + error);
+        End(s);
+        return;
+    }
+    // The bots near where the layer placed it, set up (shown, possessed, not initializing)
+    struct Bot { Classes::ATdBotPawn* pawn; std::string pawnClass, controllerClass; int health; bool weapon; };
+    const auto bots = [&] {
+        std::vector<Bot> out;
+        OnGameThread([&] {
+            for (auto* a : game::ActorsOf(Classes::ATdBotPawn::StaticClass())) {
+                auto* b = static_cast<Classes::ATdBotPawn*>(a);
+                const float dx = b->Location.X - cop.location[0], dy = b->Location.Y - cop.location[1];
+                if (b->bDeleteMe || dx * dx + dy * dy > 500.f * 500.f) continue;
+                if (b->bHidden || b->bInitializing || !b->myController) continue;
+                out.push_back({b, b->Class->GetName(), b->myController->Class->GetName(), b->Health, b->Weapon != nullptr});
+            }
+        });
+        return out;
+    };
+    std::vector<Bot> found;
+    WaitFor(10.0, [&] { found = bots(); return !found.empty(); });
+    if (found.size() != 1) {
+        // Script logs go nowhere readable: what the MirageBot holds says how far it got
+        std::string why;
+        OnGameThread([&] {
+            auto* spawner = mirage::layers::Find("ai-test", "Cop");
+            if (!spawner) {
+                why = "no MirageBot in the level";
+                return;
+            }
+            namespace r = mirage::reflect;
+            const std::string problem = r::GetText(r::Resolve(spawner->Class, spawner, "Problem"));
+            auto* bot = static_cast<Classes::ATdBotPawn*>(r::GetObj(r::Resolve(spawner->Class, spawner, "Bot")));
+            auto* controller = r::GetObj(r::Resolve(spawner->Class, spawner, "BotController"));
+            why = fmt::format("MirageBot: problem '{}', bot {}, controller {}", problem, bot ? r::ClassNameOf(bot) : "none",
+                              controller ? r::ClassNameOf(controller) : "none");
+            if (bot)
+                why += fmt::format(", hidden {}, initializing {}, possessed {}, health {}, weapon {}", !!bot->bHidden, !!bot->bInitializing,
+                                   bot->myController != nullptr, bot->Health, bot->Weapon != nullptr);
+        });
+        s.notes.push_back(why);
+        p.Problem(fmt::format("{} bot(s) set up where the layer placed one", found.size()));
+    } else {
+        const Bot& b = found[0];
+        s.notes.push_back(fmt::format("spawned: {} with {}, health {}, {}", b.pawnClass, b.controllerClass, b.health,
+                                      b.weapon ? "armed" : "no weapon"));
+        if (b.pawnClass != "TdBotPawn_PatrolCop" || b.controllerClass != "TdAI_PatrolCop") p.Problem("not the template's pawn and controller");
+        if (b.health <= 0) p.Problem("the bot has no health");
+        if (!b.weapon) p.Problem("the bot has no weapon (the template's Colt 1911)");
+
+        // A checkpoint restart: the layer spawns again, and the old bot goes with its MirageBot
+        const game::ObjectId first = game::IdOf(b.pawn);
+        if (!RestartAndWait()) p.Problem("the restart didn't come");
+        std::vector<Bot> after;
+        WaitFor(10.0, [&] { after = bots(); return !after.empty(); });
+        const bool fresh = after.size() == 1 && !(game::IdOf(after[0].pawn) == first);
+        s.notes.push_back(fmt::format("after a checkpoint restart: {} bot(s), {}", after.size(), fresh ? "a new one" : "not a new one"));
+        if (!fresh) p.Problem(fmt::format("a checkpoint restart left {} bot(s) (one new one expected)", after.size()));
+    }
+
+    // The layer emptied: the bot goes
+    OnGameThread([&] { mirage::layers::Write("ai-test", {}, &error); });
+    const bool gone = WaitFor(5.0, [&] {
+        int n = 0;
+        OnGameThread([&] {
+            for (auto* a : game::ActorsOf(Classes::ATdBotPawn::StaticClass()))
+                n += !a->bDeleteMe && std::abs(a->Location.X - cop.location[0]) < 500.f && std::abs(a->Location.Y - cop.location[1]) < 500.f;
+        });
+        return n == 0;
+    });
+    s.notes.push_back(fmt::format("layer emptied: {}", gone ? "the bot is gone" : "the bot is still there"));
+    if (!gone) p.Problem("the bot outlived its layer entry");
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "ai-test") {
+            std::error_code ec;
+            fs::remove(m.dir / "levels" / (map + ".toml"), ec);
+            fs::remove(m.dir / "levels", ec);
+        }
+    WaitPlayerReady(10.0);
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -7189,6 +7303,7 @@ const Named* FeatureList()
         {"Mirage Kismet editor", &TestKismetEditor, false},
         {"Mirage script editor", &TestScriptEditor, false},
         {"Mirage level editor", &TestLevelEditor, false},
+        {"Mirage AI", &TestAI, false},
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},

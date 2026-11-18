@@ -1483,6 +1483,23 @@ the TAS already seeds. **Failure:** a bot whose mod behaviour crashes falls back
 - **Navigation:** path data for new geometry (step 13 maps and level additions): generated offline by the CLI, loaded
   with the level.
 
+**Status (2026-11-18): spawning from level layers works; behaviour, navigation, the API and the TAS not started.**
+How the game spawns a bot (SeqAct_TdActorFactory, native; found with Ghidra: the deferred spawn is `0x012588f0`, its
+creation `0x01258690`): `UTdActorFactoryAI::CreateActor` (vtable +0x114) makes the pawn hidden, in stasis and
+`bInitializing`; then one step a tick: the pawn's `SetupTemplate(template, bGiveDefaultInventory)` until it returns
+more than 0 (mesh, animation sets, weapons, vision, health), `GroundSpeed = AnimationRunSpeed`, `SpeedMaxBaseVelocity =
+AnimationWalkSpeed`, `SpeedMinBaseVelocity = 1` and `UpdateAnimationBaseSpeed`, the controller's `SetupTemplate` until
+done, the ammo drops (`SetMainWeaponAmmoDrop`), then `AITeam.AddMember`, the controller's `Initialize`, and the pawn
+shown. The templates (`AITemplate_PatrolCop`, `_Assault`, `_Riot`, `_Sniper`, ...) are classes in TdGame.u naming
+their pawn class, controller class, mesh, animations and weapons by path, all in standalone packages (TdSpContent.u,
+Characters/, Animations/, TdSharedContent.u), so any level can spawn any kind. `tests/mods/ai-test/classes/MirageBot.uc`
+does the same in UnrealScript from a layer entry (`AIClass = "TdGame.AITemplate_PatrolCop"`); the bot goes with its
+MirageBot (restart, unload). Self-test "Mirage AI": placed in front of the player in the Prologue, a
+TdBotPawn_PatrolCop with TdAI_PatrolCop, health 100, armed; a checkpoint restart gives one new bot; the layer emptied
+removes it. Found on the way: an `auto state` with latent code in a mod class never started (the spawner uses `Tick`
+instead; not yet investigated). Next: MirageBot as a class every mod can use (first-party), the ammo drops and team
+choice, then behaviour hooks.
+
 **Milestone:** a mod sets up an ambush in an existing level with three enemies using a mod-defined flanking behaviour;
 they navigate a mod-added area, and the TAS replays the encounter verified (AI included in the determinism of step 24).
 
