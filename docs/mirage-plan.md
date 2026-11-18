@@ -1521,8 +1521,11 @@ every level again); run with GIsGame off and the levels joined again the game's 
 0x00b82c80), it defines the Prologue's paths in 0.7 s: 369 navigation points, 633 reach specs (the cooked level had
 1,085). Progress is logged through a tap on GWarn's StatusUpdatef and a sample of the game thread every 3 s. Self-test
 "Mirage path building": built, a garbage collection after it, and a patrol cop set up on the new paths still fights.
-Open: why fewer reach specs than the cooked level (long reach specs, the Scout's path sizes), whether the AI paths over
-them (a chase through the new paths), paths for a mod's added geometry only, and the octree's old reach specs (no crash
+Open: only 168 of the 369 points get reach specs (633, the cooked level had 1,085), and none near the Prologue's start:
+the nearest linked point is 9,067 units from a cop placed by the player, so the AI there has no paths (the cop that
+"moved 0 units"). The self-test now asks the cop's own FindPathTo for a route of 3 or more points to a point 1,000 to
+3,000 units away and walks it there with the game's debug MoveToPos (TestingState_MoveToPos); it fails on this, so it
+is opt-in until fixed. Then: paths for a mod's added geometry only, and the octree's old reach specs (no crash
 after a collection, not proven clean).
 
 Not yet: the ammo drops (`SetMainWeaponAmmoDrop` is private: from C++), a

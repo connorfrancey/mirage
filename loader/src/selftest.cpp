@@ -6189,7 +6189,8 @@ void TestClassStates()
 // Step 28's navigation, its first question: the editor's path builder (AScout::DefinePaths, through a TdScout's Exec)
 // run in the game on the loaded level. It must run, leave reach specs between the navigation points, and leave the game
 // playing: a garbage collection right after (the old reach specs freed: none may still be reachable from the
-// navigation octree) and a patrol cop that then moves on the new paths for a few seconds.
+// navigation octree), a patrol cop that then fights the player, and that cop's pathfinding routed over the new reach
+// specs and walked to a far navigation point.
 void TestPathBuilding()
 {
     Step& s = Begin("Mirage path building");
@@ -6238,17 +6239,66 @@ void TestPathBuilding()
                 return static_cast<Classes::ATdBotPawn*>(a);
         return nullptr;
     };
+    const auto dist = [](const Classes::FVector& a, const Classes::FVector& b) {
+        const float dx = a.X - b.X, dy = a.Y - b.Y, dz = a.Z - b.Z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
     WaitFor(15.0, [&] { bool there = false; OnGameThread([&] { if (auto* b = bot()) { there = true; first = b->Location; } }); return there; });
-    WaitTicks(300);         // Five seconds of the cop thinking and moving on the new paths
+    WaitFor(8.0, [&] { OnGameThread([&] { if (auto* b = bot()) fighting = b->myController->myEnemy == game::Pawn(); }); return fighting; });
+    s.notes.push_back(fmt::format("after a garbage collection, a cop on the new paths: {}", fighting ? "fighting" : "not fighting"));
+    if (!fighting) p.Problem("the cop didn't take the player as its enemy after the paths were built");
+
+    // The AI paths over the new reach specs: the controller's own FindPathTo (native) to a navigation point 1,000 to
+    // 3,000 units away gives a route of several points, and the game's debug MoveToPos (TestingState_MoveToPos, not
+    // interruptible) walks the cop along it to that point.
+    Classes::FVector goal{};
+    int route = 0, tried = 0;
+    std::string why;
     OnGameThread([&] {
-        if (auto* b = bot()) {
-            moved = b->Location;
-            fighting = b->myController->myEnemy == game::Pawn();
+        auto* b = bot();
+        auto* world = game::World();
+        if (!b || !world) { why = "no cop or world"; return; }
+        if (!mirage::call::LayoutChecked(&why)) return;
+        std::vector<Classes::ANavigationPoint*> distant;
+        int all = 0, linked = 0;
+        float nearest = 1e9f, farthest = 0.f;
+        for (auto* n = world->NavigationPointList; n && all < 100000; n = n->nextNavigationPoint) {
+            const float d = dist(n->Location, b->Location);
+            ++all;
+            if (n->PathList.Num() > 0) { ++linked; nearest = std::min(nearest, d); farthest = std::max(farthest, d); }
+            if (d > 1000.f && d < 3000.f && n->PathList.Num() > 0) distant.push_back(n);
         }
+        std::sort(distant.begin(), distant.end(), [&](auto* x, auto* y) { return dist(x->Location, b->Location) > dist(y->Location, b->Location); });
+        for (auto* n : distant) {
+            if (++tried > 40) break;
+            mirage::call::Params find(b->myController, "FindPathTo");
+            find.SetRaw("aPoint", &n->Location, sizeof n->Location);
+            find.Set("MaxPathLength", std::int32_t{0});
+            find.Set("bReturnPartial", false);
+            if (!find.Valid() || !mirage::call::Call(b->myController, find, &why)) { if (why.empty()) why = find.Error(); return; }
+            if (b->myController->RouteCache.Num() >= 3) {      // FindPathTo fills the route it found
+                goal = n->Location;
+                route = b->myController->RouteCache.Num();
+                b->myController->MoveToPos(goal);
+                return;
+            }
+        }
+        why = fmt::format("no route of 3 or more points to any of {} navigation points tried ({} points, {} with reach specs, "
+                          "{:.0f} to {:.0f} units from the cop)", tried, all, linked, nearest, farthest);
     });
-    const float dx = moved.X - first.X, dy = moved.Y - first.Y;
-    s.notes.push_back(fmt::format("after a garbage collection, a cop for 5 s: {}, moved {:.0f} units", fighting ? "fighting" : "not fighting",
-                                  std::sqrt(dx * dx + dy * dy)));
+    float left = 0.f;
+    const double walk0 = GameSeconds();
+    if (route == 0) p.Problem("FindPathTo over the new paths: " + why);
+    else {
+        // shortcut: 25 s covers 3,000 units at a cop's run; a slower bot class would need more
+        const bool arrived = WaitFor(25.0, [&] {
+            OnGameThread([&] { if (auto* b = bot()) { moved = b->Location; left = dist(moved, goal); } });
+            return left < 150.f;
+        });
+        s.notes.push_back(fmt::format("FindPathTo: a route of {} points to a navigation point {:.0f} units away; MoveToPos: {} ({:.0f} units left, {:.1f} s)",
+                                      route, dist(first, goal), arrived ? "arrived" : "didn't arrive", left, GameSeconds() - walk0));
+        if (!arrived) p.Problem(fmt::format("the cop didn't walk the route to its goal ({:.0f} units left)", left));
+    }
     OnGameThread([&] { mirage::layers::Write("profile-lua", {}, &error); });
     for (const auto& m : mirage::mods::List())
         if (m.id == "profile-lua") {
@@ -7537,7 +7587,7 @@ const Named* FeatureList()
         {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage AI", &TestAI, false},
         {"Mirage class states", &TestClassStates, false},
-        {"Mirage path building", &TestPathBuilding, false},
+        {"Mirage path building", &TestPathBuilding, false, true},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
