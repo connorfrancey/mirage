@@ -22,6 +22,7 @@ uv run mirage game-test --no-build --only "Mirage maps,Mirage world access"   # 
 uv run mirage install-game          # build and install into the game
 uv run mirage features              # feature switches (cmake/Features.cmake)
 uv run mirage sdk                   # regenerate the SDK (sdk/) from the game's packages
+uv run mirage model <file>          # what a glTF/FBX/OBJ model holds for the game (tools/model, assimp)
 ```
 
 - Never run a bare `cmake --build`: without the MSVC environment the cache picks up clang and the configure breaks.

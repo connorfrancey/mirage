@@ -797,6 +797,39 @@ def unreallib(ctx: click.Context, config: str, no_build: bool, cooked_pc: Path |
     ctx.exit(code and 1)
 
 
+@cli.command("model")
+@click.argument("model_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--json", "as_json", is_flag=True, help="The report as JSON.")
+@click.option("--strict", is_flag=True, help="Exit with 1 when the model has problems for the game.")
+@click.option("--no-build", is_flag=True, help="Run mirage_model as it was last built.")
+@verbose_option
+@click.pass_context
+def model(ctx: click.Context, model_file: Path, as_json: bool, strict: bool, no_build: bool, verbose: bool) -> None:
+    """What a 3D model (glTF, FBX, OBJ) holds for the game: meshes, vertices, triangles, UVs, materials, size, and what
+    a game static mesh can't take. Read with assimp by tools/model (its own build folder, always release: assimp never
+    goes into Mirage.dll); the first build takes a few minutes."""
+    tc = _toolchain(ctx)
+    folder = b.ROOT / "cmake-build-x86-model"
+    exe = folder / "mirage_model.exe"
+    if not no_build:
+        if not (folder / "build.ninja").exists():
+            args = [tc.cmake, "-S", str(b.ROOT / "tools" / "model"), "-B", str(folder), "-G", "Ninja",
+                    "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_CXX_COMPILER=cl.exe", "-DCMAKE_C_COMPILER=cl.exe"]
+            if b.run_tool(console, tc, args, "Configuring [bold]tools/model[/]", folder / "mirage-configure.log",
+                          verbose=verbose).returncode != 0:
+                console.print(f"[red]Configuring tools/model failed[/]: {folder / 'mirage-configure.log'}")
+                ctx.exit(2)
+        if b.run_tool(console, tc, [tc.ninja, "-C", str(folder), "mirage_model"], "Building [bold]mirage_model[/]",
+                      folder / "mirage-build.log", verbose=verbose).returncode != 0:
+            console.print(f"[red]Building mirage_model failed[/]: {folder / 'mirage-build.log'}")
+            ctx.exit(2)
+    if not exe.exists():
+        console.print(f"[red]{exe} not found[/]: build it first (without --no-build).")
+        ctx.exit(2)
+    args = [str(exe), str(model_file)] + (["--json"] if as_json else []) + (["--strict"] if strict else [])
+    ctx.exit(subprocess.run(args, cwd=b.ROOT).returncode)
+
+
 @cli.command("sdk")
 @config_option
 @click.option("--no-build", is_flag=True, help="Run mirage_sdkgen as it was last built.")
