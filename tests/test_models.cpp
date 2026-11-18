@@ -7,6 +7,7 @@
 
 #include <UnrealLib/UnrealLib.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
+#include <UnrealLib/Linker/ReflectionSchema.hpp>
 
 #include <gtest/gtest.h>
 
@@ -134,6 +135,23 @@ TEST(Models, BuildsAPackageTheGameCouldLoad)
     EXPECT_EQ(covered.size(), 12u);
     EXPECT_EQ(m.properties.get_bool("UseSimpleLineCollision"), std::optional<bool>(false));
     EXPECT_EQ(m.properties.get_bool("UseSimpleBoxCollision"), std::optional<bool>(false));
+    EXPECT_EQ(m.properties.get_bool("UseSimpleRigidBodyCollision"), std::optional<bool>(true));
+    // Its rigid body: a subobject with the box's 8 corners as one convex element, and no cooked copy
+    ASSERT_TRUE(m.body_setup.is_export());
+    EXPECT_EQ(p->object_path(m.body_setup), "Cube.RB_BodySetup_0");
+    EXPECT_EQ(p->class_name(m.body_setup), "RB_BodySetup");
+    ReflectionSchema schema(linker);
+    for (const char* name : {"Core", "Engine"})
+        if (const Package* s = linker.find_package(name)) schema.add_package(*s);
+    const ObjectProperties body = linker.read_properties({p, m.body_setup}, &schema);
+    const Property* geometry = find_property(body.properties, "AggGeom");
+    ASSERT_NE(geometry, nullptr);
+    PropertyFormatOptions fo;
+    fo.names = &p->names();
+    const std::string text = format_property_value(geometry->value, fo);
+    EXPECT_NE(text.find("VertexData=((X=-50.0,Y=-50.0,Z=-50.0)"), std::string::npos) << text;
+    const auto data = p->export_data(m.body_setup.export_index());
+    EXPECT_EQ(data.size() - body.end_offset, 4u);       // PreCachedPhysData: an empty array
     fs::remove_all(dir);
 }
 

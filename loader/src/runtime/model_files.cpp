@@ -3,6 +3,7 @@
 
 #include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Linker/Linker.hpp>
+#include <UnrealLib/Linker/ReflectionSchema.hpp>
 #include <UnrealLib/Objects/ObjectHeader.hpp>
 #include <UnrealLib/Package/Package.hpp>
 #include <UnrealLib/Properties/PropertyTag.hpp>
@@ -25,6 +26,7 @@ namespace mirage::models
 		using namespace UnrealLib::Assets;
 
 		constexpr std::uint64_t kMeshFlags = 0x000F000400000000ull;		// As the game's StaticMesh exports store them
+		constexpr std::uint64_t kBodyFlags = 0x0007000000000000ull;		// ... and their RB_BodySetup subobjects
 		constexpr std::uint32_t kPackageFlags = 0x00000009u;			// AllowDownload | Cooked
 		constexpr std::size_t kMaxVertices = 32767;						// Twice that (the shadow copies) in 16-bit indices
 
@@ -69,6 +71,45 @@ namespace mirage::models
 			} catch (const std::exception&) {
 				return {};
 			}
+		}
+
+		// The mesh's rigid body, a subobject of it as the game's are: one convex element, the corners of its box, which
+		// PhysX cooks when a body is made (the native data holds no cooked copy, like the game's own: an empty
+		// PreCachedPhysData). The export's data, header to native data.
+		// shortcut: a box around the model, not its convex hull; a hull when props need a closer shape.
+		std::vector<std::byte> BodySetupData(PackageModel& model, Linker& linker, const StaticMesh& mesh, const FName& none,
+											 std::int32_t netIndex)
+		{
+			ReflectionSchema schema(linker);
+			for (const char* name : {"Core", "Engine"})
+				if (const Package* p = linker.find_package(name)) schema.add_package(*p);
+			const auto type = schema.find_property("RB_BodySetup", "AggGeom");
+			if (!type) throw std::runtime_error("RB_BodySetup.AggGeom isn't in the game's Engine package");
+			const Vec3 o = mesh.bounds.origin, e = mesh.bounds.box_extent;
+			std::string corners;
+			for (int i = 0; i < 8; ++i) {
+				char v[128];
+				std::snprintf(v, sizeof v, "%s(X=%.6f,Y=%.6f,Z=%.6f)", i ? "," : "", o.x + ((i & 1) ? e.x : -e.x),
+							  o.y + ((i & 2) ? e.y : -e.y), o.z + ((i & 4) ? e.z : -e.z));
+				corners += v;
+			}
+			PropertyParseOptions options;
+			options.make_name = [&](std::string_view s) { return model.make_name(s); };
+			options.resolve_object = [](std::string_view) -> std::optional<ObjectIndex> { return std::nullopt; };
+			options.schema = &schema;
+			Property geometry;
+			geometry.name = "AggGeom";
+			geometry.value = parse_property_value("(ConvexElems=((VertexData=(" + corners + "))))", *type, options);
+			geometry.tag = make_property_tag("AggGeom", 0, *type, options.make_name);
+			BinaryWriter w(model.summary.context());
+			ObjectHeader header;
+			header.net_index = netIndex;
+			ObjectHeaderInput input;
+			input.object_flags = kBodyFlags;
+			write_object_header(w, header, input);
+			write_properties(w, {geometry}, none);
+			w.write_i32(0);		// PreCachedPhysData: none
+			return w.take();
 		}
 
 		Property BoolProperty(PackageModel& model, const char* name, bool value)
@@ -226,10 +267,19 @@ namespace mirage::models
 			e.object_name = model.make_name(meshName);
 			e.object_flags = kMeshFlags;
 			const ObjectIndex index = model.add_export(std::move(e), {});
-			model.summary.generations.back().net_object_count = 1;
+			ExportEntry body;
+			body.class_index = ImportPath(model, "Engine.RB_BodySetup", "Core", "Class");
+			body.outer = index;
+			body.object_name = model.make_name("RB_BodySetup_0");
+			body.object_flags = kBodyFlags;
+			const ObjectIndex bodyIndex = model.add_export(std::move(body), {});
+			model.export_data[bodyIndex.export_index()] = BodySetupData(model, linker, mesh, none, 1);
+			mesh.body_setup = bodyIndex;
+			model.summary.generations.back().net_object_count = 2;
+			// The player and traces collide with the triangles (the kDOP tree), rigid bodies with the body's shape
 			const std::vector<Property> properties = {BoolProperty(model, "UseSimpleLineCollision", false),
 													  BoolProperty(model, "UseSimpleBoxCollision", false),
-													  BoolProperty(model, "UseSimpleRigidBodyCollision", false)};
+													  BoolProperty(model, "UseSimpleRigidBodyCollision", true)};
 			const SerializationContext ctx = model.summary.context();
 			// Inline bulk data stores its package offset: written once to learn where the export lands, then again
 			std::vector<std::byte> bytes;

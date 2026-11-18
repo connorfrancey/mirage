@@ -60,9 +60,12 @@ namespace mirage::models
 			if (!ReadMeshFile(mmesh.string(), data, &error)) return error;
 			if (data.sourceHash != HashFile(file.string()))
 				return "it changed since it was converted: run `mirage model " + file.filename().string() + " --convert` again";
+			// Named by the converted model and the builder's version: a package of an older layout is built again
+			constexpr const char* kBuilderVersion = "mirage-model-package 2";		// 2: RB_BodySetup
 			std::ifstream in(mmesh, std::ios::binary);
 			char hash[16];
-			std::snprintf(hash, sizeof hash, "%08x", HashBytes(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>())));
+			std::snprintf(hash, sizeof hash, "%08x",
+						  HashBytes(kBuilderVersion + std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>())));
 			package = paths::Dir() / "models" / (meshName + "_" + hash + ".upk");
 			std::error_code ec;
 			if (fs::is_regular_file(package, ec)) return {};

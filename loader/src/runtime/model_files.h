@@ -7,9 +7,9 @@
 // streams hold every vertex twice (the second half the shadow volume's extruded copies, the shadow stream 0 then 1),
 // the edges and a double-sided flag per triangle for shadow volumes, one fragment per section, InternalVersion 16, and
 // a kDOP collision tree over all its triangles (UnrealLib's build_kdop), so the player and traces collide with the
-// triangles themselves (UseSimpleLineCollision and UseSimpleBoxCollision off; there is no RB_BodySetup, so no rigid
-// body). Each section's material is a game material named by the file's material name ("Package.Name"), else
-// `defaultMaterial`.
+// triangles themselves (UseSimpleLineCollision and UseSimpleBoxCollision off). A new mesh also gets an RB_BodySetup
+// for rigid bodies (physics props): a convex box around it, cooked by PhysX when a body is made. Each section's
+// material is a game material named by the file's material name ("Package.Name"), else `defaultMaterial`.
 
 #include "runtime/mesh_file.h"
 

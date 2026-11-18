@@ -6274,6 +6274,38 @@ void TestModels()
         s.notes.push_back(fmt::format("dropped from {:.0f} above her top: landed at {:.0f} ({:.0f} above her top), standing on her: {}", 150.f,
                                       landed.Z, landed.Z - top, based));
         if (!based) p.Problem(fmt::format("the player isn't standing on the model (landed {:.0f} below its top): no collision", top - landed.Z));
+
+        // Her rigid body (the mesh's RB_BodySetup, cooked by PhysX when the body is made): a physics prop of her 300
+        // units above the player's middle, beside her, falls and comes to rest on the floor, not through it
+        Classes::AActor* prop = nullptr;
+        std::string why;
+        Classes::FVector start{}, rest{};
+        OnGameThread([&] {
+            auto* mesh = static_cast<Classes::ADynamicSMActor*>(actor)->StaticMeshComponent->StaticMesh;
+            const mirage::physics::Vec at{actor->Location.X + 300.f, actor->Location.Y, home.Z + 300.f};
+            prop = mirage::physics::SpawnProp(mesh, at, 0, 0, 0, 1.f, &why);
+            if (prop) start = prop->Location;
+        });
+        if (!prop) p.Problem("her mesh made no physics prop: " + why);
+        else {
+            // At rest: hardly moving over 10 ticks, after falling
+            Classes::FVector last = start;
+            const bool rested = WaitFor(15.0, [&] {
+                WaitTicks(10);
+                Classes::FVector now{};
+                OnGameThread([&] { now = prop->Location; });
+                const float moved = std::fabs(now.X - last.X) + std::fabs(now.Y - last.Y) + std::fabs(now.Z - last.Z);
+                last = now;
+                return start.Z - now.Z > 100.f && moved < 1.f;
+            });
+            rest = last;
+            s.notes.push_back(fmt::format("a physics prop of her fell {:.0f} and came to rest {:.0f} below the player's middle ({})",
+                                          start.Z - rest.Z, home.Z - rest.Z, rested ? "at rest" : "still moving after 15 s"));
+            if (!rested) p.Problem("her physics prop didn't fall and come to rest");
+            // The floor is about 90 below the player's middle; through it, the prop would fall on
+            else if (home.Z - rest.Z > 200.f) p.Problem(fmt::format("her physics prop fell through the floor ({:.0f} below)", home.Z - rest.Z));
+            OnGameThread([&] { prop->Destroy(); });
+        }
     }
     OnGameThread([&] {
         if (auto* pawn = game::Pawn()) pawn->SetLocation(home);

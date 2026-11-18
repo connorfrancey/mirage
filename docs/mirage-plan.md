@@ -1603,8 +1603,11 @@ same way) replaces that StaticMesh in every package holding a copy, through step
 lists static meshes too; runtime/texture_files' BuildOverlay writes the model laid out as above, keeping the original's
 materials section by section, its RB_BodySetup and properties, with UseSimpleLineCollision and UseSimpleBoxCollision
 off). Self-test "Mirage mesh replacement": the Prologue's garbage bag (P_Waste.GarbageBag_01.S_GarbageBag_01, 123
-packages) is Suzanne in all 9 places the level draws it. Next: the model's own textures as materials, a rigid body
-for a replaced or new mesh from its own shape (the replaced bag keeps the bag's RB_BodySetup).
+packages) is Suzanne in all 9 places the level draws it. A new mesh has a rigid body too: an RB_BodySetup subobject
+with one convex element, its box's corners (PhysX cooks it when a body is made, as for the game's: no cooked copy is
+stored), so `physics_spawn` makes props of it; in "Mirage models" a prop of Suzanne falls 340 units and rests on the
+floor. Next: the model's own textures as materials; a body from the model's convex hull rather than its box; a
+replaced mesh's own body (it keeps the original's RB_BodySetup).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.
