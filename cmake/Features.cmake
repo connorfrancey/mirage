@@ -39,7 +39,7 @@ endfunction()
 
 mirage_stage(0  "D3D9 hook + ImGui demo window (INSERT)")
 mirage_stage(1  "logging: spdlog, mirage.log")
-mirage_stage(2  "themes: json, imjson, the theme files (on the demo window)")
+mirage_stage(2  "themes: toml11, the theme files (on the demo window)")
 mirage_stage(3  "the real menu: module system, config, keybinds, menu GUI; no features")
 mirage_stage(4  "menu-only features that never touch the game, and the not-implemented stubs")
 mirage_stage(5  "HUD overlays drawn every frame")

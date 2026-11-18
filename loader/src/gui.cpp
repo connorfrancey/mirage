@@ -297,8 +297,8 @@ namespace
 
 void gui::ApplyStyle()
 {
-    theme::ApplyBaseStyle(); // fixed layout + default colors; JSON themes are layered on top by imjson
-    theme::Apply(theme::Current()); // load the selected theme file (menu colors + imjson document)
+    theme::ApplyBaseStyle(); // fixed layout + default colors; TOML themes are pushed on top each frame
+    theme::Apply(theme::Current()); // load the selected theme file (menu colors + style colors and rounding)
 }
 
 bool gui::CaptureKey(int vk)
@@ -328,7 +328,7 @@ void gui::Render()
         return;
     }
 
-    theme::Begin(); // imjson pushes the theme onto ImGui's style stack
+    theme::Begin(); // pushes the theme onto ImGui's style stack
     const float dt = ImGui::GetIO().DeltaTime;
     // Auto sized, never past the bottom of the screen: a long panel (TAS) scrolls with the mouse wheel instead
     constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar;

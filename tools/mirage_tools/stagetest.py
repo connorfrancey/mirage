@@ -505,8 +505,7 @@ def write_report(session: Path, config: str, results: list[StageResult], unit_te
             out.append("\nTheir source files:\n" + "".join(f"- `{s}`\n" for s in srcs))
         elif r.stage <= 3:
             layer = {0: "`loader/src/hooks.cpp`, `loader/src/minimal/minimal.cpp`, MirageHook/ImGui (cmake/Libraries.cmake)",
-                     1: "`loader/src/log.cpp`, `loader/src/log.h`, spdlog, zstd", 2: "`loader/src/theme.cpp`, `loader/src/theme_backend.cpp`, "
-                     "nlohmann_json, imjson", 3: "`loader/src/dllmain.cpp`, `loader/src/gui.cpp`, `loader/src/config.cpp`, `loader/src/core/*`, "
+                     1: "`loader/src/log.cpp`, `loader/src/log.h`, spdlog, zstd", 2: "`loader/src/theme.cpp`, toml11", 3: "`loader/src/dllmain.cpp`, `loader/src/gui.cpp`, `loader/src/config.cpp`, `loader/src/core/*`, "
                      "`loader/src/diag.cpp`"}.get(r.stage, "")
             out.append(f"\nLayer sources: {layer}\n")
 

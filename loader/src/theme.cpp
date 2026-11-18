@@ -1,5 +1,4 @@
 #include "theme.h"
-#include "theme_backend.h"
 #include "paths.h"
 
 #include <Windows.h>
@@ -11,12 +10,10 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
-#include <stdexcept>
-#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
+#include <toml.hpp>
 
 namespace fs = std::filesystem;
-using json = nlohmann::json;
 
 namespace {
 
@@ -30,15 +27,15 @@ struct Theme {
 
 // The structural style (padding/spacing) stays fixed: the clickgui layout relies on it, so themes
 // can only change colors and rounding.
-struct FloatVar { const char* key; float ImGuiStyle::* member; };
+struct FloatVar { const char* key; float ImGuiStyle::* member; ImGuiStyleVar var; };
 constexpr FloatVar kRounding[] = {
-    {"WindowRounding",    &ImGuiStyle::WindowRounding},
-    {"ChildRounding",     &ImGuiStyle::ChildRounding},
-    {"PopupRounding",     &ImGuiStyle::PopupRounding},
-    {"FrameRounding",     &ImGuiStyle::FrameRounding},
-    {"ScrollbarRounding", &ImGuiStyle::ScrollbarRounding},
-    {"GrabRounding",      &ImGuiStyle::GrabRounding},
-    {"TabRounding",       &ImGuiStyle::TabRounding},
+    {"WindowRounding",    &ImGuiStyle::WindowRounding,    ImGuiStyleVar_WindowRounding},
+    {"ChildRounding",     &ImGuiStyle::ChildRounding,     ImGuiStyleVar_ChildRounding},
+    {"PopupRounding",     &ImGuiStyle::PopupRounding,     ImGuiStyleVar_PopupRounding},
+    {"FrameRounding",     &ImGuiStyle::FrameRounding,     ImGuiStyleVar_FrameRounding},
+    {"ScrollbarRounding", &ImGuiStyle::ScrollbarRounding, ImGuiStyleVar_ScrollbarRounding},
+    {"GrabRounding",      &ImGuiStyle::GrabRounding,      ImGuiStyleVar_GrabRounding},
+    {"TabRounding",       &ImGuiStyle::TabRounding,       ImGuiStyleVar_TabRounding},
 };
 
 struct MenuColorVar { const char* key; ImVec4 theme::MenuColors::* member; };
@@ -63,14 +60,20 @@ constexpr const char* kExportedColors[] = {
     "Header", "HeaderHovered", "HeaderActive", "Separator",
 };
 
+// What a theme file gives, validated: pushed onto ImGui's style stack every frame
+struct Loaded {
+    std::vector<std::pair<ImGuiCol, ImVec4>>     colors;
+    std::vector<std::pair<ImGuiStyleVar, float>> vars;
+    theme::MenuColors menu;
+};
+
 std::vector<std::string> g_names;
 std::string              g_current = kDefaultTheme;
-std::string              g_text;          // sanitized {"Colors":..,"Rounding":..} handed to imjson every frame
-bool                     g_pushed = false;
-theme::MenuColors        g_menu;
+Loaded                   g_theme;
+int                      g_pushedColors = 0, g_pushedVars = 0;
 
 fs::path Dir() { return paths::Dir() / "themes"; }
-fs::path ThemePath(const std::string& name) { return Dir() / (name + ".json"); }
+fs::path ThemePath(const std::string& name) { return Dir() / (name + ".toml"); }
 
 // ---- colors ---------------------------------------------------------------------------------
 ImVec4 Mix(ImVec4 a, ImVec4 b, float t)
@@ -99,15 +102,24 @@ bool ParseHex(std::string s, ImVec4& out)
     return true;
 }
 
-// [r,g,b] / [r,g,b,a] (0..1) or a hex string
-bool ToColor(const json& v, ImVec4& out)
+// A TOML number, integer or float
+bool ToFloat(const toml::value& v, float& out)
 {
-    if (v.is_string()) return ParseHex(v.get<std::string>(), out);
+    if (v.is_floating()) out = static_cast<float>(v.as_floating());
+    else if (v.is_integer()) out = static_cast<float>(v.as_integer());
+    else return false;
+    return true;
+}
+
+// [r,g,b] / [r,g,b,a] (0..1) or a hex string
+bool ToColor(const toml::value& v, ImVec4& out)
+{
+    if (v.is_string()) return ParseHex(v.as_string(), out);
     if (!v.is_array() || (v.size() != 3 && v.size() != 4)) return false;
     float c[4] = {0.f, 0.f, 0.f, 1.f};
     for (size_t i = 0; i < v.size(); ++i) {
-        if (!v[i].is_number()) return false;
-        c[i] = std::clamp(v[i].get<float>(), 0.f, 1.f);
+        if (!ToFloat(v.as_array()[i], c[i])) return false;
+        c[i] = std::clamp(c[i], 0.f, 1.f);
     }
     out = {c[0], c[1], c[2], c[3]};
     return true;
@@ -266,7 +278,7 @@ std::vector<std::pair<std::string, Theme>> Builtins()
     };
 }
 
-// ---- Theme -> JSON text (hand-formatted so the files stay readable) ---------------------------
+// ---- Theme -> TOML text (hand-formatted so the files stay readable) ---------------------------
 std::string Num(float v)
 {
     char buf[32];
@@ -277,101 +289,84 @@ std::string Num(float v)
 }
 std::string Arr(ImVec4 c) { return "[" + Num(c.x) + ", " + Num(c.y) + ", " + Num(c.z) + ", " + Num(c.w) + "]"; }
 
-std::string ToJsonText(const Theme& t)
+std::string ToTomlText(const Theme& t)
 {
     std::ostringstream o;
-    o << "// Mirror's Edge menu theme (JSON; comments are allowed).\n"
-         "// Colors:   ImGuiCol names without the prefix, as [r, g, b, a] in 0..1 or \"#RRGGBB[AA]\".\n"
-         "// Rounding: WindowRounding, FrameRounding, ... (applied through moleium/imjson).\n"
-         "// Menu:     the custom-drawn parts: module rows, accent bar, settings panels.\n"
-         "// Anything missing falls back to the default dark theme. Spacing/padding can't be themed.\n"
-         "{\n  \"Colors\": {\n";
-    for (size_t i = 0; i < std::size(kExportedColors); ++i) {
-        const int idx = ColorIndex(kExportedColors[i]);
-        o << "    \"" << kExportedColors[i] << "\": " << Arr(t.style.Colors[idx])
-          << (i + 1 < std::size(kExportedColors) ? ",\n" : "\n");
-    }
-    o << "  },\n  \"Rounding\": {\n";
-    for (size_t i = 0; i < std::size(kRounding); ++i)
-        o << "    \"" << kRounding[i].key << "\": " << Num(t.style.*kRounding[i].member)
-          << (i + 1 < std::size(kRounding) ? ",\n" : "\n");
-    o << "  },\n  \"Menu\": {\n";
+    o << "# Mirror's Edge menu theme (TOML).\n"
+         "# Colors:   ImGuiCol names without the prefix, as [r, g, b, a] in 0..1 or \"#RRGGBB[AA]\".\n"
+         "# Rounding: WindowRounding, FrameRounding, ...\n"
+         "# Menu:     the custom-drawn parts: module rows, accent bar, settings panels.\n"
+         "# Anything missing falls back to the default dark theme. Spacing/padding can't be themed.\n"
+         "\n[Colors]\n";
+    for (const char* name : kExportedColors)
+        o << name << " = " << Arr(t.style.Colors[ColorIndex(name)]) << "\n";
+    o << "\n[Rounding]\n";
+    for (const auto& r : kRounding)
+        o << r.key << " = " << Num(t.style.*r.member) << "\n";
+    o << "\n[Menu]\n";
     for (const auto& cv : kMenuColors)
-        o << "    \"" << cv.key << "\": " << Arr(t.menu.*cv.member) << ",\n";
-    o << "    \"row_height\": " << Num(t.menu.rowHeight) << "\n  }\n}\n";
+        o << cv.key << " = " << Arr(t.menu.*cv.member) << "\n";
+    o << "row_height = " << Num(t.menu.rowHeight) << "\n";
     return o.str();
 }
 
-// ---- JSON text -> what imjson + the menu need ------------------------------------------------
-struct Loaded {
-    std::string imjson;          // {"Colors": {...}, "Rounding": {...}} - exactly what imjson gets
-    theme::MenuColors menu;
-};
-
-// Throws std::runtime_error on invalid JSON. imjson only ever sees a rebuilt, validated document
-// (known color names, numeric values, no layout keys, no fonts), never the raw file.
-Loaded ParseTheme(const std::string& text, const std::string& label)
+// A built-in theme as a file would give it (the fallback when a file is missing or broken)
+Loaded FromTheme(const Theme& t)
 {
-    const json doc = json::parse(text, nullptr, /*allow_exceptions*/ false, /*ignore_comments*/ true);
-    if (doc.is_discarded() || !doc.is_object())
-        throw std::runtime_error("not a valid JSON object");
-
     Loaded out;
-    json colors = json::object(), rounding = json::object();
+    for (const char* name : kExportedColors)
+        out.colors.emplace_back(ColorIndex(name), t.style.Colors[ColorIndex(name)]);
+    for (const auto& r : kRounding)
+        out.vars.emplace_back(r.var, t.style.*r.member);
+    out.menu = t.menu;
+    return out;
+}
 
-    for (auto it = doc.begin(); it != doc.end(); ++it)
-        if (it.key() != "Colors" && it.key() != "Rounding" && it.key() != "Menu")
-            spdlog::warn("Theme '{}': key '{}' ignored (supported: Colors, Rounding, Menu)", label, it.key());
+// ---- TOML file -> what the style stack and the menu need ---------------------------------------
+// Throws on a file that isn't valid TOML. Only known color names, rounding vars and menu keys with values of the right
+// type are kept; the rest is logged and ignored (no layout keys, no fonts).
+Loaded ParseTheme(const fs::path& path, const std::string& label)
+{
+    const toml::value doc = toml::parse(path);
+    Loaded out;
 
-    if (const auto c = doc.find("Colors"); c != doc.end() && c->is_object()) {
-        for (auto it = c->begin(); it != c->end(); ++it) {
+    for (const auto& [key, _] : doc.as_table())
+        if (key != "Colors" && key != "Rounding" && key != "Menu")
+            spdlog::warn("Theme '{}': key '{}' ignored (supported: Colors, Rounding, Menu)", label, key);
+
+    if (doc.contains("Colors") && doc.at("Colors").is_table())
+        for (const auto& [key, value] : doc.at("Colors").as_table()) {
             ImVec4 col;
-            if (ColorIndex(it.key()) < 0) { spdlog::warn("Theme '{}': unknown color '{}'", label, it.key()); continue; }
-            if (!ToColor(it.value(), col)) { spdlog::warn("Theme '{}': bad value for color '{}'", label, it.key()); continue; }
-            colors[it.key()] = json::array({col.x, col.y, col.z, col.w});
+            const int idx = ColorIndex(key);
+            if (idx < 0) { spdlog::warn("Theme '{}': unknown color '{}'", label, key); continue; }
+            if (!ToColor(value, col)) { spdlog::warn("Theme '{}': bad value for color '{}'", label, key); continue; }
+            out.colors.emplace_back(idx, col);
         }
-    }
 
-    if (const auto r = doc.find("Rounding"); r != doc.end() && r->is_object()) {
-        for (auto it = r->begin(); it != r->end(); ++it) {
-            const bool known = std::any_of(std::begin(kRounding), std::end(kRounding),
-                                           [&](const FloatVar& v) { return it.key() == v.key; });
-            if (!known || !it.value().is_number()) { spdlog::warn("Theme '{}': rounding '{}' ignored", label, it.key()); continue; }
-            rounding[it.key()] = std::max(0.f, it.value().get<float>());
+    if (doc.contains("Rounding") && doc.at("Rounding").is_table())
+        for (const auto& [key, value] : doc.at("Rounding").as_table()) {
+            const auto r = std::find_if(std::begin(kRounding), std::end(kRounding), [&](const FloatVar& v) { return key == v.key; });
+            float f;
+            if (r == std::end(kRounding) || !ToFloat(value, f)) { spdlog::warn("Theme '{}': rounding '{}' ignored", label, key); continue; }
+            out.vars.emplace_back(r->var, std::max(0.f, f));
         }
-    }
 
-    if (const auto m = doc.find("Menu"); m != doc.end() && m->is_object()) {
-        for (auto it = m->begin(); it != m->end(); ++it) {
-            if (it.key() == "row_height") {
-                if (it.value().is_number()) out.menu.rowHeight = std::clamp(it.value().get<float>(), 18.f, 48.f);
+    if (doc.contains("Menu") && doc.at("Menu").is_table())
+        for (const auto& [key, value] : doc.at("Menu").as_table()) {
+            if (key == "row_height") {
+                if (float f; ToFloat(value, f)) out.menu.rowHeight = std::clamp(f, 18.f, 48.f);
                 continue;
             }
             const auto cv = std::find_if(std::begin(kMenuColors), std::end(kMenuColors),
-                                         [&](const MenuColorVar& v) { return it.key() == v.key; });
+                                         [&](const MenuColorVar& v) { return key == v.key; });
             ImVec4 col;
-            if (cv == std::end(kMenuColors) || !ToColor(it.value(), col)) {
-                spdlog::warn("Theme '{}': menu.{} ignored", label, it.key());
+            if (cv == std::end(kMenuColors) || !ToColor(value, col)) {
+                spdlog::warn("Theme '{}': menu.{} ignored", label, key);
                 continue;
             }
             out.menu.*(cv->member) = col;
         }
-    }
-
-    json clean = json::object();
-    if (!colors.empty())   clean["Colors"]   = std::move(colors);
-    if (!rounding.empty()) clean["Rounding"] = std::move(rounding);
-    if (!clean.empty()) out.imjson = clean.dump();
     return out;
-}
-
-std::string ReadFile(const fs::path& path)
-{
-    std::ifstream in(path, std::ios::binary);
-    if (!in) throw std::runtime_error("cannot open " + path.string());
-    std::stringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
 }
 
 } // namespace
@@ -386,7 +381,7 @@ void theme::Init()
         const auto path = ThemePath(name);
         if (fs::exists(path)) continue;                    // never overwrite user edits
         std::ofstream out(path);
-        if (out && (out << ToJsonText(t))) spdlog::info("Wrote built-in theme {}", path.string());
+        if (out && (out << ToTomlText(t))) spdlog::info("Wrote built-in theme {}", path.string());
         else                               spdlog::warn("Could not write theme {}", path.string());
     }
     Rescan();
@@ -397,7 +392,7 @@ void theme::Rescan()
     g_names.clear();
     std::error_code ec;
     for (const auto& e : fs::directory_iterator(Dir(), ec))
-        if (e.is_regular_file() && e.path().extension() == ".json")
+        if (e.is_regular_file() && e.path().extension() == ".toml")
             g_names.push_back(e.path().stem().string());
     std::sort(g_names.begin(), g_names.end());
 }
@@ -409,7 +404,7 @@ bool theme::Apply(const std::string& name)
     const auto path = ThemePath(name);
     if (fs::exists(path)) {
         try {
-            t = ParseTheme(ReadFile(path), name);
+            t = ParseTheme(path, name);
             ok = true;
         } catch (const std::exception& e) {
             spdlog::error("Theme '{}' failed to load, using the default: {}", name, e.what());
@@ -418,11 +413,10 @@ bool theme::Apply(const std::string& name)
         spdlog::warn("Theme '{}' not found, using the default", name);
     }
 
-    if (!ok) t = ParseTheme(ToJsonText(MakeDark(kRed)), kDefaultTheme);   // built-in fallback, no file needed
+    if (!ok) t = FromTheme(MakeDark(kRed));   // built-in fallback, no file needed
 
     g_current = ok ? name : kDefaultTheme;
-    g_text    = std::move(t.imjson);
-    g_menu    = t.menu;
+    g_theme   = std::move(t);
     if (ok) spdlog::info("Theme '{}' applied", name);
     return ok;
 }
@@ -437,21 +431,17 @@ void theme::ApplyBaseStyle()
 
 void theme::Begin()
 {
-    g_pushed = false;
-    if (g_text.empty()) return;
-
-    g_pushed = backend::Push(g_text);
-    if (!g_pushed) {
-        spdlog::error("imjson failed to apply theme '{}'; using the built-in style instead", g_current);
-        g_text.clear();                        // don't retry (and fail) every frame
-    }
+    for (const auto& [idx, col] : g_theme.colors) ImGui::PushStyleColor(idx, col);
+    for (const auto& [var, f] : g_theme.vars) ImGui::PushStyleVar(var, f);
+    g_pushedColors = static_cast<int>(g_theme.colors.size());
+    g_pushedVars   = static_cast<int>(g_theme.vars.size());
 }
 
 void theme::End()
 {
-    if (!g_pushed) return;
-    backend::Pop();
-    g_pushed = false;
+    if (g_pushedColors) ImGui::PopStyleColor(g_pushedColors);
+    if (g_pushedVars)   ImGui::PopStyleVar(g_pushedVars);
+    g_pushedColors = g_pushedVars = 0;
 }
 
 void theme::OpenFolder()
@@ -461,7 +451,7 @@ void theme::OpenFolder()
 
 const std::vector<std::string>& theme::Names() { return g_names; }
 const std::string& theme::Current() { return g_current; }
-const theme::MenuColors& theme::Menu() { return g_menu; }
+const theme::MenuColors& theme::Menu() { return g_theme.menu; }
 
 int theme::CurrentIndex()
 {

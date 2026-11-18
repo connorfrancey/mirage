@@ -70,9 +70,8 @@ THIRD_PARTY = [
     ("{fmt} (bundled with spdlog)", "text formatting", "https://github.com/fmtlib/fmt", "spdlog",
      ["include/spdlog/fmt/bundled/fmt.license.rst", "include/spdlog/fmt/bundled/LICENSE.rst"]),
     ("Zstandard", "compressing old logs", "https://github.com/facebook/zstd", "zstd", ["LICENSE"]),
-    ("JSON for Modern C++", "settings, themes and macro files", "https://github.com/nlohmann/json", "nlohmann_json",
+    ("JSON for Modern C++", "settings and macro files", "https://github.com/nlohmann/json", "nlohmann_json",
      ["LICENSE.MIT", "LICENSE"]),
-    ("imjson", "themes", "https://github.com/moleium/imjson", "imjson", ["LICENSE.md", "LICENSE"]),
     ("imgui-filebrowser", "the file browser", "https://github.com/AirGuanZ/imgui-filebrowser", "imgui_filebrowser",
      ["LICENSE", "LICENSE.txt"]),
 ]

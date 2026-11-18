@@ -3,15 +3,20 @@
 #include <string>
 #include <vector>
 
-// Themes are JSON files in <dll folder>/themes/ (comments allowed), applied with moleium/imjson.
-// Built-in ones are written there on first run (existing files are never overwritten).
+// Themes are TOML files in <dll folder>/themes/. Built-in ones are written there on first run
+// (existing files are never overwritten).
 //
-//   { "Colors":   { "WindowBg": [0.07, 0.07, 0.08, 0.96], "CheckMark": "#E6332E" },
-//     "Rounding": { "WindowRounding": 4.0, "FrameRounding": 3.0 },
-//     "Menu":     { "accent": [0.9, 0.2, 0.18, 1.0], "row_height": 26.0 } }
+//   [Colors]
+//   WindowBg = [0.07, 0.07, 0.08, 0.96]
+//   CheckMark = "#E6332E"
+//   [Rounding]
+//   WindowRounding = 4.0
+//   [Menu]
+//   accent = [0.9, 0.2, 0.18, 1.0]
+//   row_height = 26.0
 //
-// imjson works on ImGui's style stack, so the theme is *pushed* every frame (Begin) and popped
-// again (End) instead of being written into ImGuiStyle once.
+// The theme is *pushed* onto ImGui's style stack every frame (Begin) and popped again (End)
+// instead of being written into ImGuiStyle once.
 namespace theme {
 
     // Colors/sizes for the custom-drawn parts of the menu (module rows, panels).
@@ -28,16 +33,16 @@ namespace theme {
 
     void Init();                                   // create themes/ and the built-in theme files, scan
     void Rescan();                                 // re-read the list of theme files
-    bool Apply(const std::string& name);           // load themes/<name>.json; falls back to the default theme
+    bool Apply(const std::string& name);           // load themes/<name>.toml; falls back to the default theme
     void OpenFolder();                             // open themes/ in Explorer
     void ApplyBaseStyle();                         // the style every theme is layered on (needs an ImGui context)
 
-    // Call around the menu drawing, inside a frame. Begin() pushes the active theme through imjson,
+    // Call around the menu drawing, inside a frame. Begin() pushes the active theme,
     // End() pops it again (must happen before ImGui::EndFrame()).
     void Begin();
     void End();
 
-    const std::vector<std::string>& Names();       // available theme names (file names without .json)
+    const std::vector<std::string>& Names();       // available theme names (file names without .toml)
     const std::string& Current();
     int  CurrentIndex();                           // index into Names(), -1 if not found
     const MenuColors& Menu();
