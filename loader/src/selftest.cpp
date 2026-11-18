@@ -41,6 +41,7 @@
 #include "runtime/kismet_trace.h"
 #include "runtime/kismet_layers.h"
 #include "runtime/mod_profile.h"
+#include "runtime/mod_world.h"
 #include "runtime/detours.h"
 #include "runtime/symbols.h"
 #include "runtime/natives.h"
@@ -5739,6 +5740,85 @@ void TestScriptEditor()
     End(s);
 }
 
+// The showcase mod examples/mods/grapple, driven through its console functions (runtime/mods.h Eval): hooked to a
+// point above and ahead of the player, the rope holds (the player never gets farther than its length), lifts the player
+// and is drawn in the world; in Pull mode it reels the player in until it lets go by itself; released, the drawing is
+// gone and the mod's move ended with it.
+void TestGrapple()
+{
+    Step& s = Begin("Mirage grapple (example)");
+    Probe p(s);
+    Module* m = modules::Find("Grappling Hook");
+    if (!m) {
+        p.Problem("the Grappling Hook module is missing (examples/mods/grapple)");
+        End(s);
+        return;
+    }
+    OnRenderThread([m] { m->SetEnabled(true); });
+    const auto eval = [](const std::string& code) {
+        mirage::mods::EvalResult r;
+        OnGameThread([&] { r = mirage::mods::Eval("grapple", code); });
+        return r;
+    };
+    const auto shared = [](const char* key) {
+        char v[128]{};
+        mirage::mods::game_api::ShareGet("grapple", key, v, sizeof v);
+        return std::string(v);
+    };
+    WaitPlayerReady(10.0);
+    WaitTicks(3);       // The module's first tick registers its move
+    Classes::FVector start{};
+    int yaw = 0;
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) {
+            start = pawn->Location;
+            yaw = pawn->Rotation.Yaw;
+        }
+    });
+    const float rad = static_cast<float>(yaw & 0xFFFF) * 6.2831853f / 65536.f;
+    const Classes::FVector anchor{start.X + std::cos(rad) * 300.f, start.Y + std::sin(rad) * 300.f, start.Z + 700.f};
+    eval("mirage.setting('mode'):set('Swing')");
+    const auto attached = eval(fmt::format("grapple_at({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", anchor.X, anchor.Y, anchor.Z));
+    if (attached.value != "true") {
+        p.Problem("grapple_at didn't hook: " + attached.value + attached.error);
+        OnRenderThread([m] { m->SetEnabled(false); });
+        End(s);
+        return;
+    }
+    // Swinging: the rope holds and is drawn; the player is lifted off the ground by the yank and swings below the anchor
+    float worst = 0.f, highest = start.Z;
+    MirageWorldStats stats{};
+    stats.size = sizeof stats;
+    const double t0 = GameSeconds();
+    while (!g_aborted && GameSeconds() - t0 < 1.5) {
+        WaitTicks(1);
+        const float length = util::ParseFloatOr(shared("length"), 0.f), distance = util::ParseFloatOr(shared("distance"), 0.f);
+        if (shared("state") == "hooked") worst = std::max(worst, distance - length);
+        OnGameThread([&] { if (auto* pawn = game::Pawn()) highest = std::max(highest, pawn->Location.Z); });
+    }
+    mirage::mods::world::DrawStats(&stats);
+    s.notes.push_back(fmt::format("swing: {} ; the player rose {:.0f} units; at most {:.1f} units beyond the rope; {} line(s) drawn",
+                                  eval("grapple_status()").value, highest - start.Z, worst, stats.lines));
+    if (worst > 30.f) p.Problem(fmt::format("the player got {:.0f} units beyond the rope's length", worst));
+    if (highest - start.Z < 50.f) p.Problem("the hook didn't lift the player");
+    if (stats.lines == 0) p.Problem("the rope wasn't drawn in the world");
+
+    // Pulled: the rope reels in until the player is at the anchor, then lets go by itself
+    eval("mirage.setting('mode'):set('Pull')");
+    const bool arrived = WaitFor(8.0, [&] { return shared("state") == "free"; });
+    s.notes.push_back(fmt::format("pull: {} ({})", arrived ? "let go" : "still hooked", shared("released")));
+    if (!arrived || shared("released") != "arrived") p.Problem("Pull mode didn't reel the player in to the anchor (" + shared("released") + ")");
+
+    // Released (it already let go when it arrived: again from the console is harmless). The renderer's counts can't show
+    // the rope gone: the mod switches the drawing off with it, and no frame counts again.
+    eval("grapple_release()");
+    if (const auto status = eval("grapple_status()"); status.value != "free") p.Problem("after letting go: " + status.value + status.error);
+    eval("mirage.setting('mode'):set('Swing')");
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitPlayerReady(10.0);
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -7013,6 +7093,7 @@ const Named* FeatureList()
         {"Mirage console", &TestConsole, false},
         {"Mirage Kismet editor", &TestKismetEditor, false},
         {"Mirage script editor", &TestScriptEditor, false},
+        {"Mirage grapple (example)", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

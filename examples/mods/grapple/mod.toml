@@ -1,0 +1,73 @@
+# Grappling hook: a showcase of what a Lua mod can do with Mirage, in one folder and no build. See main.lua.
+id = "grapple"
+name = "Grappling Hook"
+version = "1.0.0"
+description = "Fire a rope at any surface, swing on it or reel yourself in"
+authors = ["Mirage"]
+mirage = "^0.1"
+
+# Input actions: keys the player can rebind in the mod manager
+[actions.fire]
+key = "MiddleMouseButton"
+description = "Fire the hook (hold), let go to release"
+
+[actions.reel_in]
+key = "Z"
+description = "Shorten the rope while hooked"
+
+[actions.reel_out]
+key = "X"
+description = "Lengthen the rope while hooked"
+
+# Settings, shown in the module's panel and saved by the menu
+[settings.mode]
+type = "choice"
+name = "Mode"
+description = "Swing: a pendulum on a fixed rope. Pull: the rope reels you in by itself."
+options = ["Swing", "Pull"]
+default = "Swing"
+
+[settings.range]
+type = "float"
+name = "Range"
+description = "How far the hook reaches (Unreal units; Faith is about 192 tall)"
+default = 3500.0
+min = 500.0
+max = 8000.0
+format = "%.0f"
+
+[settings.reel_speed]
+type = "float"
+name = "Reel speed"
+description = "Units per second the rope shortens or lengthens"
+default = 900.0
+min = 100.0
+max = 3000.0
+format = "%.0f"
+
+[settings.swing]
+type = "float"
+name = "Air control"
+description = "How hard looking around steers the swing"
+default = 700.0
+min = 0.0
+max = 2000.0
+format = "%.0f"
+
+[settings.yank]
+type = "float"
+name = "Yank"
+description = "Speed toward the hook when it catches"
+default = 450.0
+min = 0.0
+max = 2000.0
+format = "%.0f"
+
+[settings.release_boost]
+type = "float"
+name = "Release boost"
+description = "Upward speed added when letting go mid-swing"
+default = 250.0
+min = 0.0
+max = 1500.0
+format = "%.0f"

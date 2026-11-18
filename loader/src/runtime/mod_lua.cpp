@@ -21,6 +21,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <cmath>
 #include <vector>
 
 namespace mirage::mods
@@ -255,6 +256,10 @@ namespace mirage::mods
 		static int CollisionFn(lua_State* L);
 		static int SetCollisionFn(lua_State* L);
 		static int TraceFn(lua_State* L);
+		static int CameraFn(lua_State* L);
+		static int WorldToScreenFn(lua_State* L);
+		static int Draw3dLines(lua_State* L);
+		static int Draw3dClear(lua_State* L);
 		static int OverlapFn(lua_State* L);
 		static int JointFn(lua_State* L);
 		static int TriggerFn(lua_State* L);
@@ -1571,6 +1576,108 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.camera(): the player's view, {location = {x, y, z}, rotation = {pitch, yaw, roll}, forward = {x, y, z}, fov},
+	// or nil (no camera yet: the first call starts following it, valid from the next tick). Any thread.
+	int LuaMod::CameraFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, camera_get)) return luaL_error(L, "mirage.camera: this runtime has no camera");
+		MirageCamera c{};
+		c.size = sizeof c;
+		if (!self.api_->camera_get(&c)) {
+			lua_pushnil(L);
+			return 1;
+		}
+		const float at[3] = {c.x, c.y, c.z};
+		const double turn = 6.283185307179586 / 65536.0;	// Unreal rotation units to radians
+		const double pitch = c.pitch * turn, yaw = c.yaw * turn;
+		const float forward[3] = {static_cast<float>(std::cos(pitch) * std::cos(yaw)), static_cast<float>(std::cos(pitch) * std::sin(yaw)),
+								  static_cast<float>(std::sin(pitch))};
+		lua_createtable(L, 0, 4);
+		PushVec(L, at);
+		lua_setfield(L, -2, "location");
+		lua_createtable(L, 0, 3);
+		lua_pushinteger(L, c.pitch);
+		lua_setfield(L, -2, "pitch");
+		lua_pushinteger(L, c.yaw);
+		lua_setfield(L, -2, "yaw");
+		lua_pushinteger(L, c.roll);
+		lua_setfield(L, -2, "roll");
+		lua_setfield(L, -2, "rotation");
+		PushVec(L, forward);
+		lua_setfield(L, -2, "forward");
+		lua_pushnumber(L, c.fov);
+		lua_setfield(L, -2, "fov");
+		return 1;
+	}
+
+	// mirage.world_to_screen({x, y, z}) -> x, y (pixels, with the last frame's view), or nil (behind the camera)
+	int LuaMod::WorldToScreenFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, world_to_screen)) return luaL_error(L, "mirage.world_to_screen: this runtime can't project");
+		float v[3], x = 0.f, y = 0.f;
+		CheckVec(L, 1, v);
+		if (!self.api_->world_to_screen(v[0], v[1], v[2], &x, &y)) {
+			lua_pushnil(L);
+			return 1;
+		}
+		lua_pushnumber(L, x);
+		lua_pushnumber(L, y);
+		return 2;
+	}
+
+	// mirage.draw3d.lines({{a, b, color}, ...}): lines in the world, drawn by the runtime's renderer inside the game's
+	// frame (behind walls where there is depth); a, b vectors, color as mirage.rgba gives it. Each call replaces the last
+	// (the renderer's moving layer: call it every tick for what moves). The drawing is the last mod's to set it (the
+	// Collision View's when that is on). mirage.draw3d.clear(): the mod's lines gone. Game thread.
+	int LuaMod::Draw3dLines(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, world_draw_set)) return luaL_error(L, "mirage.draw3d: this runtime has no 3D drawing");
+		luaL_checktype(L, 1, LUA_TTABLE);
+		std::vector<MirageWorldVertex> lines;
+		const lua_Integer n = luaL_len(L, 1);
+		lines.reserve(static_cast<std::size_t>(n) * 2);
+		for (lua_Integer i = 1; i <= n; ++i) {
+			lua_rawgeti(L, 1, i);
+			const int line = lua_gettop(L);
+			if (lua_istable(L, line)) {
+				float a[3], b[3];
+				lua_rawgeti(L, line, 1);
+				const bool okA = ReadVec(L, -1, a);
+				lua_rawgeti(L, line, 2);
+				const bool okB = ReadVec(L, -1, b);
+				lua_rawgeti(L, line, 3);
+				const auto abgr = static_cast<uint32_t>(luaL_optinteger(L, -1, 0xFFFFFFFF));
+				lua_pop(L, 3);
+				// mirage.rgba is ImGui's 0xAABBGGRR; the renderer takes Direct3D's 0xAARRGGBB
+				const uint32_t argb = (abgr & 0xFF00FF00u) | ((abgr & 0xFFu) << 16) | ((abgr >> 16) & 0xFFu);
+				if (okA && okB) {
+					lines.push_back({a[0], a[1], a[2], argb});
+					lines.push_back({b[0], b[1], b[2], argb});
+				}
+			}
+			lua_settop(L, line - 1);
+		}
+		MirageWorldMesh mesh{};
+		mesh.size = sizeof mesh;
+		mesh.lines = lines.data();
+		mesh.line_vertices = static_cast<uint32_t>(lines.size());
+		mesh.shapes = static_cast<uint32_t>(lines.size() / 2);
+		self.api_->world_draw_active(self.mod_, 1);
+		self.api_->world_draw_set(MIRAGE_WORLD_MOVING, &mesh);
+		return 0;
+	}
+	int LuaMod::Draw3dClear(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, world_draw_set)) return 0;
+		self.api_->world_draw_set(MIRAGE_WORLD_MOVING, nullptr);
+		self.api_->world_draw_active(self.mod_, 0);
+		return 0;
+	}
+
 	// mirage.trace(start, end, {actors = true, extent = {x, y, z}, ignore = actor}): {actor, component, location, normal,
 	// time, bone} or nil (nothing hit); error when the trace can't be done
 	int LuaMod::TraceFn(lua_State* L)
@@ -2844,6 +2951,7 @@ namespace mirage::mods
 			{"kismet_fire", KismetFireFn}, {"kismet_trace", KismetTraceFn}, {"kismet_trace_read", KismetTraceReadFn},
 			{"transitions", TransitionsFn}, {"body", BodyFn}, {"set_body", SetBodyFn}, {"impulse", ImpulseFn}, {"force", ForceFn},
 			{"spawn_prop", SpawnPropFn}, {"collision", CollisionFn}, {"set_collision", SetCollisionFn}, {"trace", TraceFn},
+			{"camera", CameraFn}, {"world_to_screen", WorldToScreenFn},
 			{"overlap", OverlapFn}, {"joint", JointFn}, {"trigger", TriggerFn}, {"trigger_count", TriggerCountFn}, {"piece", PieceFn},
 			{"mover", MoverFn}, {"move_to", MoveToFn}, {"mover_moving", MoverMovingFn}, {"move", MoveFn}, {"move_start", MoveStartFn},
 			{"move_remove", MoveRemoveFn}, {"anim_play", AnimPlayFn}, {"anim_stop", AnimStopFn}, {"anim_state", AnimStateFn},
@@ -2871,6 +2979,11 @@ namespace mirage::mods
 			{nullptr, nullptr}};
 		set(drawFns);
 		lua_setfield(L, -2, "draw");
+
+		lua_newtable(L);
+		const luaL_Reg draw3dFns[] = {{"lines", Draw3dLines}, {"clear", Draw3dClear}, {nullptr, nullptr}};
+		set(draw3dFns);
+		lua_setfield(L, -2, "draw3d");
 
 		lua_ui::Push(L, api_->ui());
 		lua_setfield(L, -2, "ui");

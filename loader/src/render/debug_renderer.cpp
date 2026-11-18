@@ -35,6 +35,19 @@ namespace debugrender
         std::uint64_t g_staticVersion = 0;
         std::atomic<bool> g_watchConstants{false};      // = g_active: the shader constant hook looks at nothing otherwise
 
+        // The scene to draw (g_mutex held). With no scene but a moving or static layer (a mod's lines alone) it is an
+        // empty one, whose version no real scene has, so whatever an earlier scene uploaded is replaced by nothing.
+        std::shared_ptr<const Scene> SceneToDraw()
+        {
+            if (g_scene || (!g_dynamic && !g_static)) return g_scene;
+            static const std::shared_ptr<const Scene> kEmpty = [] {
+                auto empty = std::make_shared<Scene>();
+                empty->version = ~0ull;
+                return empty;
+            }();
+            return kEmpty;
+        }
+
         // ---- Render thread only ------------------------------------------------------------------------------------
         struct FrameSetup
         {
@@ -544,8 +557,8 @@ namespace debugrender
             g_stats.path = path;
             g_stats.viewFromDevice = viewFromDevice;
             g_stats.nearUsed = nearUsed;
-            g_stats.triangles = g_tris.count / 3;
-            g_stats.lines = g_lines.count / 2;
+            g_stats.triangles = (g_tris.count + g_dynTris.count) / 3;     // The scene's and the moving layer's
+            g_stats.lines = (g_lines.count + g_dynLines.count) / 2;
             g_stats.staticTriangles = g_statTris.count / 3;
             g_stats.staticLines = g_statLines.count / 2;
             g_stats.shapes = scene.shapes;
@@ -676,7 +689,7 @@ namespace debugrender
             style = g_style;
             camera = g_camera;
             engineNear = g_engineNear;
-            scene = g_scene;
+            scene = SceneToDraw();
         }
         if (!active || !scene || g_drewInScene || style.depth != Depth::Scene) return;
 
@@ -785,7 +798,7 @@ namespace debugrender
         {
             std::lock_guard lock(g_mutex);
             style = g_style;
-            scene = g_scene;
+            scene = SceneToDraw();
         }
         if (!scene) { g_stats.drawn = false; return; }
 

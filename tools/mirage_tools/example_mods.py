@@ -104,7 +104,7 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
     content = [d for d in sorted(TEST_MODS.iterdir())   # Content only: level layers, maps, routes (step 13), Kismet layers
                if d.is_dir() and any((d / sub).is_dir() for sub in ("content", "levels", "maps", "routes", "kismet"))
                and not (d / "main.lua").exists() and not (d / "main.cs").exists()]
-    mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", EXAMPLES / "bounce-pad", *lua,
+    mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", EXAMPLES / "bounce-pad", EXAMPLES / "grapple", *lua,
             EXAMPLES / "hello-script", *scripts, *content]
     return mods, (f"{', '.join(built)}, {len(lua) + 1} Lua mods, {len(scripts) + 1} C# scripts, high-steps and retexture "
                   "(content), bounce-pad (an UnrealScript class)")
