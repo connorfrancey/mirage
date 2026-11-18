@@ -1102,8 +1102,9 @@ def dev_test(ctx: click.Context, config: str, stage: str | None, no_build: bool,
               help="Load the menu this much later than usual (after the game went fullscreen, like the launcher).")
 @click.option("--timeout", default=900.0, show_default=True, help="Kill the game after this many seconds.")
 @click.option("--keep-open", is_flag=True, help="Don't close the game when the test is done.")
-@click.option("--minimized/--visible", default=True, show_default=True,
-              help="Start the game windowed and minimized, without taking focus (--visible: as the game is set up).")
+@click.option("--minimized/--visible", default=False, show_default=True,
+              help="Start the game minimized, without taking focus (default: visible, windowed; Left Alt + Right Alt "
+                   "send it to the taskbar).")
 @click.option("--real-speed", is_flag=True,
               help="Test the game as players run it: the 62 fps cap stays on and TAS playbacks are paced (slower).")
 @click.option("--retries", default=1, show_default=True,

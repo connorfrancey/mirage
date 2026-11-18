@@ -5876,7 +5876,7 @@ void TestLevelEditor()
     s.notes.push_back(fmt::format("added {} at the view: {}", level_editor::Actors()[0].name, spawned ? "spawned" : "not spawned " + error));
     if (!spawned) p.Problem("the added actor didn't spawn after saving: " + error);
 
-    // Picked where it shows on screen (the game's camera, a 1280x720 view: the game runs minimized here, and the
+    // Picked where it shows on screen (the game's camera, a 1280x720 view: the game may run minimized, and the
     // projection is the same for any size), then dragged 100 units along X by the gizmo's function: the actor follows
     MirageCamera followed{};
     followed.size = sizeof followed;

@@ -316,6 +316,15 @@ def _minimize_windows(pid: int) -> int:
     return done
 
 
+def _both_alts_down() -> bool:
+    """Left Alt and Right Alt held together, wherever the focus is (the hotkey that sends a visible test's game to the
+    taskbar)."""
+    user32 = ctypes.WinDLL("user32")
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    return bool(user32.GetAsyncKeyState(0xA4) & 0x8000) and bool(user32.GetAsyncKeyState(0xA5) & 0x8000)  # VK_LMENU, VK_RMENU
+
+
 # How long after the start the game's window is kept minimized: the engine shows it again while it sets up its device;
 # after that it stays as the user leaves it (restoring it to watch is fine)
 MINIMIZE_SECONDS = 25.0
@@ -324,8 +333,10 @@ MINIMIZE_SECONDS = 25.0
 def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True, minimized: bool = False) -> Result:
     """Starts the game, waits for the self-test to finish and the game to close (or `timeout` seconds).
 
-    `minimized`: the game starts windowed (-windowed) and minimized without taking focus. A fullscreen game can't be
-    minimized: its D3D9 device would be lost and it would stop drawing frames, which the self-test needs.
+    The game always starts windowed (-windowed): a fullscreen game can't be minimized (its D3D9 device would be lost and
+    it would stop drawing frames, which the self-test needs). `minimized`: it starts minimized without taking focus and
+    is kept so while the engine sets up. Otherwise it is visible, and Left Alt + Right Alt together send it to the
+    taskbar (once per press; clicking it there brings it back).
 
     `close`: quit the game once the menu has unloaded. This is done from here and not by the menu: a game told to quit
     while the menu is still unloading itself can deadlock on the way out (the process exit and the menu's own FreeLibrary
@@ -345,7 +356,7 @@ def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True, mi
             info.wShowWindow = 7     # SW_SHOWMINNOACTIVE: the first ShowWindow of the game takes this
             proc = subprocess.Popen([str(game_dir / devtest.GAME_EXE), "-windowed"], cwd=game_dir, startupinfo=info)
         else:
-            proc = subprocess.Popen([str(game_dir / devtest.GAME_EXE)], cwd=game_dir)
+            proc = subprocess.Popen([str(game_dir / devtest.GAME_EXE), "-windowed"], cwd=game_dir)
     except OSError as e:
         if getattr(e, "winerror", None) == 740:   # ERROR_ELEVATION_REQUIRED
             raise ElevationRequired() from e
@@ -353,10 +364,16 @@ def run(game_dir: Path, timeout: float, on_progress=None, close: bool = True, mi
     res = Result()
     last_current = None
     watch = None if LINUX else hangmon.HangWatch(proc.pid, menu_dir / "logs" / "mirage.log", menu_dir / "logs")
+    alts_were = False
     while True:
-        time.sleep(0.25)
+        time.sleep(0.1)
         if minimized and not LINUX and time.monotonic() - t0 < MINIMIZE_SECONDS and proc.poll() is None:
             _minimize_windows(proc.pid)
+        if not LINUX and proc.poll() is None:
+            alts = _both_alts_down()
+            if alts and not alts_were:
+                _minimize_windows(proc.pid)
+            alts_were = alts
         data = _read(result_file)
         if data:
             res.finished, res.passed = data.get("finished", False), data.get("passed", False)

@@ -27,8 +27,8 @@ uv run mirage model <file>          # what a glTF/FBX/OBJ model holds for the ga
 
 - Never run a bare `cmake --build`: without the MSVC environment the cache picks up clang and the configure breaks.
 - Build folders are `cmake-build-x86-<config>`; feature toggles (`--enable/--disable/--only`) are remembered per folder.
-- `game-test` installs the build into the game, starts it windowed and minimized (`--visible` to opt out), and closes
-  it. The game must not run elevated. Results: `<game>\Binaries\mirage\logs\mirage.log`. The user is often at the PC:
+- `game-test` installs the build into the game, starts it windowed and visible (Left Alt + Right Alt together send it
+  to the taskbar, a click brings it back; `--minimized` starts it there), and closes it. The game must not run elevated. Results: `<game>\Binaries\mirage\logs\mirage.log`. The user is often at the PC:
   say before a run that the game will start. Unit tests can't prove game features; only `game-test` can.
 - Mirage and memenu both install a `dinput8.dll` into the game; whichever was installed last is the one that runs.
 - The debug build uses a local UnrealLib checkout (`-D CPM_UnrealLib_SOURCE=...`, see `cmake/Versions.cmake` and

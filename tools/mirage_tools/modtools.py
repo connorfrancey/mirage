@@ -284,9 +284,10 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
     @mod.command("test")
     @folder_arg
     @click.option("--dir", "game_dir", type=click.Path(path_type=Path), help="The game's Binaries folder (default: found).")
-    @click.option("--visible", is_flag=True, help="Show the game while it runs (default: minimized).")
+    @click.option("--minimized", is_flag=True, help="Start the game minimized (default: visible; Left Alt + Right Alt "
+                                                    "send it to the taskbar).")
     @click.pass_context
-    def test_cmd(ctx: click.Context, folder: Path, game_dir: Path | None, visible: bool) -> None:
+    def test_cmd(ctx: click.Context, folder: Path, game_dir: Path | None, minimized: bool) -> None:
         """Installs it, starts the game (the build Mirage was last built from) and runs its tests: the step "Mod tests"
         with only this mod's. The game starts and closes by itself."""
         info = resolve(ctx, folder)
@@ -297,7 +298,7 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
         install(built_or_exit(ctx, info), info.id, game_dir)
         console.print(f"Testing {info.id} in the game (it starts and closes by itself)...")
         game_test = ctx.find_root().command.commands["game-test"]
-        ctx.invoke(game_test, no_build=True, game_dir=game_dir, only="Mod tests", mod_tests=info.id, minimized=not visible)
+        ctx.invoke(game_test, no_build=True, game_dir=game_dir, only="Mod tests", mod_tests=info.id, minimized=minimized)
 
     @cli.group("docs")
     def docs() -> None:
