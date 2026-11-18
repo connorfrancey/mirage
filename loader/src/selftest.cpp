@@ -63,6 +63,7 @@
 #include "runtime/packages.h"
 #if MIRAGE_FEATURE_MOD_MANAGER
 #include "features/misc/mod_manager.h"
+#include "features/misc/kismet_editor.h"
 #endif
 #include <shlobj.h>
 #if MIRAGE_FEATURE_INPUT
@@ -5532,6 +5533,137 @@ void TestConsole()
     End(s);
 }
 
+// Step 27's Kismet node editor (features/misc/kismet_editor.h), driven through the functions its window calls: the
+// Prologue's root sequence opened; an op added, a touch event linked to it and one of the event's links unlinked, all
+// live; saved into tests/mods/kismet-editor-test's Kismet layer, which applies them (the editor's own edits undone);
+// another op added and discarded; the layer file removed at the end puts the graph back.
+void TestKismetEditor()
+{
+    Step& s = Begin("Mirage Kismet editor");
+    Probe p(s);
+    namespace ki = mirage::kismet;
+    std::filesystem::path dir;
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "kismet-editor-test" && m.loaded) dir = m.dir;
+    if (dir.empty()) {
+        p.Problem("the kismet-editor-test mod isn't loaded");
+        End(s);
+        return;
+    }
+    const std::filesystem::path file = dir / "kismet" / "edge_p.toml";
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+    if (!modules::Find("Kismet Editor")) p.Problem("the Kismet Editor module is missing");
+
+    // The root sequence, opened
+    std::string root;
+    OnGameThread([&] {
+        for (auto* q : ki::Sequences()) {
+            const auto info = ki::ReadSequence(q, false);
+            if (info.parent.empty() && info.level == "Edge_p") root = info.path;
+        }
+    });
+    bool opened = false;
+    ki::Sequence graph;
+    OnGameThread([&] { opened = kismet_editor::Open(root); graph = kismet_editor::Graph(); });
+    if (!opened || graph.ops.empty()) {
+        p.Problem("the Prologue's root sequence didn't open (" + root + ")");
+        End(s);
+        return;
+    }
+    int placed = 0;
+    for (const auto& op : graph.ops) placed += op.x != 0 || op.y != 0;
+    s.notes.push_back(fmt::format("{}: {} objects, {} with the designers' positions kept", root, graph.ops.size(), placed));
+
+    // A touch event of this sequence with a link out, its name unique in Edge_p itself (how a layer can name it)
+    std::map<std::string, int> names;
+    OnGameThread([&] { for (auto* o : ki::LevelObjects()) if (ki::LevelOf(o) == "Edge_p") ++names[o->GetName()]; });
+    const ki::Op* event = nullptr;
+    for (const auto& op : graph.ops)
+        if (!event && op.cls == "SeqEvent_Touch" && names[op.name] == 1 && !op.outputs.empty() && !op.outputs[0].links.empty()) event = &op;
+    if (!event) {
+        p.Problem("no touch event with a link in the root sequence");
+        End(s);
+        return;
+    }
+    const ki::Link old = event->outputs[0].links[0];
+    const std::string eventPath = event->path;
+    std::string logPath, why;
+    std::vector<std::string> edits;
+    bool linked = false, unlinked = false;
+    OnGameThread([&] {
+        logPath = kismet_editor::Add("SeqAct_Log", 0, 0, &why);
+        linked = !logPath.empty() && kismet_editor::Link(eventPath, 0, logPath, 0, &why);
+        unlinked = kismet_editor::Unlink(eventPath, 0, old.op, old.input, &why);
+        graph = kismet_editor::Graph();
+        edits = kismet_editor::Edits();
+    });
+    const auto targetsOf = [&](const ki::Sequence& g) {
+        std::string t;
+        for (const auto& op : g.ops)
+            if (op.path == eventPath && !op.outputs.empty())
+                for (const auto& l : op.outputs[0].links) t += l.op + ";";
+        return t;
+    };
+    const std::string live = targetsOf(graph);
+    s.notes.push_back(fmt::format("live: {} edits ({})", edits.size(), edits.empty() ? "" : edits.front()));
+    if (logPath.empty() || !linked || !unlinked) p.Problem("an edit failed: " + why);
+    if (live.find(logPath) == std::string::npos || live.find(old.op + ";") != std::string::npos)
+        p.Problem("the live graph doesn't show the edits: " + live);
+    if (edits.size() != 3) p.Problem(fmt::format("{} edits listed, not 3", edits.size()));
+
+    // Saved: the layer applies them, the editor's own are undone
+    bool saved = false;
+    OnGameThread([&] { saved = kismet_editor::Save("kismet-editor-test", &why); edits = kismet_editor::Edits(); });
+    if (!saved) p.Problem("Save failed: " + why);
+    std::vector<mirage::kismet_layers::Entry> entries;
+    const bool applied = WaitFor(10.0, [&] {
+        entries.clear();
+        OnGameThread([&] {
+            for (auto& e : mirage::kismet_layers::List())
+                if (e.mod == "kismet-editor-test") entries.push_back(e);
+        });
+        return entries.size() == 3;
+    });
+    int problems = 0;
+    for (const auto& e : entries) problems += !e.problem.empty();
+    std::string after;
+    OnGameThread([&] {
+        kismet_editor::Open(root);
+        after = targetsOf(kismet_editor::Graph());
+    });
+    s.notes.push_back(fmt::format("saved: the layer has {} entries, {} skipped; the event now leads to {}", entries.size(), problems, after));
+    if (!applied || problems) p.Problem("the saved layer didn't apply its 3 entries");
+    if (!edits.empty()) p.Problem("the editor still lists edits after saving");
+    if (after.find("SeqAct_Log") == std::string::npos || after.find(old.op + ";") != std::string::npos)
+        p.Problem("after saving, the event doesn't lead to a log op alone: " + after);
+
+    // Discarded: an op added and taken back
+    std::size_t before = 0, added = 0, discarded = 0;
+    OnGameThread([&] {
+        before = kismet_editor::Graph().ops.size();
+        kismet_editor::Add("Engine.SeqAct_Log", 100, 100, &why);
+        added = kismet_editor::Graph().ops.size();
+        kismet_editor::Discard();
+        discarded = kismet_editor::Graph().ops.size();
+    });
+    if (added != before + 1 || discarded != before) p.Problem(fmt::format("discard: {} ops, {} after adding, {} after discarding", before, added, discarded));
+
+    // The layer file removed: the graph as the level has it
+    std::filesystem::remove(file, ec);
+    std::string restored;
+    const bool back = WaitFor(10.0, [&] {
+        OnGameThread([&] {
+            kismet_editor::Open(root);
+            restored = targetsOf(kismet_editor::Graph());
+        });
+        return restored.find(old.op + ";") != std::string::npos && restored.find("SeqAct_Log") == std::string::npos;
+    });
+    if (!back) p.Problem("removing the layer didn't put the event's link back: " + restored);
+    OnGameThread([&] { kismet_editor::Open(""); });
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -6804,6 +6936,7 @@ const Named* FeatureList()
         {"Mirage mission", &TestMission, false},
         {"Mirage profiler", &TestProfiler, false},
         {"Mirage console", &TestConsole, false},
+        {"Mirage Kismet editor", &TestKismetEditor, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

@@ -55,6 +55,8 @@ namespace mirage::kismet
 			op.cls = so->Class ? so->Class->GetName() : std::string();
 			op.title = Narrow(so->ObjName);
 			op.comment = Narrow(so->ObjComment);
+			op.x = so->ObjPosX;
+			op.y = so->ObjPosY;
 			if (so->IsA(Classes::USequenceVariable::StaticClass())) {
 				op.kind = Op::Kind::Variable;
 				return op;
@@ -102,6 +104,32 @@ namespace mirage::kismet
 		}
 	}
 
+	Sequence ReadSequence(Classes::USequence* seq, bool withOps)
+	{
+		Sequence s;
+		s.path = PathOf(seq);
+		s.name = seq->GetName();
+		s.level = LevelOf(seq);
+		s.parent = PathOf(seq->ParentSequence);
+		s.enabled = seq->bEnabled;
+		if (withOps)
+			for (std::size_t k = 0; k < seq->SequenceObjects.Num(); ++k)
+				if (auto* so = seq->SequenceObjects[k]) s.ops.push_back(ReadOp(so));
+		return s;
+	}
+
+	std::vector<Classes::USequence*> Sequences()
+	{
+		std::vector<Classes::USequence*> out;
+		Classes::UClass* sequenceClass = Classes::USequence::StaticClass();
+		const auto& objects = Classes::UObject::GetGlobalObjects();
+		for (std::size_t i = 0; i < objects.Num(); ++i) {
+			auto* o = objects.GetByIndex(i);
+			if (o && !IsDefault(o) && o->IsA(sequenceClass) && InWorld(o)) out.push_back(static_cast<Classes::USequence*>(o));
+		}
+		return out;
+	}
+
 	std::vector<Sequence> Read()
 	{
 		std::vector<Sequence> out;
@@ -112,15 +140,7 @@ namespace mirage::kismet
 			if (!o || IsDefault(o) || !o->IsA(sequenceClass)) continue;
 			auto* seq = static_cast<Classes::USequence*>(o);
 			if (!InWorld(seq)) continue;		// A level's, not the UI scenes' or a script package's templates
-			Sequence s;
-			s.path = PathOf(seq);
-			s.name = seq->GetName();
-			s.level = LevelOf(seq);
-			s.parent = PathOf(seq->ParentSequence);
-			s.enabled = seq->bEnabled;
-			for (std::size_t k = 0; k < seq->SequenceObjects.Num(); ++k)
-				if (auto* so = seq->SequenceObjects[k]) s.ops.push_back(ReadOp(so));
-			out.push_back(std::move(s));
+			out.push_back(ReadSequence(seq, true));
 		}
 		std::stable_sort(out.begin(), out.end(), [](const Sequence& a, const Sequence& b) { return a.parent.empty() && !b.parent.empty(); });
 		return out;
@@ -156,7 +176,7 @@ namespace mirage::kismet
 				for (const VariableLink& v : op.variables) vars.push_back({{"desc", v.desc}, {"linked", v.variables}});
 				ops.push_back({{"path", op.path}, {"name", op.name}, {"class", op.cls}, {"kind", KindName(op.kind)},
 							   {"title", op.title}, {"comment", op.comment}, {"active", op.active},
-							   {"activations", op.activations}, {"inputs", op.inputs}, {"outputs", outputs},
+							   {"activations", op.activations}, {"x", op.x}, {"y", op.y}, {"inputs", op.inputs}, {"outputs", outputs},
 							   {"variables", vars}, {"originator", op.originator}});
 			}
 			all.push_back({{"path", s.path}, {"name", s.name}, {"level", s.level}, {"parent", s.parent},

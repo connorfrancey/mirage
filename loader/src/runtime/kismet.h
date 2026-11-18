@@ -40,6 +40,7 @@ namespace mirage::kismet
 	{
 		std::string path, name, cls;			// name: the object's name; cls: its class ("SeqEvent_Touch")
 		std::string title, comment;				// ObjName (the editor's title) and ObjComment, when cooking kept them
+		int x = 0, y = 0;						// ObjPosX / ObjPosY: where the editor drew it
 		enum class Kind { Event, Action, Condition, Variable, Sequence, Other } kind = Kind::Other;
 		bool active = false;
 		int activations = 0;					// ActivateCount
@@ -59,8 +60,12 @@ namespace mirage::kismet
 
 	// Every sequence of the loaded levels, root ones first. Game thread.
 	std::vector<Sequence> Read();
+	// The loaded levels' sequences as objects, unordered (cheap: no op is read). Game thread.
+	std::vector<Classes::USequence*> Sequences();
+	// One sequence; `withOps` false: only its names and place. Game thread.
+	Sequence ReadSequence(Classes::USequence* sequence, bool withOps = true);
 	// The same as JSON: [{"path", "name", "level", "parent", "enabled", "ops": [{"path", "name", "class", "kind", "title",
-	// "comment", "active", "activations", "inputs": [...], "outputs": [{"desc", "links": [{"op", "input"}]}],
+	// "comment", "active", "activations", "x", "y", "inputs": [...], "outputs": [{"desc", "links": [{"op", "input"}]}],
 	// "variables": [{"desc", "linked": [...]}], "originator"}]}]
 	std::string ToJson(const std::vector<Sequence>& sequences);
 	const char* KindName(Op::Kind kind);

@@ -1389,8 +1389,8 @@ mod's Kismet layer added out of its package comparison.
 
 **Depends on.** Hard: 9, 16. Soft: 24.
 
-**Status (2026-11-18): the profiler per mod and the Lua REPL done; the editor, debugger, Kismet node editor, C# in the
-REPL and native hot reload not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
+**Status (2026-11-18): the profiler per mod, the Lua REPL and the Kismet node editor done; the script editor, the Lua
+debugger, C# in the REPL and native hot reload not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
 The profiler (`runtime/mod_profile`): both gates into a mod's code (`detail::Enter` for hooks, events, natives,
 triggers and moves; `ModModule::Call` for module callbacks) time each call; once a second the calls are summed per mod
 and per callback into milliseconds per engine tick, the slowest callback first, shown in the mod manager's details
@@ -1409,6 +1409,19 @@ for the line; errors show Lua's message and leave the mod running; Up and Down w
 its top level aren't reachable (a chunk of its own), its globals are. Self-test "Mirage console": seven lines in
 profile-lua's state (values, a global kept between lines, print, the pawn, two errors), then the state intact and the
 lines profiled.
+
+The Kismet node editor (`features/misc/kismet_editor`, a custom ImGui canvas: the pinned `imgui-node-editor` v0.9.4
+predates ImGui 1.92): the loaded levels' sequences listed; the open one drawn where the designers placed its ops
+(`ObjPosX/Y` survive cooking: 198 of the Prologue root's 210 objects; a grid when none do), events, actions, conditions
+and nested sequences coloured, variables as small nodes, active ops outlined; pan, zoom, nodes dragged (view only).
+Edits apply live on the game thread through `kismet::AddLink` / `RemoveLink` / `Construct` (`kismet::ReadSequence` reads
+just the open sequence, four times a second while the menu is open): drag an output pin to an input pin to link,
+right-click a wire to unlink, add an op of a class at the view. "Save as layer" appends them to the chosen mod's
+`kismet/<map>.toml` (ops by `Ed_<object>`, level ops by name, or `<sequence>.<name>` when the name repeats in their
+own level) and undoes them live, so the layer applies them from then on; "Discard" undoes them. Self-test "Mirage
+Kismet editor" (tests/mods/kismet-editor-test): an op added, a touch event linked to it and one of its links unlinked,
+saved (the layer applies 3 entries, 0 skipped), another op discarded, and the layer removed puts the graph back. Not
+yet: editing an op's properties, deleting level ops, saving node positions, copy and paste, the debugger (step 19).
 
 **Milestone.** A mod author breaks in a Lua hook from VS Code, inspects a locals table and the player object, changes a
 property in the inspector, reloads a native DLL without losing state, and the profiler names the slowest callback; a
