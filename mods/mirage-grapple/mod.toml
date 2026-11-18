@@ -10,7 +10,7 @@ mirage = "^0.1"
 # Input actions: keys the player can rebind in the mod manager
 [actions.fire]
 key = "MiddleMouseButton"
-description = "Fire the hook (hold), let go to release"
+description = "Fire the hook; in Swing and Pull, hold it and let go to release"
 
 [actions.reel_in]
 key = "Z"
@@ -24,9 +24,18 @@ description = "Lengthen the rope while hooked"
 [settings.mode]
 type = "choice"
 name = "Mode"
-description = "Swing: a pendulum on a fixed rope. Pull: the rope reels you in by itself."
-options = ["Swing", "Pull"]
-default = "Swing"
+description = "Zip: straight to the point you aimed at. Swing: a pendulum on a fixed rope. Pull: the rope reels you in by itself."
+options = ["Zip", "Swing", "Pull"]
+default = "Zip"
+
+[settings.zip_speed]
+type = "float"
+name = "Zip speed"
+description = "Units per second in Zip mode"
+default = 2500.0
+min = 500.0
+max = 8000.0
+format = "%.0f"
 
 [settings.range]
 type = "float"

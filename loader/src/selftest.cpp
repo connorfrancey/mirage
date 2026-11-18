@@ -5742,8 +5742,9 @@ void TestScriptEditor()
 
 // The first-party mod mods/mirage-grapple, driven through its console functions (runtime/mods.h Eval): hooked to a
 // point above and ahead of the player, the rope holds (the player never gets farther than its length), lifts the player
-// and is drawn in the world; in Pull mode it reels the player in until it lets go by itself; released, the drawing is
-// gone and the mod's move ended with it.
+// and is drawn in the world; in Pull mode it reels the player in until it lets go by itself; in Zip mode (the default)
+// it takes the player straight to a point in well under a second; released, the drawing is gone and the mod's move
+// ended with it.
 void TestGrapple()
 {
     Step& s = Begin("Mirage grapple");
@@ -5813,7 +5814,20 @@ void TestGrapple()
     // the rope gone: the mod switches the drawing off with it, and no frame counts again.
     eval("grapple_release()");
     if (const auto status = eval("grapple_status()"); status.value != "free") p.Problem("after letting go: " + status.value + status.error);
-    eval("mirage.setting('mode'):set('Swing')");
+
+    // Zipped (the default mode): straight to a point ahead and above, from wherever the player is now, letting go there
+    // by itself; at the zip's speed that takes well under a second, which falling or Pull's reel can't do
+    eval("mirage.setting('mode'):set('Zip')");
+    Classes::FVector from{};
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) from = pawn->Location; });
+    const Classes::FVector target{from.X + std::cos(rad) * 600.f, from.Y + std::sin(rad) * 600.f, from.Z + 300.f};
+    const auto zipped = eval(fmt::format("grapple_at({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", target.X, target.Y, target.Z));
+    const double z0 = GameSeconds();
+    const bool there = zipped.value == "true" && WaitFor(3.0, [&] { return shared("state") == "free"; });
+    const double zipSeconds = GameSeconds() - z0;
+    s.notes.push_back(fmt::format("zip: {} ({}) in {:.2f} s", zipped.value + zipped.error, shared("released"), zipSeconds));
+    if (!there || shared("released") != "arrived" || zipSeconds > 1.0)
+        p.Problem(fmt::format("Zip mode didn't take the player to the point ({}, {:.2f} s)", shared("released"), zipSeconds));
     OnRenderThread([m] { m->SetEnabled(false); });
     WaitPlayerReady(10.0);
     End(s);

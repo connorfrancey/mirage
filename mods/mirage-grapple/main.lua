@@ -1,8 +1,9 @@
 -- Grappling Hook: a first-party Mirage mod, all Lua, no build. It ships inside the menu's DLL and is written to
 -- Binaries\mirage\mods\mirage-grapple at startup: to change it, copy the folder under another id.
 --
--- Hold the fire key (middle mouse) while aiming at a surface in range: the hook catches, a rope is drawn in the world,
--- and you swing on it (Swing mode) or are reeled in (Pull mode). Z and X shorten and lengthen the rope; letting go of
+-- Press the fire key (middle mouse) while aiming at a surface in range: the hook catches, a rope is drawn in the world,
+-- and you zip straight to that point (Zip mode, the default), or, holding the key, swing on it (Swing mode) or are
+-- reeled in (Pull mode). Z and X shorten and lengthen the rope; letting go of
 -- fire releases with a small boost. Everything below is the public mod API (docs/AI-GUIDE.md, runtime/mod_lua.h):
 --
 --   mirage.module          a switch and settings panel in the menu (settings declared in mod.toml)
@@ -24,7 +25,7 @@ local rope = require("rope")
 
 local MOVE_WALKING = 1
 
-local Mode, Range, ReelSpeed, Swing, Yank, Boost          -- mod.toml settings (found once the module exists)
+local Mode, Range, ReelSpeed, Swing, Yank, Boost, ZipSpeed         -- mod.toml settings (found once the module exists)
 local Status, Hooks                                        -- made in code below
 local move                                                 -- the mod's move (its EMovement number)
 
@@ -102,11 +103,36 @@ local function draw_rope(pos)
     mirage.draw3d.lines(lines)
 end
 
+-- ---- Zip mode: a straight line to the anchor at a fixed speed, no swinging --------------------------------------------
+-- Each tick the velocity points at the anchor (gravity has no time to act); there, the player keeps a little of it
+-- and a hop, enough to land on a ledge. A wall in the way stops the zip: no progress for a quarter second lets go.
+local ZIP_ARRIVE, ZIP_EXIT_SPEED = 120, 350
+local function zip_tick(p, seconds)
+    local pos = vec.of(p.Location)
+    local dir, dist = vec.norm(vec.sub(hook.anchor, pos))
+    hook.length, hook.taut = dist, true
+    share("length", string.format("%.0f", dist))
+    share("distance", string.format("%.0f", dist))
+    if dist < ZIP_ARRIVE then
+        p.Velocity = vec.engine(vec.scale(dir, ZIP_EXIT_SPEED))
+        return release("arrived", Boost:get())
+    end
+    if dist < (hook.best or math.huge) - 1 then
+        hook.best, hook.stalled = dist, 0
+    else
+        hook.stalled = (hook.stalled or 0) + seconds
+        if hook.stalled > 0.25 then return release("blocked") end
+    end
+    p.Velocity = vec.engine(vec.scale(dir, ZipSpeed:get()))
+    draw_rope(pos)
+end
+
 -- ---- The rope's physics, each engine tick while hooked -----------------------------------------------------------------
 local function rope_tick(seconds)
     if not hook then return end
     local p = mirage.pawn()
     if not p then return release("no player") end
+    if Mode:get() == "Zip" then return zip_tick(p, seconds) end
     local cam = mirage.camera()
     local input = {
         dt = seconds,
@@ -160,7 +186,7 @@ end
 local m = mirage.module {
     name = "Grappling Hook",
     tab = "Mods",
-    description = "Hold middle mouse to fire a rope at a surface; Z / X reel in and out",
+    description = "Middle mouse fires a rope at a surface and zips you there (or swing / pull); Z / X reel in and out",
     on_tick = function()
         if not move then
             move = mirage.move { name = "Grapple", as = "TdMove_Falling" }
@@ -177,6 +203,7 @@ local m = mirage.module {
 }
 Mode, Range, ReelSpeed = mirage.setting("mode"), mirage.setting("range"), mirage.setting("reel_speed")
 Swing, Yank, Boost = mirage.setting("swing"), mirage.setting("yank"), mirage.setting("release_boost")
+ZipSpeed = mirage.setting("zip_speed")
 Status = m:text("Status", "free", "What the hook is doing")
 Hooks = m:slider_int("Hooks fired", 0, 0, 1 << 30, "Times the hook caught this session")
 
@@ -184,7 +211,7 @@ mirage.on("action", function(name, pressed)
     if not m:enabled() then return end
     if name == "fire" then
         if pressed and aim and aim.hit then attach(aim.hit)
-        elseif not pressed then release("let go", Boost:get()) end
+        elseif not pressed and Mode:get() ~= "Zip" then release("let go", Boost:get()) end  -- A zip runs to the end
     elseif name == "reel_in" then reel.into = pressed
     elseif name == "reel_out" then reel.out = pressed end
 end)
