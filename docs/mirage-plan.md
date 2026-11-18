@@ -1389,8 +1389,9 @@ mod's Kismet layer added out of its package comparison.
 
 **Depends on.** Hard: 9, 16. Soft: 24.
 
-**Status (2026-11-18): the profiler per mod, the Lua REPL, the Kismet node editor and the script editor done; the Lua
-debugger, C# in the REPL, completion and native hot reload not started.** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
+**Status (2026-11-18): the profiler per mod, the Lua REPL, the Kismet node editor, the script editor and the level
+editor's first feature (layer actors) done; the Lua debugger, C# in the REPL, completion and native hot reload deferred
+(not started; the plan moved on to step 28 with them open).** Mirage has no script editor or console of its own (they stayed in memenu), so the step builds them here.
 The profiler (`runtime/mod_profile`): both gates into a mod's code (`detail::Enter` for hooks, events, natives,
 triggers and moves; `ModModule::Call` for module callbacks) time each call; once a second the calls are summed per mod
 and per callback into milliseconds per engine tick, the slowest callback first, shown in the mod manager's details
@@ -1446,6 +1447,12 @@ stayed there). In order, each with a self-test that drives it like a user:
 1. **Layer actors** (step 27): a Level Editor window listing a mod's layer actors for the current level; select one,
    move, rotate and scale it with fields (applied live through `Place`), add an actor of a class at the view, delete,
    and save to the mod's levels/<map>.toml.
+   **Done (2026-11-18):** `features/misc/level_editor` (Misc tab): a loaded mod chosen, its layer for the current level
+   in a working copy (`level_editor::Open`); location, rotation and scale fields move the spawned actor at once
+   (`layers::Place`); name and class, "Add at view" (400 units in front of the camera) and Delete show after Save
+   (`layers::Write`, spawned again on the next tick); Revert reads the file again; properties are kept as saved.
+   Self-test "Mirage level editor" (profile-lua's layer): an actor added and saved spawns, a 200-unit move moves it
+   200.0 at once and is in the file once saved, deleted and saved it is gone.
 2. **3D gizmo and picking:** translate / rotate / scale handles in the world, click to select what is under the cursor,
    snapping to grid and surfaces.
 3. **Properties:** the selected actor's properties through reflection (`runtime/reflect`), edited live and saved as

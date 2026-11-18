@@ -72,6 +72,9 @@
 #include "features/misc/script_editor.h"
 #include "font.h"
 #endif
+#if MIRAGE_FEATURE_LEVEL_EDITOR
+#include "features/misc/level_editor.h"
+#endif
 #include <shlobj.h>
 #if MIRAGE_FEATURE_INPUT
 #include "tas/engine.h"
@@ -5833,6 +5836,84 @@ void TestGrapple()
     End(s);
 }
 
+// Step 27's Level Editor (features/misc/level_editor.h), the level editor's first feature, through the functions its
+// window calls, on profile-lua's layer for the current level (it has none): an actor added at the view and saved
+// spawns; moved, its actor follows at once and the move is in the file once saved; deleted and saved, it is gone. The
+// layer file is removed after.
+void TestLevelEditor()
+{
+    Step& s = Begin("Mirage level editor");
+    Probe p(s);
+#if !MIRAGE_FEATURE_LEVEL_EDITOR
+    p.Problem("built without the Level Editor feature");
+#else
+    namespace fs = std::filesystem;
+    WaitPlayerReady(10.0);
+    std::string error, map;
+    bool opened = false;
+    int added = -1;
+    OnGameThread([&] {
+        map = mirage::layers::CurrentMap();
+        opened = level_editor::Open("profile-lua", &error);
+        added = opened ? level_editor::Add("Engine.DynamicSMActor_Spawnable") : -1;
+    });
+    fs::path file;
+    for (const auto& m : mirage::mods::List())
+        if (m.id == "profile-lua") file = m.dir / "levels" / (map + ".toml");
+    if (!opened || added != 0 || map.empty() || file.empty()) {
+        p.Problem(fmt::format("couldn't open profile-lua's layer (map '{}', added at {}): {}", map, added, error));
+        End(s);
+        return;
+    }
+    const auto live = [] {
+        bool there = false;
+        OnGameThread([&] { there = level_editor::Live(0) != nullptr; });
+        return there;
+    };
+    bool saved = false;
+    OnGameThread([&] { saved = level_editor::Save(&error); });
+    const bool spawned = saved && WaitFor(3.0, live);
+    s.notes.push_back(fmt::format("added {} at the view: {}", level_editor::Actors()[0].name, spawned ? "spawned" : "not spawned " + error));
+    if (!spawned) p.Problem("the added actor didn't spawn after saving: " + error);
+
+    // Moved: the spawned actor follows at once; saved, the file has the new place
+    mirage::layers::EditActor moved = level_editor::Actors()[0];
+    moved.location[0] += 200.f;
+    Classes::FVector before{}, after{};
+    OnGameThread([&] {
+        if (auto* a = level_editor::Live(0)) before = a->Location;
+        level_editor::Set(0, moved);
+        if (auto* a = level_editor::Live(0)) after = a->Location;
+    });
+    s.notes.push_back(fmt::format("moved 200 units: the actor moved {:.1f}, unsaved: {}", after.X - before.X, level_editor::Dirty()));
+    if (std::abs(after.X - before.X - 200.f) > 1.f) p.Problem(fmt::format("the actor didn't follow the move ({:.1f} units)", after.X - before.X));
+    std::vector<mirage::layers::EditActor> back;
+    OnGameThread([&] {
+        saved = level_editor::Save(&error);
+        mirage::layers::Read("profile-lua", back);
+    });
+    if (!saved || back.size() != 1 || std::abs(back[0].location[0] - moved.location[0]) > 0.5f)
+        p.Problem(fmt::format("the move wasn't saved ({} entries in the file) {}", back.size(), error));
+
+    // Deleted: gone once saved
+    OnGameThread([&] {
+        level_editor::Remove(0);
+        saved = level_editor::Save(&error);
+    });
+    const bool gone = saved && WaitFor(3.0, [&] {
+        bool there = true;
+        OnGameThread([&] { there = mirage::layers::Find("profile-lua", moved.name) != nullptr; });
+        return !there;
+    });
+    s.notes.push_back(fmt::format("deleted: {}", gone ? "gone" : "still there"));
+    if (!gone) p.Problem("the deleted actor is still in the level: " + error);
+    std::error_code ec;
+    fs::remove(file, ec);
+    fs::remove(file.parent_path(), ec);     // Only if empty
+#endif
+    End(s);
+}
+
 // World access (step 14), with tests/mods/world-access (Lua): an actor (a DynamicSMActor_Spawnable) spawned with the Tag
 // "WorldGravityZ" (a name the game has, no class's) comes to the
 // mod as actor_added (its class with it); the mod finds it by tag and around the player (the player first: nearest
@@ -7107,6 +7188,7 @@ const Named* FeatureList()
         {"Mirage console", &TestConsole, false},
         {"Mirage Kismet editor", &TestKismetEditor, false},
         {"Mirage script editor", &TestScriptEditor, false},
+        {"Mirage level editor", &TestLevelEditor, false},
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
