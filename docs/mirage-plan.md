@@ -206,7 +206,7 @@ priorities (10, 17, 20, 24, 31, 33).
 | 10 Tooling, docs, distribution | 35 (CLI, templates, docs), 40 (index, updates) | Local tooling is P2; distribution is P3 and must not block local mod creation |
 | 14 Services between mods | 33 | P2: no gameplay step needs versioned services first; `share_set/get` covers today's needs |
 | 15 Engine-level hooks | 32 (minimal form pulled in by 20 and 22) | Needed only where reflection and script hooks stop |
-| 16 Rendering, Scaleform | 31 | P1 gameplay presentation, after the core systems |
+| 16 Rendering, the game's UI | 31 | P1 gameplay presentation, after the core systems |
 | 17 Audio, input, controllers | 22 (input actions), 30 (audio, controllers) | Custom mechanics need input actions early; the rest later |
 | 18 Multiplayer | 43 | P3: single-player gameplay first |
 | 19 Determinism with mods | 24 | P0: custom mechanics must replay; moved up next to them |
@@ -1349,7 +1349,7 @@ engine by name, not listed as maps), for maps with their own content package (ma
 Objectives are mod content, with no new API: a `TdCheckpoint` subclass a level layer places (tests/mods/mission-test:
 classes/MirageObjective.uc) is the objective. While it is open, the game's own on-screen message shows its goal (the
 HUD's Supers message, opened as the levels' Kismet opens it: a `SeqAct_TdSupersMessage` activated from script, so no
-Scaleform or menu HUD is needed). Touched by the player, it becomes the active checkpoint as `SeqAct_TdCheckpoint` makes
+Mirage menu HUD is needed). Touched by the player, it becomes the active checkpoint as `SeqAct_TdCheckpoint` makes
 one (`SetNewCheckpoint`, not saved to the profile; a weight over the level's own checkpoints), shows its "reached"
 message and fires the level's `MirageSeqEvent_ObjectiveReached` events; the mod's Kismet layer (kismet/edge_p.toml)
 links that event to a mod-defined action, `MirageSeqAct_OpenDoor`, which opens the mod's door. Consistency over a
@@ -1450,13 +1450,23 @@ below as self-tests. **Costs (targets):** a full-screen pass under 0.5 ms at 108
   after everything), a D3D9 device and state block handed to native mods, render targets and textures a mod owns.
 - **Shaders and post process:** a mod ships HLSL (compiled at build time by the CLI, or at load), applied as a full-screen
   pass or replacing a material's pixel shader; parameters animatable from Lua (a "runner vision" filter, colour grading).
-- **Scaleform:** the game's menus and HUD are GFx movies: list, read and replace them (a mod ships its own `.gfx`),
-  call ActionScript functions and set variables from Lua, and receive `fscommand`s. A mod adds a page to the game's own
-  options menu.
+- **The game's UI:** Mirror's Edge has no Scaleform (the SDK has no GFx class): its menus and HUD scenes are UE3
+  `UIScene`s (`TdUIScene_*`, archetypes in `CookedPC\UI\TdUI_*.upk`) built from widgets (`TdUIButtonBarButton`,
+  `UILabel`, panels), each widget's behaviour a small Kismet graph (`UISequence`: `UIEvent_OnClick` ->
+  `UIAction_OpenScene`, `UIAction_ConsoleCommand`, `UIAction_PlaySound`). MirrorsEdgeTweaks (surveyed 2026-11-18)
+  integrates this way, by replacing cooked packages: `TdUI_FrontEnd.upk` and `Maps\Menu\TdMainMenu.me1` re-cooked with
+  two extra buttons in the main menu's bottom `ButtonBar` (each `OnClick` -> `UIAction_OpenScene` of a scene in its own
+  `TdUI_SofTimer.upk`), whose `TdUIScene` pages are stock widgets with `UIAction_ConsoleCommand` buttons running exec
+  files (`set <class> <property> <value>` on class defaults, e.g. `HUDType` and `PlayerControllerClass` to its script
+  package's subclasses, then `RestartLevel`); a stock-restore download per game version (1.0, 1.1) undoes it. Mirage does
+  the same at runtime instead, so mods compose and nothing per version is shipped: a mod's scene is a package in its
+  `packages/` folder (authored in the UE3 editor) or widgets created from code; a button is inserted into a stock scene
+  when it opens (a widget cloned from its siblings into the `ButtonBar`), its click opening the mod's scene; the scenes'
+  console commands reach mods as Mirage commands. A mod adds a page to the game's own options menu.
 - **Models and materials at runtime:** load a mesh and textures from a mod's files (glTF/FBX converted by the CLI
   through UnrealLib), swap the player's arms and body (step 7's texture path extended to meshes).
 
-**Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (Scaleform), another swaps
+**Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.
 
 ### 50. Player-drivable vehicles (P2)
@@ -1817,7 +1827,7 @@ whether PhysX state rewinds and replays deterministically (step 20's investigati
 | Player-drivable vehicles | 50 | P2 | UE3's `SVehicle` / `SVehicleSimCar` (PhysX wheels) are in the engine |
 | Cameras | 29 | P1 | Photo mode and cinematics: 48 |
 | Audio, controllers | 30 | P1 | Input actions are in 22 |
-| Rendering, materials, post process, Scaleform UI, models | 31 | P1 | Texture replacement exists (7) |
+| Rendering, materials, post process, the game's UI (`UIScene`s), models | 31 | P1 | Texture replacement exists (7) |
 | Saves and persistent mod data | 38 | P2 | |
 | Localization | 39 | P2 | |
 
