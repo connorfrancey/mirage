@@ -6014,6 +6014,47 @@ void TestAI()
         s.notes.push_back(fmt::format("engaged the player: {}; the player's health {} -> {}", engaged ? "yes" : "no", healthBefore, healthAfter));
         if (!engaged) p.Problem("the bot didn't take the player as its enemy (seen) within 8 s");
 
+        // A mod behaviour at the AI's own update rate: a Lua hook on TdAIController.Tick (profile-lua's) slides its bot
+        // 2 units along X each update, something the game never does. Then it fails on purpose: the hook is removed and
+        // the bot is the game's again (no more sliding, still fighting).
+        const auto botX = [&] {
+            float x = 0.f;
+            OnGameThread([&] { x = b.pawn->bDeleteMe ? 0.f : b.pawn->Location.X; });
+            return x;
+        };
+        const auto eval = [](const std::string& code) {
+            mirage::mods::EvalResult r;
+            OnGameThread([&] { r = mirage::mods::Eval("profile-lua", code); });
+            return r;
+        };
+        const auto hooked = eval(
+            "ai_updates, ai_fail = 0, false\n"
+            "ai_hook = mirage.hook('TdGame.TdAIController.Tick', function(call)\n"
+            "  if ai_fail then error('the behaviour failed on purpose') end\n"
+            "  local p = call.object.Pawn\n"
+            "  if p then ai_updates = ai_updates + 1; local l = p.Location; p.Location = {X = l.X + 2, Y = l.Y, Z = l.Z} end\n"
+            "end, { when = 'after' })\n"
+            "return ai_hook ~= nil");
+        const float x0 = botX();
+        WaitTicks(60);
+        const float slid = botX() - x0;
+        const int updates = static_cast<int>(util::ParseFloatOr(eval("return ai_updates").value, 0.f));
+        eval("ai_fail = true");
+        WaitTicks(5);
+        const int updatesAtFail = static_cast<int>(util::ParseFloatOr(eval("return ai_updates").value, 0.f));
+        const float x1 = botX();
+        WaitTicks(60);
+        const float slidAfter = botX() - x1;
+        const int updatesAfter = static_cast<int>(util::ParseFloatOr(eval("return ai_updates").value, 0.f)) - updatesAtFail;
+        bool fightsOn = false;
+        OnGameThread([&] { fightsOn = !b.pawn->bDeleteMe && b.pawn->myController && b.pawn->myController->myEnemy == game::Pawn(); });
+        s.notes.push_back(fmt::format("behaviour hook {}: {} AI updates in 60 ticks, the bot slid {:.0f} units; failed: {} updates and "
+                                      "{:.0f} units after, still fighting: {}", hooked.value + hooked.error, updates, slid, updatesAfter,
+                                      slidAfter, fightsOn ? "yes" : "no"));
+        if (updates < 30 || slid < 50.f) p.Problem("the behaviour hook didn't run at the AI's update rate or didn't move its bot");
+        if (updatesAfter != 0 || std::abs(slidAfter) > 10.f) p.Problem("the failed behaviour wasn't removed");
+        if (!fightsOn) p.Problem("after its behaviour failed the bot isn't fighting the player (the game's behaviour)");
+
         // A checkpoint restart: the layer spawns again, and the old bot goes with its MirageBot
         const game::ObjectId first = game::IdOf(b.pawn);
         if (!RestartAndWait()) p.Problem("the restart didn't come");
