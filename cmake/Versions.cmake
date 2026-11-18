@@ -59,10 +59,7 @@ set(ZSTD_VERSION v1.5.7)
 #  - imcurve: https://github.com/jsoulier/imcurve
 set(IMGUI_VERSION v1.92.9b-docking)   # The docking branch (its tags carry -docking)
 set(IMGUIFILEBROWSER_GIT_COMMIT 47a1884524d6a3df5d99f70ecc82e1ed0ccd26cf)
-set(IMGUICOLORTEXTINPUT_GIT_COMMIT ca2f9f1462e3b60e56351bc466acda448c5ea50d)
-
-# Script editor: Zep (vim and notepad modes)
-set(ZEP_GIT_COMMIT 7aa7ed940d5c889dc6b27a2529a740c0bb2ad6af)
+set(IMGUICOLORTEXTINPUT_GIT_COMMIT a07eb7fa4d1c097e202950d75a41e583f5a28d2b)   # goossens' fork, 2026-11-04
 
 # Icons: IconFontCppHeaders names the codepoints of Font Awesome 6, whose solid font is embedded (cmake/Fonts.cmake)
 set(ICONFONTCPPHEADERS_GIT_COMMIT 210b5a399a64270674560d633638952d1e8d804d)

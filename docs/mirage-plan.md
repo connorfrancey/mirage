@@ -1424,12 +1424,12 @@ Kismet editor" (tests/mods/kismet-editor-test): an op added, a touch event linke
 saved (the layer applies 3 entries, 0 skipped), another op discarded, and the layer removed puts the graph back. Not
 yet: editing an op's properties, deleting level ops, saving node positions, copy and paste, the debugger (step 19).
 
-The script editor (`features/misc/script_editor`, ImGuiColorTextEdit, already a dependency): a loaded mod's `.lua`
+The script editor (`features/misc/script_editor`, goossens' fork of ImGuiColorTextEdit since 2026-11-18, which replaced Zep): a loaded mod's `.lua`
 files opened from the menu bar, edited with Lua highlighting and line numbers, saved with Ctrl+S into the mod's folder,
 where the hot reload loads them (Lua mods reload by default); the mod's load error is marked on the line it names;
 Ctrl+Enter runs the selection (or the current line) through the REPL in the mod's state. Self-test "Mirage script
 editor" (profile-lua's main.lua): an edit saved reloads the mod; a broken first line saved fails the load with line 1
-marked; the original saved back loads again. Not yet: find and replace, completion, signature help, go to definition,
+marked; the original saved back loads again. Find and replace (Ctrl+F) comes with the widget. Not yet: completion, signature help, go to definition,
 templates, C#.
 
 **Milestone.** A mod author breaks in a Lua hook from VS Code, inspects a locals table and the player object, changes a

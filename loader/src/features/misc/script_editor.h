@@ -1,11 +1,11 @@
 #pragma once
-// The in-game script editor (Mirage step 27): a loaded mod's Lua files opened in a code editor (ImGuiColorTextEdit:
-// Lua highlighting, line numbers; no find and replace yet), saved back to the mod's folder, where the hot
+// The in-game script editor (Mirage step 27): a loaded mod's Lua files opened in a code editor (ImGuiColorTextEdit,
+// goossens' fork: Lua highlighting, line numbers, find and replace), saved back to the mod's folder, where the hot
 // reload picks them up (Lua mods reload by default), with the mod's load error marked on its line. "Run selection"
 // sends the selected lines (or the current line) to the console's REPL in the mod's state (runtime/mods.h Eval).
 //
-// The window and the self-test call the same functions below, on the render thread only: Zep lays text out with ImGui's
-// fonts (the self-test queues its calls there).
+// The window and the self-test call the same functions below, on the render thread only: the editor lays text out with
+// ImGui's fonts (the self-test queues its calls there).
 #include <string>
 #include <vector>
 

@@ -19,7 +19,7 @@ add_executable(mirage_tests
         test_abi.cpp
         test_resolve.cpp
         test_mod_profile.cpp
-        test_zep.cpp
+        test_text_editor.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mod_profile.cpp
         test_detours.cpp
         test_crashhandler.cpp
@@ -75,7 +75,7 @@ target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src $
         ${CMAKE_BINARY_DIR}/generated)   # symbols_toml.inc
 target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(mirage_tests PRIVATE GTest::gtest_main zstd_compress nlohmann_json::nlohmann_json imgui zep spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
+target_link_libraries(mirage_tests PRIVATE GTest::gtest_main zstd_compress nlohmann_json::nlohmann_json imgui imgui_color_text_edit spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
 if(MSVC)
   target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
 endif()

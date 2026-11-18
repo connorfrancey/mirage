@@ -507,8 +507,17 @@ Expectation ExpectationFor(Module& m)
 #if MIRAGE_FEATURE_SCRIPT_EDITOR
     if (name == "Script Editor") {
         static std::uint64_t framesBefore = 0;
-        return {[] { framesBefore = script_editor::Frames(); },
-                [] { return script_editor::Frames() == framesBefore ? std::string("its window was never drawn") : std::string(); }};
+        // A file open, so the window draws the editor widget itself, not only the "open a file" line
+        return {[] {
+                    framesBefore = script_editor::Frames();
+                    OnRenderThread([] { script_editor::Open("profile-lua", "main.lua"); });
+                },
+                [] {
+                    if (script_editor::Frames() == framesBefore) return std::string("its window was never drawn");
+                    std::string text;
+                    OnRenderThread([&text] { text = script_editor::Text(); });
+                    return text.empty() ? std::string("its editor had no file open") : std::string();
+                }};
     }
 #endif
 #if MIRAGE_FEATURE_MOD_MANAGER
@@ -5694,7 +5703,7 @@ void TestScriptEditor()
             if (m.id == "profile-lua") return m;
         return mirage::mods::Info{};
     };
-    // The editor's functions run on the render thread (Zep lays text out with ImGui's fonts)
+    // The editor's functions run on the render thread (it lays text out with ImGui's fonts)
     std::vector<std::string> files;
     bool opened = false;
     std::string original;

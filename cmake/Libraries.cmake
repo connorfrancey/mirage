@@ -471,37 +471,20 @@ if(NOT TARGET span_lite)
     target_include_directories(span_lite SYSTEM INTERFACE ${span-lite_SOURCE_DIR}/include)
 endif()
 
-# ImGuiColorTextEdit: a code editor widget with syntax highlighting (no CMake project: built here against our ImGui)
+# ImGuiColorTextEdit (goossens' fork): the script editor's code editor widget (features/misc/script_editor.cpp):
+# Lua highlighting, line numbers, find and replace, markers. No CMake project: built here against our ImGui, with only
+# the Lua language definition compiled in.
 CPMAddPackage(
         NAME ImGuiColorTextEdit
-        GITHUB_REPOSITORY BalazsJako/ImGuiColorTextEdit
+        GITHUB_REPOSITORY goossens/ImGuiColorTextEdit
         GIT_TAG ${IMGUICOLORTEXTINPUT_GIT_COMMIT}
         DOWNLOAD_ONLY YES
 )
 if(ImGuiColorTextEdit_ADDED)
     add_library(imgui_color_text_edit STATIC ${ImGuiColorTextEdit_SOURCE_DIR}/TextEditor.cpp)
     target_include_directories(imgui_color_text_edit SYSTEM PUBLIC ${ImGuiColorTextEdit_SOURCE_DIR})
+    target_compile_definitions(imgui_color_text_edit PUBLIC TEXTEDITOR_INCLUDE_LUA)
     target_link_libraries(imgui_color_text_edit PUBLIC imgui)
-endif()
-
-# Zep: an embeddable code editor with vim and notepad modes (features/misc/script_editor.cpp). Its own CMake project wants
-# vcpkg for its demos, so its core sources are built here; the ImGui backend is header-only (zep/imgui/*.h).
-CPMAddPackage(
-        NAME zep
-        GITHUB_REPOSITORY cmaughan/zep
-        GIT_TAG ${ZEP_GIT_COMMIT}
-        DOWNLOAD_ONLY YES
-)
-if(zep_ADDED)
-    file(GLOB _zep_sources CONFIGURE_DEPENDS ${zep_SOURCE_DIR}/src/*.cpp)
-    list(APPEND _zep_sources ${zep_SOURCE_DIR}/src/mcommon/animation/timer.cpp ${zep_SOURCE_DIR}/src/mcommon/string/stringutils.cpp
-            ${zep_SOURCE_DIR}/src/mcommon/file/path.cpp)   # The ones its own src/CMakeLists.txt builds
-    add_library(zep STATIC ${_zep_sources})
-    file(WRITE ${CMAKE_BINARY_DIR}/zep_config/config_app.h "// Zep's generated configuration: nothing needed here
-")
-    target_include_directories(zep SYSTEM PUBLIC ${zep_SOURCE_DIR}/include
-            PRIVATE ${zep_SOURCE_DIR}/src ${zep_SOURCE_DIR}/src/mcommon ${CMAKE_BINARY_DIR}/zep_config)
-    target_compile_definitions(zep PUBLIC ZEP_FEATURE_CPP_FILE_SYSTEM NOMINMAX PRIVATE _CRT_SECURE_NO_WARNINGS)
 endif()
 
 # IconFontCppHeaders: ICON_FA_* names for Font Awesome 6's codepoints (the font is embedded by cmake/Fonts.cmake)
@@ -561,7 +544,7 @@ endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE
         imgui imjson MirageHook::MirageHook d3d9 shell32 spdlog::spdlog zstd_compress nlohmann_json::nlohmann_json winmm Threads::Threads
         readerwriterqueue simdutf::simdutf uv_a cpptrace::cpptrace ghc_filesystem directxmath bitsery span_lite
-        imgui_color_text_edit imgui_markdown imgui_flame_graph imgui_club zep icon_font_headers)
+        imgui_color_text_edit imgui_markdown imgui_flame_graph imgui_club icon_font_headers)
 if(MIRAGE_GAME)
   target_link_libraries(${PROJECT_NAME} PRIVATE mirage::sdk UnrealLib::Linker UnrealLib::Assets UnrealLib::Writer UnrealLib::Compiler UnrealLib::Decompiler lua::lua toml11::toml11 stb_headers
           Zydis dbghelp)   # Zydis (built for MirageHook) and dbghelp: the crash handler's disassembly and symbols
