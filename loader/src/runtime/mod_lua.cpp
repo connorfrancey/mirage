@@ -254,6 +254,9 @@ namespace mirage::mods
 		static int ForceFn(lua_State* L);
 		static int SpawnPropFn(lua_State* L);
 		static int SpawnFn(lua_State* L);
+		static int SoundPlayFn(lua_State* L);
+		static int SoundStopFn(lua_State* L);
+		static int SoundPlayingFn(lua_State* L);
 		static int CollisionFn(lua_State* L);
 		static int SetCollisionFn(lua_State* L);
 		static int TraceFn(lua_State* L);
@@ -1563,6 +1566,45 @@ namespace mirage::mods
 		MirageObject* a = self.api_->actor_spawn(self.mod_, cls, at, hasRot ? rot : nullptr);
 		if (a) PushObject(L, a);
 		else lua_pushnil(L);
+		return 1;
+	}
+
+	// mirage.sound_play("sounds/x.wav", {volume = 1, loop = false}): a handle, or nil (the log says why). A WAV of the
+	// mod's folder; stopped when the mod unloads
+	int LuaMod::SoundPlayFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, sound_play)) return luaL_error(L, "mirage.sound_play: this runtime has no sound");
+		const char* path = luaL_checkstring(L, 1);
+		float volume = 1.f;
+		uint32_t flags = 0;
+		if (lua_istable(L, 2)) {
+			lua_getfield(L, 2, "volume");
+			if (lua_isnumber(L, -1)) volume = static_cast<float>(lua_tonumber(L, -1));
+			lua_pop(L, 1);
+			lua_getfield(L, 2, "loop");
+			if (lua_toboolean(L, -1)) flags |= MIRAGE_SOUND_LOOP;
+			lua_pop(L, 1);
+		}
+		const int32_t handle = self.api_->sound_play(self.mod_, path, volume, flags);
+		if (handle > 0) lua_pushinteger(L, handle);
+		else lua_pushnil(L);
+		return 1;
+	}
+
+	// mirage.sound_stop(handle); mirage.sound_playing(handle): true while it plays
+	int LuaMod::SoundStopFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (MIRAGE_API_HAS(self.api_, sound_stop) && lua_isinteger(L, 1))
+			self.api_->sound_stop(self.mod_, static_cast<int32_t>(lua_tointeger(L, 1)));
+		return 0;
+	}
+	int LuaMod::SoundPlayingFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		lua_pushboolean(L, MIRAGE_API_HAS(self.api_, sound_playing) && lua_isinteger(L, 1) &&
+							   self.api_->sound_playing(self.mod_, static_cast<int32_t>(lua_tointeger(L, 1))) == 1);
 		return 1;
 	}
 
@@ -2968,7 +3010,7 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"sound_play", SoundPlayFn}, {"sound_stop", SoundStopFn}, {"sound_playing", SoundPlayingFn}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
 			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn}, {"layer_actor", LayerActor},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},

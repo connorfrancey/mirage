@@ -5980,6 +5980,46 @@ void TestGrapple()
     End(s);
 }
 
+// Sound from mods (runtime/audio.h): tests/mods/sound-lua plays its own WAV (a half-second tone): it plays and ends by
+// itself; looped, it plays on until sound_stop; a path out of the mod's folder is refused.
+void TestSound()
+{
+    Step& s = Begin("Mirage sound");
+    Probe p(s);
+    p.Expect("a path inside the mod's folder");     // tone_escape, on purpose
+    const auto eval = [](const std::string& code) {
+        mirage::mods::EvalResult r;
+        OnGameThread([&] { r = mirage::mods::Eval("sound-lua", code); });
+        return r;
+    };
+    const auto handle = [](const std::string& v) { return std::atoi(v.c_str()); };
+    const auto once = eval("tone_play(false)");
+    if (handle(once.value) <= 0) {
+        p.Problem("sound_play gave no handle: " + once.value + once.error + " (no audio device?)");
+        End(s);
+        return;
+    }
+    const bool started = eval("tone_playing(" + once.value + ")").value == "true";
+    const double t0 = GameSeconds();
+    const bool ended = WaitFor(3.0, [&] { return eval("tone_playing(" + once.value + ")").value == "false"; });
+    const double played = GameSeconds() - t0;
+    const auto looped = eval("tone_play(true)");
+    const double t1 = GameSeconds();
+    while (!g_aborted && GameSeconds() - t1 < 0.8) WaitTicks(1);
+    const bool still = eval("tone_playing(" + looped.value + ")").value == "true";
+    eval("tone_stop(" + looped.value + ")");
+    const bool stopped = eval("tone_playing(" + looped.value + ")").value == "false";
+    const std::string escape = eval("tone_escape()").value;
+    s.notes.push_back(fmt::format("once: handle {}, playing {}, ended after {:.2f} s; looped: still playing after 0.8 s {}, stopped {}; "
+                                  "out of the folder: {}", once.value, started, played, still, stopped, escape));
+    if (!started) p.Problem("the sound wasn't playing right after sound_play");
+    if (!ended) p.Problem("a half-second sound was still playing after 3 s");
+    if (!still) p.Problem("a looping sound stopped by itself");
+    if (!stopped) p.Problem("sound_stop didn't stop it");
+    if (handle(escape) > 0) p.Problem("a path out of the mod's folder was played");
+    End(s);
+}
+
 // The first-party mod mods/mirage-blink: the blink key held draws the marker in the world, and let go blinks along the
 // view; a blink straight up to a point 400 above arrives there exactly, in well under the time a jump would take
 // (gravity can't lift her); a second one at once is refused by the cooldown.
@@ -6008,8 +6048,88 @@ void TestBlink()
     WaitGrounded();
     WaitTicks(3);       // The module's first tick registers its move
 
+    // A ledge: a wall near the player whose top is a floor 10 to 120 above the player's middle. Looking level at the
+    // wall, the blink stands on the top.
+    {
+        float top = 0.f;
+        Classes::FVector aimAt{}, pawnAt{}, wallAt{}, wallNormal{};
+        bool found = false;
+        OnGameThread([&] {
+            auto* pawn = game::Pawn();
+            if (!pawn) return;
+            pawnAt = pawn->Location;
+            for (int i = 0; i < 64 && !found; ++i) {
+                const float a = static_cast<float>(i) * 6.2831853f / 64.f;
+                MirageHit wall{};
+                wall.size = sizeof wall;
+                const float from[3] = {pawnAt.X, pawnAt.Y, pawnAt.Z}, to[3] = {pawnAt.X + std::cos(a) * 1100.f, pawnAt.Y + std::sin(a) * 1100.f, pawnAt.Z};
+                // Swept as the player's body is (a line finds surfaces the player walks through)
+                const float body[3] = {34.f, 34.f, 40.f};
+                if (mirage::mods::game_api::WorldTrace(nullptr, from, to, body, MIRAGE_TRACE_ACTORS, nullptr, &wall) != 1) continue;
+                if (wall.time <= 0.01f || std::abs(wall.normal[2]) > 0.3f) continue;     // Not one the box started in
+                MirageHit floor{};
+                floor.size = sizeof floor;
+                const float down0[3] = {wall.location[0] - wall.normal[0] * 80.f, wall.location[1] - wall.normal[1] * 80.f, pawnAt.Z + 250.f};
+                const float down1[3] = {down0[0], down0[1], pawnAt.Z - 50.f};
+                if (mirage::mods::game_api::WorldTrace(nullptr, down0, down1, body, MIRAGE_TRACE_ACTORS, nullptr, &floor) != 1) continue;
+                if (floor.normal[2] < 0.7f || floor.time <= 0.f) continue;
+                const float rise = floor.location[2] - body[2] - pawnAt.Z;
+                if (rise < 10.f || rise > 120.f) continue;
+                top = floor.location[2] - body[2];       // The box's center rests a half height above the top
+                wallAt = {wall.location[0], wall.location[1], wall.location[2]};
+                wallNormal = {wall.normal[0], wall.normal[1], wall.normal[2]};
+                aimAt = {wall.location[0], wall.location[1], top - 40.f};
+                found = true;
+            }
+        });
+        if (!found) {
+            s.notes.push_back("ledge: no wall with a ledge 10 to 120 above the player's middle within 1100 (not checked)");
+        } else {
+            const std::string where = eval("string.format('%f %f %f', mirage.camera().location.x, mirage.camera().location.y, mirage.camera().location.z)").value;
+            float ex = 0.f, ey = 0.f, ez = 0.f;
+            sscanf_s(where.c_str(), "%f %f %f", &ex, &ey, &ez);
+            // Level, as a player looks at a ledge: the body-sized box then meets the wall's face (aimed down at it, the
+            // box meets the floor first)
+            const float dx = aimAt.X - ex, dy = aimAt.Y - ey, dz = 0.f;
+            constexpr float kUnits = 65536.f / 6.2831853f;
+            int pitchWas = 0, yawWas = 0;
+            OnGameThread([&] {
+                if (auto* pc = game::Controller()) {
+                    pitchWas = pc->Rotation.Pitch, yawWas = pc->Rotation.Yaw;
+                    pc->Rotation.Yaw = static_cast<int>(std::atan2(dy, dx) * kUnits) & 0xFFFF;
+                    pc->Rotation.Pitch = static_cast<int>(std::atan2(dz, std::sqrt(dx * dx + dy * dy)) * kUnits) & 0xFFFF;
+                }
+            });
+            WaitTicks(3);
+            const std::string aimed = eval("blink_target()").value;
+            // What the blink's own sweep meets along the same view (its body: 34 wide, 96 half height)
+            const std::string view = eval("string.format('%f %f %f', mirage.camera().forward.x, mirage.camera().forward.y, mirage.camera().forward.z)").value;
+            float fx = 0.f, fy = 0.f, fz = 0.f;
+            sscanf_s(view.c_str(), "%f %f %f", &fx, &fy, &fz);
+            MirageHit same{};
+            same.size = sizeof same;
+            OnGameThread([&] {
+                const float from[3] = {ex, ey, ez}, to[3] = {ex + fx * 1200.f, ey + fy * 1200.f, ez + fz * 1200.f}, box[3] = {34.f, 34.f, 96.f};
+                mirage::mods::game_api::WorldTrace(nullptr, from, to, box, MIRAGE_TRACE_ACTORS, reinterpret_cast<MirageObject*>(game::Pawn()), &same);
+            });
+            s.notes.push_back(fmt::format("ledge: wall at {:.0f} {:.0f} {:.0f} normal {:.2f} {:.2f} {:.2f}; eye {:.0f} {:.0f} {:.0f} looking {:.2f} {:.2f} {:.2f}; "
+                                          "the blink's sweep meets {} at {:.0f} {:.0f} {:.0f} normal {:.2f} {:.2f} {:.2f}",
+                                          wallAt.X, wallAt.Y, wallAt.Z, wallNormal.X, wallNormal.Y, wallNormal.Z, ex, ey, ez, fx, fy, fz,
+                                          same.hit, same.location[0], same.location[1], same.location[2], same.normal[0], same.normal[1], same.normal[2]));
+            char kind[32] = {};
+            float sx = 0.f, sy = 0.f, sz = 0.f;
+            sscanf_s(aimed.c_str(), "%31s %f %f %f", kind, static_cast<unsigned>(sizeof kind), &sx, &sy, &sz);
+            s.notes.push_back(fmt::format("ledge: top {:.0f} above the player's middle; aimed at the wall below it: {}", top - pawnAt.Z, aimed));
+            if (std::string(kind) != "ledge") p.Problem("aimed at a wall below a ledge, the blink found '" + aimed + "', not the ledge");
+            else if (sz < top) p.Problem(fmt::format("the ledge spot ({:.0f}) isn't on the top ({:.0f})", sz, top));
+            OnGameThread([&] { if (auto* pc = game::Controller()) { pc->Rotation.Pitch = pitchWas; pc->Rotation.Yaw = yawWas; } });
+            WaitTicks(2);
+        }
+    }
+
     // The key: held, the marker is drawn; let go, a blink along the view (wherever that ends: floor, wall or air)
     const std::string aimed = eval("blink_target()").value;
+    const int blinksBefore = std::atoi(eval("blink_count()").value.c_str());      // A saved count: one more is this blink
     int drawn = 0;
     std::string armSequence;
     float handAhead = -1e9f;        // How far in front of the eye, along the view, the left hand got
@@ -6039,8 +6159,11 @@ void TestBlink()
     s.notes.push_back(fmt::format("arm while aiming: {} on the upper body; the left hand {:.0f} ahead of the pawn", armSequence, handAhead));
     if (armSequence != "BlinkAim") p.Problem("aiming didn't raise the arm (the upper body plays '" + armSequence + "', not BlinkAim)");
     else if (handAhead < 15.f) p.Problem(fmt::format("the aiming hand stayed out of view ({:.0f} ahead)", handAhead));
-    const bool keyed = WaitFor(2.0, [&] { return shared("blinks") == "1" && shared("state") == "idle"; });
-    s.notes.push_back(fmt::format("key: aimed at {}; marker lines {}; blink {} ({})", aimed, drawn, keyed ? "done" : "not done", shared("ended")));
+    const bool keyed = WaitFor(2.0, [&] {
+        return std::atoi(eval("blink_count()").value.c_str()) == blinksBefore + 1 && shared("state") == "idle";
+    });
+    s.notes.push_back(fmt::format("key: aimed at {}; marker lines {}; blink {} ({}); blinks {} then {}", aimed, drawn, keyed ? "done" : "not done",
+                                  shared("ended"), blinksBefore, eval("blink_count()").value));
     if (drawn == 0) p.Problem("holding the blink key drew no marker");
     if (!keyed) p.Problem("letting go of the blink key didn't blink (" + shared("state") + ")");
 
@@ -6066,6 +6189,52 @@ void TestBlink()
     else if (std::abs(at.Z - from.Z - 400.f) > 30.f) p.Problem(fmt::format("a blink 400 up ended {:.0f} up", at.Z - from.Z));
     if (seconds > 0.4) p.Problem(fmt::format("a blink 400 up took {:.2f} s", seconds));
     if (again != "false") p.Problem("a second blink at once wasn't refused by the cooldown: " + again);
+
+    // The view's kick: wider during a blink, back to the camera's own after (the FOV lock let go)
+    const auto fov = [] {
+        float f = 0.f;
+        bool locked = false;
+        OnGameThread([&] {
+            auto* c = game::Controller();
+            if (c && c->PlayerCamera) f = c->PlayerCamera->GetFOVAngle(), locked = c->PlayerCamera->bLockedFOV;
+        });
+        return std::pair{f, locked};
+    };
+    WaitFor(2.0, [&] { return eval("blink_status()").value == "ready"; });
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    const float baseFov = fov().first;
+    float widest = baseFov;
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) from = pawn->Location; });
+    eval(fmt::format("blink_to({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", from.X, from.Y, from.Z + 150.f));
+    const double k0 = GameSeconds();
+    while (!g_aborted && GameSeconds() - k0 < 0.3) {
+        widest = std::max(widest, fov().first);
+        WaitTicks(1);
+    }
+    WaitFor(2.0, [&] { return !fov().second; });
+    const auto [afterFov, stillLocked] = fov();
+    s.notes.push_back(fmt::format("view: {:.1f} degrees, {:.1f} at the widest, {:.1f} after (locked {})", baseFov, widest, afterFov, stillLocked));
+    if (widest < baseFov + 5.f) p.Problem("the view didn't widen during the blink");
+    if (stillLocked || std::abs(afterFov - baseFov) > 0.5f) p.Problem("the view didn't go back after the blink");
+
+    // Charges: with refilling slowed, blinks run out and the next is refused
+    eval("mirage.setting('recharge'):set(30)");
+    int used = 0;
+    for (int i = 0; i < 12 && !g_aborted; ++i) {
+        WaitFor(2.0, [&] { const std::string st = eval("blink_status()").value; return st == "ready" || st == "out of charges"; });
+        if (eval("blink_status()").value != "ready") break;
+        WaitPlayerReady(10.0);
+        WaitGrounded();
+        OnGameThread([&] { if (auto* pawn = game::Pawn()) from = pawn->Location; });
+        if (eval(fmt::format("blink_to({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", from.X, from.Y, from.Z + 60.f)).value == "true") ++used;
+        WaitFor(2.0, [&] { return shared("state") == "idle"; });
+    }
+    WaitFor(2.0, [&] { return eval("blink_status()").value != "cooldown"; });
+    const std::string refused = eval("blink_to()").value;
+    s.notes.push_back(fmt::format("charges: {} more blinks, then {} ({}); refused: {}", used, eval("blink_status()").value, shared("denied"), refused));
+    if (refused != "false" || shared("denied") != "charges") p.Problem("with no charges left a blink wasn't refused");
+    eval("mirage.setting('recharge'):set(2.5)");
 
     OnRenderThread([m] { m->SetEnabled(false); });
     WaitPlayerReady(10.0);
@@ -7995,6 +8164,7 @@ const Named* FeatureList()
         {"Mirage mesh replacement", &TestMeshReplacement, false},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage blink", &TestBlink, false},
+        {"Mirage sound", &TestSound, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

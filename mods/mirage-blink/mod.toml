@@ -47,17 +47,52 @@ min = 0.0
 max = 400.0
 format = "%.0f"
 
+[settings.charges]
+type = "int"
+name = "Charges"
+description = "Blinks in a row before they have to refill"
+default = 3
+min = 1
+max = 10
+
+[settings.recharge]
+type = "float"
+name = "Recharge"
+description = "Seconds for one charge to refill"
+default = 2.5
+min = 0.1
+max = 20.0
+format = "%.1f"
+
 [settings.cooldown]
 type = "float"
 name = "Cooldown"
-description = "Seconds after a blink before the next one"
-default = 0.5
+description = "Seconds after a blink before the next one, charges or not"
+default = 0.35
 min = 0.0
 max = 5.0
 format = "%.2f"
+
+[settings.fov_kick]
+type = "float"
+name = "View kick"
+description = "Degrees the view widens during a blink (0: none)"
+default = 14.0
+min = 0.0
+max = 40.0
+format = "%.0f"
 
 [settings.keep_momentum]
 type = "bool"
 name = "Keep momentum"
 description = "Off: a blink ends nearly at rest, as a short step. On: it keeps a little of its speed."
 default = false
+
+[settings.volume]
+type = "float"
+name = "Volume"
+description = "How loud the blink's sounds are (sounds/charge.wav and sounds/release.wav in the mod's folder)"
+default = 0.8
+min = 0.0
+max = 1.0
+format = "%.2f"

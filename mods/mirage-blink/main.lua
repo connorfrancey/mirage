@@ -17,10 +17,10 @@
 -- go, dropped back on arriving.
 --
 -- For the console and tests: blink_to({x, y, z}) dashes to a point (the same way a let-go key does), blink_target()
--- gives what aiming finds right now, blink_status() what the mod is doing.
+-- gives what aiming finds right now, blink_status() what the mod is doing, blink_count() the blinks so far.
 local vec = require("vec")
 
-local Range, Speed, Ledge, Cooldown, KeepMomentum         -- mod.toml settings
+local Range, Speed, Ledge, Cooldown, KeepMomentum, Charges, Recharge, FovKick, Volume   -- mod.toml settings
 local Status, Blinks
 local move                                               -- the mod's move (its EMovement number)
 
@@ -30,12 +30,30 @@ local dash = nil            -- While blinking: {points = {vec...}, index, best, 
 local cooldown = 0          -- Seconds until the next blink
 local cooling = false       -- A cooldown is running (the status says "ready" again when it ends)
 local flash = 0             -- Seconds left of the arrival flash
+local charges = nil         -- Blinks available (fractional while refilling), full at the start
+local kick = nil            -- The view's kick while it runs: {base = degrees, t = seconds into it}
+local KICK_TIME = 0.4
 
 local FLASH_TIME = 0.25
 local ARRIVE = 24           -- Close enough to a point to take the next (units)
 local EXIT_SPEED = 260      -- Speed kept along the dash when "Keep momentum" is on
 
 local function share(k, v) mirage.share(k, tostring(v)) end
+
+-- Sounds: sounds/charge.wav while aiming, sounds/release.wav on letting go (16-bit PCM WAVs in the installed mod's
+-- folder; none ship with the mod). A file that isn't there is tried once: the mod is silent without it.
+local missing = {}
+local charging = nil        -- The charge sound's handle while it plays
+local function sound(name, options)
+    if missing[name] then return nil end
+    local h = mirage.sound_play("sounds/" .. name .. ".wav", options)
+    if not h then missing[name] = true end
+    return h
+end
+local function stop_charge()
+    if charging then mirage.sound_stop(charging) end
+    charging = nil
+end
 
 -- The left arm (content/animations): played on the upper body, so the legs keep running under it
 local function arm(sequence, options)
@@ -71,7 +89,7 @@ local function find_target(p, cam)
     local extent = body(p)
     local eye = vec.of(cam.location)
     local far = vec.add(eye, vec.scale(cam.forward, Range:get()))
-    local hit = mirage.trace(eye, far, { extent = extent, ignore = p })
+    local hit = mirage.trace(eye, far, { extent = extent, ignore = p, actors = true })
     if not hit then return { stand = far, kind = "air" } end
     local spot, normal = vec.of(hit.location), vec.of(hit.normal)
     if normal.z > 0.7 then return { stand = spot, kind = "floor" } end
@@ -82,9 +100,9 @@ local function find_target(p, cam)
         -- The way up must be clear (nothing between the wall spot and the point above it) and the drop must land on a
         -- floor, starting in the open
         local up = vec.add(spot, vec.new(0, 0, Ledge:get() + 4))
-        local blocked = mirage.trace(spot, up, { extent = extent, ignore = p })
-        local over = not blocked and mirage.trace(up, above, { extent = extent, ignore = p })
-        local land = not blocked and not over and mirage.trace(above, below, { extent = extent, ignore = p })
+        local blocked = mirage.trace(spot, up, { extent = extent, ignore = p, actors = true })
+        local over = not blocked and mirage.trace(up, above, { extent = extent, ignore = p, actors = true })
+        local land = not blocked and not over and mirage.trace(above, below, { extent = extent, ignore = p, actors = true })
         if land and land.time > 0.001 and vec.of(land.normal).z > 0.7 then
             return { stand = vec.of(land.location), via = up, kind = "ledge" }
         end
@@ -137,6 +155,7 @@ local function finish(why)
     if why == "arrived" or why == "blocked" then arm("BlinkLand", { blend_in = 0.04, blend_out = 0.15 }) end
     Status:set("ready in " .. string.format("%.2f", cooldown) .. " s (" .. why .. ")")
     share("state", "idle")
+share("blinks", Blinks:get())
     share("ended", why)
 end
 
@@ -144,6 +163,12 @@ end
 local function start(t)
     local p = mirage.pawn()
     if not p or not move or dash or cooldown > 0 then return false end
+    if charges < 1 then
+        Status:set("out of charges")
+        share("denied", "charges")
+        return false
+    end
+    charges = charges - 1
     local points = {}
     if t.via then
         points[#points + 1] = vec.add(t.via, vec.new(0, 0, -(Ledge:get() + 4)))
@@ -157,12 +182,17 @@ local function start(t)
     end
     mirage.move_start(move)
     arm("BlinkCast", { blend_in = 0.04, blend_out = 0 })
+    stop_charge()
+    sound("release", { volume = Volume:get() })
+    local cam = mirage.camera()
+    if FovKick:get() > 0 and cam and cam.fov then kick = { base = kick and kick.base or cam.fov, t = 0 } end
     flash = FLASH_TIME
     Blinks:set(Blinks:get() + 1)
     Status:set("blinking (" .. t.kind .. ")")
     share("state", "blinking")
     share("kind", t.kind)
     share("blinks", Blinks:get())
+    share("charges", string.format("%.2f", charges))
     return true
 end
 
@@ -197,6 +227,27 @@ local function dash_tick(p, seconds)
     p.Velocity = vec.engine(vec.scale(dir, Speed:get()))
 end
 
+-- ---- The view's kick: wider for the dash, easing back as she arrives ----------------------------------------------------
+-- The camera's own FOV lock (Camera.SetFOV): set each tick while the kick runs, and let go (0) after
+local function set_fov(degrees)
+    local c = mirage.controller()
+    local cam = c and c.PlayerCamera
+    if cam then mirage.call(cam, "SetFOV", { NewFOV = degrees }) end
+end
+local function kick_tick(seconds)
+    if not kick then return end
+    kick.t = kick.t + seconds
+    if kick.t >= KICK_TIME then
+        set_fov(0)
+        kick = nil
+        return
+    end
+    local x = kick.t / KICK_TIME
+    local shape = x < 0.25 and (x / 0.25) or (1 - (x - 0.25) / 0.75) ^ 2      -- Out fast, back slowly
+    set_fov(kick.base + FovKick:get() * shape)
+    share("fov", string.format("%.1f", kick.base + FovKick:get() * shape))
+end
+
 -- ---- The HUD: a vignette while aiming, a flash when blinking, the cooldown ---------------------------------------------
 local function frame(w, h, inset, thickness, color)
     mirage.draw.rect_filled(inset, inset, w - inset, inset + thickness, color)
@@ -218,6 +269,16 @@ local function hud()
         end
         if cooldown > 0 then mirage.draw.text(cx + 12, cy + 10, color, string.format("%.1f", cooldown)) end
     end
+    -- The charges: pips under the crosshair while aiming or refilling
+    if charges and (aiming or charges < Charges:get()) then
+        local n, cx = Charges:get(), w * 0.5
+        for i = 1, n do
+            local x = cx + (i - (n + 1) / 2) * 16
+            local fill = math.max(0, math.min(1, charges - (i - 1)))
+            mirage.draw.rect(x - 5, h * 0.5 + 26, x + 5, h * 0.5 + 30, mirage.rgba(140, 225, 255, 120), 1)
+            if fill > 0 then mirage.draw.rect_filled(x - 5, h * 0.5 + 26, x - 5 + 10 * fill, h * 0.5 + 30, mirage.rgba(140, 225, 255, fill >= 1 and 230 or 110)) end
+        end
+    end
     if flash > 0 then
         local a = math.floor(140 * (flash / FLASH_TIME))
         mirage.draw.rect_filled(0, 0, w, h, mirage.rgba(200, 235, 255, a))
@@ -238,6 +299,8 @@ local m = mirage.module {
     on_render = hud,
     on_disable = function()
         if aiming or dash then arm_down(0) end
+        if kick then set_fov(0); kick = nil end
+        stop_charge()
         aiming, target, dash = false, nil, nil
         mirage.draw3d.clear()
         mirage.revert()
@@ -246,6 +309,9 @@ local m = mirage.module {
 }
 Range, Speed, Ledge = mirage.setting("range"), mirage.setting("speed"), mirage.setting("ledge")
 Cooldown, KeepMomentum = mirage.setting("cooldown"), mirage.setting("keep_momentum")
+Charges, Recharge, FovKick = mirage.setting("charges"), mirage.setting("recharge"), mirage.setting("fov_kick")
+Volume = mirage.setting("volume")
+charges = Charges:get()
 Status = m:text("Status", "ready", "What the blink is doing")
 Blinks = m:slider_int("Blinks", 0, 0, 1 << 30, "Blinks this session")
 share("state", "idle")
@@ -255,14 +321,20 @@ mirage.on("action", function(name, pressed)
     if name == "blink" then
         if pressed then
             aiming = true
-            if not dash then arm("BlinkAim", { blend_in = 0.15, blend_out = 0.2, loop = true }) end
+            if not dash then
+                arm("BlinkAim", { blend_in = 0.15, blend_out = 0.2, loop = true })
+                stop_charge()
+                charging = sound("charge", { volume = Volume:get() })
+            end
         elseif aiming then
             aiming = false
+            stop_charge()
             if target then start(target) end
         end
     elseif name == "cancel" and pressed and aiming then
         aiming = false
         arm_down(0.2)
+        stop_charge()
     end
 end)
 
@@ -270,6 +342,8 @@ mirage.on("tick", function(seconds)
     if not m:enabled() then return end
     cooldown = math.max(0, cooldown - seconds)
     flash = math.max(0, flash - seconds)
+    charges = math.min(Charges:get(), charges + seconds / Recharge:get())
+    kick_tick(seconds)
     if cooling and cooldown == 0 then
         cooling = false
         Status:set("ready")
@@ -286,7 +360,9 @@ for _, event in ipairs({ "level_load", "death", "restart" }) do
         aiming, target = false, nil
         finish(event)
         arm_down(0)
-        cooldown = 0
+        stop_charge()
+        if kick then set_fov(0); kick = nil end
+        cooldown, charges = 0, Charges:get()
     end)
 end
 
@@ -304,6 +380,9 @@ function blink_target()
     local t = find_target(p, cam)
     return string.format("%s %.0f %.0f %.0f", t.kind, t.stand.x, t.stand.y, t.stand.z)
 end
+function blink_count() return Blinks:get() end
 function blink_status()
-    return dash and ("blinking to point " .. dash.index .. " of " .. #dash.points) or (cooldown > 0 and "cooldown" or "ready")
+    if dash then return "blinking to point " .. dash.index .. " of " .. #dash.points end
+    if cooldown > 0 then return "cooldown" end
+    return charges >= 1 and "ready" or "out of charges"
 end

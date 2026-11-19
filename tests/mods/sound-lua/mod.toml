@@ -1,0 +1,5 @@
+# Self-test mod ("Mirage sound"): sounds/tone.wav is a half-second 440 Hz tone made for the test (16-bit mono PCM).
+# The self-test plays it through the globals in main.lua.
+id = "sound-lua"
+version = "1.0.0"
+mirage = "^0.1"

@@ -269,6 +269,20 @@ namespace Mirage
             return new GameObject(Bridge.Api->actor_spawn(Handle, Utf8.Intern(cls), at, rot));
         }
 
+        /// <summary>
+        /// Plays a WAV file of the mod's folder ("sounds/x.wav": PCM, 8 or 16 bit, mono or stereo) at
+        /// <paramref name="volume"/> (0 to 1), until <see cref="SoundStop"/> when <paramref name="loop"/>. A handle, or 0
+        /// when it can't (the log says why). Stopped when the mod unloads. Any thread.
+        /// </summary>
+        public int SoundPlay(string path, float volume = 1f, bool loop = false) =>
+            Bridge.Api->sound_play(Handle, Utf8.Intern(path), volume, loop ? 1u : 0u);
+
+        /// <summary>Stops a sound <see cref="SoundPlay"/> started (nothing if it has ended).</summary>
+        public void SoundStop(int handle) => Bridge.Api->sound_stop(Handle, handle);
+
+        /// <summary>True while the sound plays.</summary>
+        public bool SoundPlaying(int handle) => Bridge.Api->sound_playing(Handle, handle) != 0;
+
         /// <summary>A line trace (or a box sweep with <paramref name="extent"/>); null when nothing was hit. Game thread.</summary>
         public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default,
                                bool material = false)

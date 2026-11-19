@@ -1170,7 +1170,19 @@ typedef struct MirageApi {
      * mod's), or a class path ("Engine.Trigger"). Destroyed on revert and unload (a checkpoint restart doesn't).
      * Properties are set on the object after, before its first tick. NULL when it can't (the log says why). Game thread. */
     MirageObject*(MIRAGE_CALL* actor_spawn)(MirageMod* mod, const char* cls, const float* location, const int32_t* rotation);
+
+    /* ---- Sound (step 30) */
+    /* Plays a WAV file of the mod's folder ("sounds/x.wav": PCM, 8 or 16 bit, mono or stereo) on the audio device,
+     * mixed with the game's sound. `volume` 0 to 1; flags: MIRAGE_SOUND_LOOP plays it until sound_stop. A handle (above
+     * 0), or 0 when it can't (the log says why). Stopped when the mod unloads. Any thread. */
+    int32_t(MIRAGE_CALL* sound_play)(MirageMod* mod, const char* path, float volume, uint32_t flags);
+    /* Stops a sound of the mod's (nothing if it has ended) */
+    void(MIRAGE_CALL* sound_stop)(MirageMod* mod, int32_t handle);
+    /* 1 while it plays, else 0 */
+    int32_t(MIRAGE_CALL* sound_playing)(MirageMod* mod, int32_t handle);
 } MirageApi;
+
+#define MIRAGE_SOUND_LOOP 0x1u
 
 /* The runtime has `field` (a mod built against a newer header, running on an older runtime) */
 #define MIRAGE_API_HAS(api, field) \

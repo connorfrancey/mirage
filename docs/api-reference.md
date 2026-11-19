@@ -49,6 +49,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Moves](#moves) (3)
 - [Animation](#animation) (4)
 - [Actors](#actors) (1)
+- [Sound](#sound) (3)
 - [Types](#types)
 
 ## Basics
@@ -1496,6 +1497,32 @@ MirageObject*(MIRAGE_CALL* actor_spawn)(MirageMod* mod, const char* cls, const f
 ```
 
 An actor of class `cls` at `location`, `rotation` 3 ints (NULL: none): a .uc file of the mod ("classes/X.uc", compiled first: seconds the first time), another loaded mod's ("mirage-ai:classes/MirageBot.uc", built as that mod's), or a class path ("Engine.Trigger"). Destroyed on revert and unload (a checkpoint restart doesn't). Properties are set on the object after, before its first tick. NULL when it can't (the log says why). Game thread.
+
+## Sound
+
+### `sound_play`
+
+```c
+int32_t(MIRAGE_CALL* sound_play)(MirageMod* mod, const char* path, float volume, uint32_t flags);
+```
+
+Plays a WAV file of the mod's folder ("sounds/x.wav": PCM, 8 or 16 bit, mono or stereo) on the audio device, mixed with the game's sound. `volume` 0 to 1; flags: MIRAGE_SOUND_LOOP plays it until sound_stop. A handle (above 0), or 0 when it can't (the log says why). Stopped when the mod unloads. Any thread.
+
+### `sound_stop`
+
+```c
+void(MIRAGE_CALL* sound_stop)(MirageMod* mod, int32_t handle);
+```
+
+Stops a sound of the mod's (nothing if it has ended)
+
+### `sound_playing`
+
+```c
+int32_t(MIRAGE_CALL* sound_playing)(MirageMod* mod, int32_t handle);
+```
+
+1 while it plays, else 0
 
 ## Types
 

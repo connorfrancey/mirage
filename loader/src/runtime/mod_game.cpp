@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include "game/uobject.h"
 #include "gui.h"
+#include "runtime/audio.h"
 #include "runtime/call.h"
 #include "runtime/changes.h"
 #include "runtime/class_source.h"
@@ -1184,6 +1185,41 @@ namespace mirage::mods
 				return x && x->Destroy();
 			});
 			return h;
+		}
+
+		// A mod's file named by a path relative to its folder, which must stay inside it: empty if it doesn't
+		std::filesystem::path FileInMod(MirageMod* mod, const char* path)
+		{
+			const std::string_view text(path);
+			std::filesystem::path rel = std::filesystem::path(std::u8string(text.begin(), text.end())).lexically_normal();
+			if (rel.empty() || rel.is_absolute() || rel.has_root_name() || rel.has_root_directory()) return {};
+			if (!rel.empty() && *rel.begin() == "..") return {};
+			const std::string_view dir(mod->dir);
+			return std::filesystem::path(std::u8string(dir.begin(), dir.end())) / rel;
+		}
+
+		int32_t MIRAGE_CALL SoundPlay(MirageMod* mod, const char* path, float volume, uint32_t flags)
+		{
+			if (!mod || !path) return 0;
+			const std::filesystem::path file = FileInMod(mod, path);
+			if (file.empty()) {
+				spdlog::warn("[mod {}] sound_play {}: a path inside the mod's folder, like sounds/x.wav", mod->id, path);
+				return 0;
+			}
+			std::string error;
+			const int handle = audio::Play(mod->id, file, volume, (flags & MIRAGE_SOUND_LOOP) != 0, &error);
+			if (!handle) spdlog::warn("[mod {}] sound_play {}: {}", mod->id, path, error);
+			return handle;
+		}
+
+		void MIRAGE_CALL SoundStop(MirageMod* mod, int32_t handle)
+		{
+			if (mod) audio::Stop(mod->id, handle);
+		}
+
+		int32_t MIRAGE_CALL SoundPlaying(MirageMod* mod, int32_t handle)
+		{
+			return mod && audio::Playing(mod->id, handle) ? 1 : 0;
 		}
 
 		int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor)
