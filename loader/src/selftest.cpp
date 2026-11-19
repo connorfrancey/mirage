@@ -76,6 +76,10 @@
 #if MIRAGE_FEATURE_LEVEL_EDITOR
 #include "features/misc/level_editor.h"
 #endif
+#if MIRAGE_FEATURE_ANIMATION_BROWSER
+#include "features/misc/animation_browser.h"
+#include "runtime/anim.h"
+#endif
 #include <shlobj.h>
 #if MIRAGE_FEATURE_INPUT
 #include "tas/engine.h"
@@ -3425,6 +3429,42 @@ void TestAnimation()
     if (looped != 1 || !looping.playing || !looping.looping) p.Problem("a looping sequence didn't keep playing past its length");
     if (stopped != 1 || (after.playing && pick == after.sequence)) p.Problem("anim_stop didn't stop it");
     p.Check(1, true);
+    End(s);
+}
+
+// The Animation Browser (features/misc/animation_browser.h): it lists the player's sequences, and one it plays is the
+// sequence on the full-body slot (the window's default) until Stop takes it off.
+void TestAnimationBrowser()
+{
+    Step& s = Begin("Mirage animation browser");
+    Probe p(s);
+#if !MIRAGE_FEATURE_ANIMATION_BROWSER
+    p.Problem("built without the Animation Browser feature");
+#else
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    std::vector<std::string> names;
+    OnGameThread([&] { names = animation_browser::Refresh(); });
+    s.notes.push_back(fmt::format("{} animations listed", names.size()));
+    if (names.size() < 50) {
+        p.Problem(fmt::format("only {} animations listed for the player", names.size()));
+        End(s);
+        return;
+    }
+    const std::string pick = std::find(names.begin(), names.end(), "SpringBoardLeftLeg") != names.end() ? "SpringBoardLeftLeg" : names.front();
+    std::string error;
+    bool played = false;
+    OnGameThread([&] { played = animation_browser::Play(pick, &error); });
+    if (!played) p.Problem("playing " + pick + " failed: " + error);
+    mirage::anim::State st;
+    OnGameThread([&] { st = mirage::anim::Get(game::Pawn(), mirage::anim::SlotFromName("FullBody")); });
+    if (st.sequence != pick) p.Problem(fmt::format("the full-body slot plays '{}', not {}", st.sequence, pick));
+    OnGameThread([&] {
+        animation_browser::Stop();
+        st = mirage::anim::Get(game::Pawn(), mirage::anim::SlotFromName("FullBody"));
+    });
+    if (st.playing && st.sequence == pick) p.Problem("Stop didn't stop it");
+#endif
     End(s);
 }
 
@@ -7727,6 +7767,7 @@ const Named* FeatureList()
         {"Mirage custom move (probe)", &TestCustomMoveProbe, false},
         {"Mirage custom move", &TestCustomMove, false},
         {"Mirage animation", &TestAnimation, false},
+        {"Mirage animation browser", &TestAnimationBrowser, false},
         {"Mirage conflicts", &TestConflicts, false},
         {"Mirage safe mode", &TestSafeMode, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},
