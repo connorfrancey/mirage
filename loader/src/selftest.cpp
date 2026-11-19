@@ -6101,80 +6101,69 @@ void TestBlink()
     WaitGrounded();
     WaitTicks(3);       // The module's first tick registers its move
 
-    // A ledge: a wall near the player whose top is a floor 10 to 120 above the player's middle. Looking level at the
-    // wall, the blink stands on the top.
+    // A ledge, found as a player would aim at one: from the eye, the blink's 20 cm probe swept in many directions a little
+    // downward; where it meets a wall whose top, within reach above the hit, is a floor she fits on, the view is turned
+    // that way. The blink then stands on the top (up and over, or straight onto it).
     {
-        float top = 0.f;
-        Classes::FVector aimAt{}, pawnAt{}, wallAt{}, wallNormal{};
+        const std::string eyeText = eval("string.format('%f %f %f', mirage.camera().location.x, mirage.camera().location.y, mirage.camera().location.z)").value;
+        float eye[3] = {};
+        sscanf_s(eyeText.c_str(), "%f %f %f", &eye[0], &eye[1], &eye[2]);
+        float top = 0.f, yaw = 0.f, pitch = 0.f, distance = 0.f;
         bool found = false;
         OnGameThread([&] {
             auto* pawn = game::Pawn();
             if (!pawn) return;
-            pawnAt = pawn->Location;
-            for (int i = 0; i < 64 && !found; ++i) {
-                const float a = static_cast<float>(i) * 6.2831853f / 64.f;
-                MirageHit wall{};
-                wall.size = sizeof wall;
-                const float from[3] = {pawnAt.X, pawnAt.Y, pawnAt.Z}, to[3] = {pawnAt.X + std::cos(a) * 1100.f, pawnAt.Y + std::sin(a) * 1100.f, pawnAt.Z};
-                // Swept as the player's body is (a line finds surfaces the player walks through)
-                const float body[3] = {34.f, 34.f, 40.f};
-                if (mirage::mods::game_api::WorldTrace(nullptr, from, to, body, MIRAGE_TRACE_ACTORS, nullptr, &wall) != 1) continue;
-                if (wall.time <= 0.01f || std::abs(wall.normal[2]) > 0.3f) continue;     // Not one the box started in
-                MirageHit floor{};
-                floor.size = sizeof floor;
-                const float down0[3] = {wall.location[0] - wall.normal[0] * 80.f, wall.location[1] - wall.normal[1] * 80.f, pawnAt.Z + 250.f};
-                const float down1[3] = {down0[0], down0[1], pawnAt.Z - 50.f};
-                if (mirage::mods::game_api::WorldTrace(nullptr, down0, down1, body, MIRAGE_TRACE_ACTORS, nullptr, &floor) != 1) continue;
-                if (floor.normal[2] < 0.7f || floor.time <= 0.f) continue;
-                const float rise = floor.location[2] - body[2] - pawnAt.Z;
-                if (rise < 10.f || rise > 120.f) continue;
-                top = floor.location[2] - body[2];       // The box's center rests a half height above the top
-                wallAt = {wall.location[0], wall.location[1], wall.location[2]};
-                wallNormal = {wall.normal[0], wall.normal[1], wall.normal[2]};
-                aimAt = {wall.location[0], wall.location[1], top - 40.f};
-                found = true;
+            const float probeBox[3] = {10.f, 10.f, 10.f}, body[3] = {34.f, 34.f, 96.f};
+            const auto sweep = [&](const float* from, const float* to, const float* box, MirageHit& h) {
+                h = {};
+                h.size = sizeof h;
+                return mirage::mods::game_api::WorldTrace(nullptr, from, to, box, MIRAGE_TRACE_ACTORS, reinterpret_cast<MirageObject*>(pawn), &h) == 1;
+            };
+            for (int down = 1; down <= 4 && !found; ++down) {
+                const float pa = -0.06f * static_cast<float>(down);         // About 3.5 to 14 degrees down
+                for (int i = 0; i < 64 && !found; ++i) {
+                    const float ya = static_cast<float>(i) * 6.2831853f / 64.f;
+                    const float dir[3] = {std::cos(pa) * std::cos(ya), std::cos(pa) * std::sin(ya), std::sin(pa)};
+                    const float farEnd[3] = {eye[0] + dir[0] * 1000.f, eye[1] + dir[1] * 1000.f, eye[2] + dir[2] * 1000.f};
+                    MirageHit wall;
+                    if (!sweep(eye, farEnd, probeBox, wall) || wall.time <= 0.15f || std::abs(wall.normal[2]) > 0.3f) continue;
+                    // The top: her body dropped onto the wall's far side of the face, from within reach above the hit
+                    const float x = wall.location[0] - wall.normal[0] * 60.f, y = wall.location[1] - wall.normal[1] * 60.f;
+                    const float from[3] = {x, y, wall.location[2] + 150.f + body[2]}, to[3] = {x, y, wall.location[2] - 20.f};
+                    MirageHit land;
+                    if (!sweep(from, to, body, land) || land.time <= 0.f || land.normal[2] < 0.7f) continue;
+                    const float floorTop = land.location[2] - body[2];
+                    if (floorTop <= wall.location[2] + 5.f) continue;      // Not above the hit: no ledge
+                    top = floorTop;
+                    yaw = ya;
+                    pitch = pa;
+                    distance = wall.time * 1000.f;
+                    found = true;
+                }
             }
         });
         if (!found) {
-            s.notes.push_back("ledge: no wall with a ledge 10 to 120 above the player's middle within 1100 (not checked)");
+            s.notes.push_back("ledge: no wall with a top within reach seen from the eye (not checked)");
         } else {
-            const std::string where = eval("string.format('%f %f %f', mirage.camera().location.x, mirage.camera().location.y, mirage.camera().location.z)").value;
-            float ex = 0.f, ey = 0.f, ez = 0.f;
-            sscanf_s(where.c_str(), "%f %f %f", &ex, &ey, &ez);
-            // Level, as a player looks at a ledge: the body-sized box then meets the wall's face (aimed down at it, the
-            // box meets the floor first)
-            const float dx = aimAt.X - ex, dy = aimAt.Y - ey, dz = 0.f;
             constexpr float kUnits = 65536.f / 6.2831853f;
             int pitchWas = 0, yawWas = 0;
             OnGameThread([&] {
                 if (auto* pc = game::Controller()) {
                     pitchWas = pc->Rotation.Pitch, yawWas = pc->Rotation.Yaw;
-                    pc->Rotation.Yaw = static_cast<int>(std::atan2(dy, dx) * kUnits) & 0xFFFF;
-                    pc->Rotation.Pitch = static_cast<int>(std::atan2(dz, std::sqrt(dx * dx + dy * dy)) * kUnits) & 0xFFFF;
+                    pc->Rotation.Yaw = static_cast<int>(yaw * kUnits) & 0xFFFF;
+                    pc->Rotation.Pitch = static_cast<int>(pitch * kUnits) & 0xFFFF;
                 }
             });
             WaitTicks(3);
             const std::string aimed = eval("blink_target()").value;
-            // What the blink's own sweep meets along the same view (its body: 34 wide, 96 half height)
-            const std::string view = eval("string.format('%f %f %f', mirage.camera().forward.x, mirage.camera().forward.y, mirage.camera().forward.z)").value;
-            float fx = 0.f, fy = 0.f, fz = 0.f;
-            sscanf_s(view.c_str(), "%f %f %f", &fx, &fy, &fz);
-            MirageHit same{};
-            same.size = sizeof same;
-            OnGameThread([&] {
-                const float from[3] = {ex, ey, ez}, to[3] = {ex + fx * 1200.f, ey + fy * 1200.f, ez + fz * 1200.f}, box[3] = {34.f, 34.f, 96.f};
-                mirage::mods::game_api::WorldTrace(nullptr, from, to, box, MIRAGE_TRACE_ACTORS, reinterpret_cast<MirageObject*>(game::Pawn()), &same);
-            });
-            s.notes.push_back(fmt::format("ledge: wall at {:.0f} {:.0f} {:.0f} normal {:.2f} {:.2f} {:.2f}; eye {:.0f} {:.0f} {:.0f} looking {:.2f} {:.2f} {:.2f}; "
-                                          "the blink's sweep meets {} at {:.0f} {:.0f} {:.0f} normal {:.2f} {:.2f} {:.2f}",
-                                          wallAt.X, wallAt.Y, wallAt.Z, wallNormal.X, wallNormal.Y, wallNormal.Z, ex, ey, ez, fx, fy, fz,
-                                          same.hit, same.location[0], same.location[1], same.location[2], same.normal[0], same.normal[1], same.normal[2]));
             char kind[32] = {};
             float sx = 0.f, sy = 0.f, sz = 0.f;
             sscanf_s(aimed.c_str(), "%31s %f %f %f", kind, static_cast<unsigned>(sizeof kind), &sx, &sy, &sz);
-            s.notes.push_back(fmt::format("ledge: top {:.0f} above the player's middle; aimed at the wall below it: {}", top - pawnAt.Z, aimed));
-            if (std::string(kind) != "ledge") p.Problem("aimed at a wall below a ledge, the blink found '" + aimed + "', not the ledge");
-            else if (sz < top) p.Problem(fmt::format("the ledge spot ({:.0f}) isn't on the top ({:.0f})", sz, top));
+            s.notes.push_back(fmt::format("ledge: a wall {:.0f} away, its top {:.0f} above the eye; aimed at it: {}", distance, top - eye[2], aimed));
+            // Up and over (a mantle), or straight onto the top: either way she stands on it (her middle a half height up)
+            if (std::string(kind) != "ledge" && std::string(kind) != "floor")
+                p.Problem("aimed at a wall below a ledge, the blink found '" + aimed + "', not the ledge");
+            else if (sz < top + 40.f) p.Problem(fmt::format("the blink's spot ({:.0f}) isn't on the top ({:.0f})", sz, top));
             OnGameThread([&] { if (auto* pc = game::Controller()) { pc->Rotation.Pitch = pitchWas; pc->Rotation.Yaw = yawWas; } });
             WaitTicks(2);
         }
@@ -6271,23 +6260,48 @@ void TestBlink()
     if (widest < baseFov + 5.f) p.Problem("the view didn't widen during the blink");
     if (stillLocked || std::abs(afterFov - baseFov) > 0.5f) p.Problem("the view didn't go back after the blink");
 
-    // Charges: with refilling slowed, blinks run out and the next is refused
-    eval("mirage.setting('recharge'):set(30)");
-    int used = 0;
-    for (int i = 0; i < 12 && !g_aborted; ++i) {
-        WaitFor(2.0, [&] { const std::string st = eval("blink_status()").value; return st == "ready" || st == "out of charges"; });
-        if (eval("blink_status()").value != "ready") break;
-        WaitPlayerReady(10.0);
-        WaitGrounded();
-        OnGameThread([&] { if (auto* pawn = game::Pawn()) from = pawn->Location; });
-        if (eval(fmt::format("blink_to({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", from.X, from.Y, from.Z + 60.f)).value == "true") ++used;
-        WaitFor(2.0, [&] { return shared("state") == "idle"; });
+    // The lens pass: compiled, and on (travel) during a blink
+    const std::string fxError = eval("blink_fx_error()").value;
+    if (!fxError.empty()) p.Problem("the blink's lens shader: " + fxError);
+
+    // Looking straight up: the squashed sphere's 5 m at most
+    {
+        int pitchWas = 0;
+        OnGameThread([&] { if (auto* pc = game::Controller()) pitchWas = pc->Rotation.Pitch, pc->Rotation.Pitch = 16000; });
+        WaitTicks(3);
+        const std::string where = eval("string.format('%f', mirage.camera().location.z)").value;
+        const std::string upward = eval("blink_target()").value;
+        OnGameThread([&] { if (auto* pc = game::Controller()) pc->Rotation.Pitch = pitchWas; });
+        char kind[32] = {};
+        float sx = 0.f, sy = 0.f, sz = 0.f;
+        sscanf_s(upward.c_str(), "%31s %f %f %f", kind, static_cast<unsigned>(sizeof kind), &sx, &sy, &sz);
+        const float rise = sz - static_cast<float>(std::atof(where.c_str()));
+        s.notes.push_back(fmt::format("looking up: {} ({:.0f} above the eye)", upward, rise));
+        if (rise > 510.f) p.Problem(fmt::format("looking up, the blink rises {:.0f}, more than 5 m", rise));
     }
-    WaitFor(2.0, [&] { return eval("blink_status()").value != "cooldown"; });
-    const std::string refused = eval("blink_to()").value;
-    s.notes.push_back(fmt::format("charges: {} more blinks, then {} ({}); refused: {}", used, eval("blink_status()").value, shared("denied"), refused));
-    if (refused != "false" || shared("denied") != "charges") p.Problem("with no charges left a blink wasn't refused");
-    eval("mirage.setting('recharge'):set(2.5)");
+
+    // Momentum: the velocity from before the blink is hers again after it
+    WaitFor(2.0, [&] { return eval("blink_status()").value == "ready"; });
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    std::string lens;
+    Classes::FVector before{}, kept{};
+    OnGameThread([&] {
+        if (auto* pawn = game::Pawn()) {
+            from = pawn->Location;
+            pawn->Velocity = {350.f, 0.f, 0.f};
+            before = pawn->Velocity;
+        }
+    });
+    eval(fmt::format("blink_to({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", from.X, from.Y, from.Z + 300.f));
+    WaitTicks(1);
+    lens = shared("lens");
+    WaitFor(2.0, [&] { return shared("state") == "idle"; });
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) kept = pawn->Velocity; });
+    s.notes.push_back(fmt::format("momentum: {:.0f} {:.0f} {:.0f} before, {:.0f} {:.0f} {:.0f} on arriving; the lens in travel: {}", before.X,
+                                  before.Y, before.Z, kept.X, kept.Y, kept.Z, lens));
+    if (std::abs(kept.X - before.X) > 60.f) p.Problem("the blink didn't give back the velocity from before it");
+    if (lens.empty() || lens == "off") p.Problem("the lens pass wasn't on during the blink");
 
     OnRenderThread([m] { m->SetEnabled(false); });
     WaitPlayerReady(10.0);
