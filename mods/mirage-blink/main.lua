@@ -13,6 +13,9 @@
 -- place the marker shows is one she fits in. The dash runs as the game's falling move (mirage.move, like the grapple's
 -- zip): the game still lands her, grabs ledges and wall runs once it ends. A short cooldown follows each blink.
 --
+-- Faith's left arm plays the mod's own animations (content/animations): raised while aiming, driven forward on letting
+-- go, dropped back on arriving.
+--
 -- For the console and tests: blink_to({x, y, z}) dashes to a point (the same way a let-go key does), blink_target()
 -- gives what aiming finds right now, blink_status() what the mod is doing.
 local vec = require("vec")
@@ -33,6 +36,18 @@ local ARRIVE = 24           -- Close enough to a point to take the next (units)
 local EXIT_SPEED = 260      -- Speed kept along the dash when "Keep momentum" is on
 
 local function share(k, v) mirage.share(k, tostring(v)) end
+
+-- The left arm (content/animations): played on the upper body, so the legs keep running under it
+local function arm(sequence, options)
+    local p = mirage.pawn()
+    if not p then return end
+    options.slot = "upperbody"
+    mirage.anim_play(p, sequence, options)
+end
+local function arm_down(blend)
+    local p = mirage.pawn()
+    if p then mirage.anim_stop(p, "upperbody", blend or 0.2) end
+end
 
 -- Faith's collision, the box that is swept: half its width and half its height
 local function body(p)
@@ -119,6 +134,7 @@ local function finish(why)
     if not dash then return end
     dash = nil
     cooldown, cooling = Cooldown:get(), true
+    if why == "arrived" or why == "blocked" then arm("BlinkLand", { blend_in = 0.04, blend_out = 0.15 }) end
     Status:set("ready in " .. string.format("%.2f", cooldown) .. " s (" .. why .. ")")
     share("state", "idle")
     share("ended", why)
@@ -140,6 +156,7 @@ local function start(t)
         p.Location = vec.engine(vec.add(from, vec.new(0, 0, 4)))
     end
     mirage.move_start(move)
+    arm("BlinkCast", { blend_in = 0.04, blend_out = 0 })
     flash = FLASH_TIME
     Blinks:set(Blinks:get() + 1)
     Status:set("blinking (" .. t.kind .. ")")
@@ -220,6 +237,7 @@ local m = mirage.module {
     end,
     on_render = hud,
     on_disable = function()
+        if aiming or dash then arm_down(0) end
         aiming, target, dash = false, nil, nil
         mirage.draw3d.clear()
         mirage.revert()
@@ -237,12 +255,14 @@ mirage.on("action", function(name, pressed)
     if name == "blink" then
         if pressed then
             aiming = true
+            if not dash then arm("BlinkAim", { blend_in = 0.15, blend_out = 0.2, loop = true }) end
         elseif aiming then
             aiming = false
             if target then start(target) end
         end
-    elseif name == "cancel" and pressed then
+    elseif name == "cancel" and pressed and aiming then
         aiming = false
+        arm_down(0.2)
     end
 end)
 
@@ -265,6 +285,7 @@ for _, event in ipairs({ "level_load", "death", "restart" }) do
     mirage.on(event, function()
         aiming, target = false, nil
         finish(event)
+        arm_down(0)
         cooldown = 0
     end)
 end

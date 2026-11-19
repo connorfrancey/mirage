@@ -6011,12 +6011,34 @@ void TestBlink()
     // The key: held, the marker is drawn; let go, a blink along the view (wherever that ends: floor, wall or air)
     const std::string aimed = eval("blink_target()").value;
     int drawn = 0;
-    HoldKey("F", 0.25, [&] {
+    std::string armSequence;
+    float handAhead = -1e9f;        // How far in front of the eye, along the view, the left hand got
+    const int upperBody = mirage::anim::SlotFromName("UpperBody");
+    HoldKey("F", 0.4, [&] {
         MirageWorldStats stats{};
         stats.size = sizeof stats;
         mirage::mods::world::DrawStats(&stats);
         drawn = std::max(drawn, static_cast<int>(stats.lines));
+        // HoldKey runs this on the game thread
+        [&] {
+            auto* pawn = game::Pawn();
+            if (!pawn || !pawn->Mesh1p || !pawn->Controller) return;
+            const auto st = mirage::anim::Get(pawn, upperBody);
+            if (st.playing) armSequence = st.sequence;
+            Classes::FVector hand{};
+            mirage::call::Params c(pawn->Mesh1p, "GetBoneLocation");
+            c.SetName("BoneName", "LeftHand");
+            c.Set("Space", std::int32_t{0});
+            if (!mirage::call::Call(pawn->Mesh1p, c)) return;
+            c.GetRaw("ReturnValue", &hand, sizeof hand);
+            const float yaw = static_cast<float>(pawn->Controller->Rotation.Yaw & 0xFFFF) * 6.2831853f / 65536.f;
+            const float ahead = (hand.X - pawn->Location.X) * std::cos(yaw) + (hand.Y - pawn->Location.Y) * std::sin(yaw);
+            handAhead = std::max(handAhead, ahead);
+        }();
     });
+    s.notes.push_back(fmt::format("arm while aiming: {} on the upper body; the left hand {:.0f} ahead of the pawn", armSequence, handAhead));
+    if (armSequence != "BlinkAim") p.Problem("aiming didn't raise the arm (the upper body plays '" + armSequence + "', not BlinkAim)");
+    else if (handAhead < 15.f) p.Problem(fmt::format("the aiming hand stayed out of view ({:.0f} ahead)", handAhead));
     const bool keyed = WaitFor(2.0, [&] { return shared("blinks") == "1" && shared("state") == "idle"; });
     s.notes.push_back(fmt::format("key: aimed at {}; marker lines {}; blink {} ({})", aimed, drawn, keyed ? "done" : "not done", shared("ended")));
     if (drawn == 0) p.Problem("holding the blink key drew no marker");

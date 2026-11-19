@@ -65,12 +65,15 @@ namespace mirage::anim
 	struct Clip
 	{
 		std::string name;
+		std::string base;		// A game sequence whose first frame gives every bone and position the clip leaves out
+								// (baked from the player's own game when installed): a mod ships only what it changes
 		float length = 0.f, rate = 1.f;
 		int frames = 0;
 		std::map<std::string, std::map<std::string, BoneKeys>> meshes;		// "Mesh1p" / "Mesh3p" -> bone -> keys
 	};
-	// The JSON form: {"name", "length", "rate", "frames", "meshes": {"Mesh1p": {"LeftHand": {"pos": [[x, y, z]...],
-	// "rot": [[x, y, z, w]...]}}}}. False and `error` for a clip that isn't well formed (key counts, numbers).
+	// The JSON form: {"name", "base", "length", "rate", "frames", "meshes": {"Mesh1p": {"LeftHand": {"pos": [[x, y, z]...],
+	// "rot": [[x, y, z, w]...]}}}}; "base" and a bone's "pos" may be left out. False and `error` for a clip that isn't
+	// well formed (key counts, numbers).
 	bool ClipFromJson(const std::string& text, Clip* out, std::string* error);
 	std::string ClipToJson(const Clip& clip);
 	// `sequence` posed on each of the pawn's meshes `frames` times over its length (the full-body slot held at each
@@ -78,7 +81,8 @@ namespace mirage::anim
 	// thread.
 	bool Bake(Classes::AActor* pawn, const std::string& sequence, int frames, Clip* out, std::string* error);
 	// The clip as a sequence of the pawn's meshes, in each mesh's first AnimSet (tracks in the set's bone order; a bone
-	// the clip doesn't have holds where it is in the mesh's pose now). A clip installed before under that name is
+	// or position the clip doesn't have comes from its base's first frame, or without a base holds where it is in the
+	// mesh's pose now). A clip installed before under that name is
 	// replaced; a game sequence of that name is left alone (false). Game thread.
 	bool Install(Classes::AActor* pawn, const Clip& clip, std::string* error);
 	// A mod's clips, installed on the player now and again whenever the player's pawn or its animation sets change

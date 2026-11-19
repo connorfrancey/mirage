@@ -199,6 +199,7 @@ namespace mirage::anim
 		if (!j.is_object()) return fail("not a JSON object");
 		Clip c;
 		c.name = j.value("name", std::string());
+		c.base = j.value("base", std::string());
 		c.length = j.value("length", 0.f);
 		c.rate = j.value("rate", 1.f);
 		c.frames = j.value("frames", 0);
@@ -212,8 +213,8 @@ namespace mirage::anim
 			for (const auto& [bone, keys] : bones.items()) {
 				BoneKeys k;
 				std::string why;
-				if (!keys.is_object() || !keys.contains("pos") || !keys.contains("rot")) return fail(mesh + "." + bone + ": needs pos and rot");
-				if (!ReadKeys(keys["pos"], c.frames, k.pos, why)) return fail(mesh + "." + bone + ".pos " + why);
+				if (!keys.is_object() || !keys.contains("rot")) return fail(mesh + "." + bone + ": needs rot");
+				if (keys.contains("pos") && !ReadKeys(keys["pos"], c.frames, k.pos, why)) return fail(mesh + "." + bone + ".pos " + why);
 				if (!ReadKeys(keys["rot"], c.frames, k.rot, why)) return fail(mesh + "." + bone + ".rot " + why);
 				for (auto& q : k.rot) {		// Unit rotations: a stray length scales the bone
 					const float len = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
@@ -231,8 +232,12 @@ namespace mirage::anim
 	{
 		nlohmann::json meshes = nlohmann::json::object();
 		for (const auto& [mesh, bones] : clip.meshes)
-			for (const auto& [bone, k] : bones) meshes[mesh][bone] = {{"pos", k.pos}, {"rot", k.rot}};
-		const nlohmann::json j = {{"name", clip.name}, {"length", clip.length}, {"rate", clip.rate}, {"frames", clip.frames}, {"meshes", meshes}};
+			for (const auto& [bone, k] : bones) {
+				meshes[mesh][bone] = {{"rot", k.rot}};
+				if (!k.pos.empty()) meshes[mesh][bone]["pos"] = k.pos;
+			}
+		nlohmann::json j = {{"name", clip.name}, {"length", clip.length}, {"rate", clip.rate}, {"frames", clip.frames}, {"meshes", meshes}};
+		if (!clip.base.empty()) j["base"] = clip.base;
 		return j.dump(1);
 	}
 
@@ -294,6 +299,12 @@ namespace mirage::anim
 		Classes::ATdPawn* pawn = TdPawnOf(actor);
 		if (!pawn) return fail("not a TdPawn");
 		if (clip.name.empty() || clip.frames < 1) return fail("the clip has no name or no frames");
+		// The base's first frame: what the clip leaves out
+		Clip base;
+		if (!clip.base.empty()) {
+			std::string why;
+			if (!Bake(pawn, clip.base, 2, &base, &why)) return fail("its base '" + clip.base + "': " + why);
+		}
 		int installed = 0;
 		for (const MeshRef& m : Meshes(pawn)) {
 			const auto section = clip.meshes.find(m.label);
@@ -337,14 +348,26 @@ namespace mirage::anim
 			for (int f = 0; f < clip.frames; ++f) times[f] = clip.frames > 1 ? clip.length * f / (clip.frames - 1) : 0.f;
 			for (int t = 0; t < tracks; ++t) {
 				const std::string bone = set->TrackBoneNames[t].GetName();
-				BoneKeys held;
-				const BoneKeys* keys = nullptr;
-				if (const auto it = section->second.find(bone); it != section->second.end()) keys = &it->second;
-				else {
+				// What the clip doesn't say comes from the base's first frame, or without one the mesh's pose now
+				BoneKeys fallback;
+				const auto baseMesh = base.meshes.find(m.label);
+				const BoneKeys* baseKeys = nullptr;
+				if (baseMesh != base.meshes.end())
+					if (const auto b = baseMesh->second.find(bone); b != baseMesh->second.end() && !b->second.pos.empty()) baseKeys = &b->second;
+				if (baseKeys) {
+					fallback.pos.push_back(baseKeys->pos.front());
+					fallback.rot.push_back(baseKeys->rot.front());
+				} else {
 					const Classes::FBoneAtom a = AtomOf(m.mesh, index[t]);
-					held.pos.push_back({a.Translation.X, a.Translation.Y, a.Translation.Z});
-					held.rot.push_back({a.Rotation.X, a.Rotation.Y, a.Rotation.Z, a.Rotation.W});
-					keys = &held;
+					fallback.pos.push_back({a.Translation.X, a.Translation.Y, a.Translation.Z});
+					fallback.rot.push_back({a.Rotation.X, a.Rotation.Y, a.Rotation.Z, a.Rotation.W});
+				}
+				BoneKeys merged;
+				const BoneKeys* keys = &fallback;
+				if (const auto it = section->second.find(bone); it != section->second.end()) {
+					merged = it->second;
+					if (merged.pos.empty()) merged.pos = fallback.pos;
+					keys = &merged;
 				}
 				auto* arrays = reinterpret_cast<RawArray*>(raw.data + t * kTrack);
 				// Animation tracks keep a non-root bone's rotation as the conjugate of its bone-space rotation (what

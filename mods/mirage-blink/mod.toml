@@ -7,6 +7,11 @@ description = "Hold to aim a short teleport, let go to dash there in a blink: on
 authors = ["Mirage"]
 mirage = "^0.1"
 
+# content/animations: the first-person arm's three clips (runtime/anim.h, "Custom animations"): BlinkAim (held up while
+# aiming, looping), BlinkCast (driven forward on letting go) and BlinkLand (dropped back on arriving). They hold only
+# rotations of the left arm, hand and fingers; everything else is the game's own Stand pose (each clip's "base").
+content = ["content"]
+
 [actions.blink]
 key = "F"
 description = "Hold to aim; let go to blink to the marker"
