@@ -5886,6 +5886,76 @@ void TestGrapple()
     End(s);
 }
 
+// The first-party mod mods/mirage-blink: the blink key held draws the marker in the world, and let go blinks along the
+// view; a blink straight up to a point 400 above arrives there exactly, in well under the time a jump would take
+// (gravity can't lift her); a second one at once is refused by the cooldown.
+void TestBlink()
+{
+    Step& s = Begin("Mirage blink");
+    Probe p(s);
+    Module* m = modules::Find("Blink");
+    if (!m) {
+        p.Problem("the Blink module is missing (mods/mirage-blink)");
+        End(s);
+        return;
+    }
+    OnRenderThread([m] { m->SetEnabled(true); });
+    const auto eval = [](const std::string& code) {
+        mirage::mods::EvalResult r;
+        OnGameThread([&] { r = mirage::mods::Eval("mirage-blink", code); });
+        return r;
+    };
+    const auto shared = [](const char* key) {
+        char v[128]{};
+        mirage::mods::game_api::ShareGet("mirage-blink", key, v, sizeof v);
+        return std::string(v);
+    };
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    WaitTicks(3);       // The module's first tick registers its move
+
+    // The key: held, the marker is drawn; let go, a blink along the view (wherever that ends: floor, wall or air)
+    const std::string aimed = eval("blink_target()").value;
+    int drawn = 0;
+    HoldKey("F", 0.25, [&] {
+        MirageWorldStats stats{};
+        stats.size = sizeof stats;
+        mirage::mods::world::DrawStats(&stats);
+        drawn = std::max(drawn, static_cast<int>(stats.lines));
+    });
+    const bool keyed = WaitFor(2.0, [&] { return shared("blinks") == "1" && shared("state") == "idle"; });
+    s.notes.push_back(fmt::format("key: aimed at {}; marker lines {}; blink {} ({})", aimed, drawn, keyed ? "done" : "not done", shared("ended")));
+    if (drawn == 0) p.Problem("holding the blink key drew no marker");
+    if (!keyed) p.Problem("letting go of the blink key didn't blink (" + shared("state") + ")");
+
+    // Straight up to a point 400 above: there exactly, fast
+    WaitFor(2.0, [&] { return eval("blink_status()").value == "ready"; });
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    Classes::FVector from{};
+    OnGameThread([&] { if (auto* pawn = game::Pawn()) from = pawn->Location; });
+    const auto started = eval(fmt::format("blink_to({{x = {:.1f}, y = {:.1f}, z = {:.1f}}})", from.X, from.Y, from.Z + 400.f));
+    const double t0 = GameSeconds();
+    Classes::FVector at{};
+    const bool arrived = started.value == "true" && WaitFor(2.0, [&] {
+        if (shared("state") != "idle") return false;
+        OnGameThread([&] { if (auto* pawn = game::Pawn()) at = pawn->Location; });
+        return true;
+    });
+    const double seconds = GameSeconds() - t0;
+    const std::string again = eval("blink_to()").value;
+    s.notes.push_back(fmt::format("up: {} ({}) in {:.2f} s, rose {:.0f}; again at once: {}", started.value + started.error, shared("ended"), seconds,
+                                  at.Z - from.Z, again));
+    if (!arrived || shared("ended") != "arrived") p.Problem("a blink 400 up didn't arrive (" + shared("ended") + ")");
+    else if (std::abs(at.Z - from.Z - 400.f) > 30.f) p.Problem(fmt::format("a blink 400 up ended {:.0f} up", at.Z - from.Z));
+    if (seconds > 0.4) p.Problem(fmt::format("a blink 400 up took {:.2f} s", seconds));
+    if (again != "false") p.Problem("a second blink at once wasn't refused by the cooldown: " + again);
+
+    OnRenderThread([m] { m->SetEnabled(false); });
+    WaitPlayerReady(10.0);
+    End(s);
+}
+
 // Step 27's Level Editor (features/misc/level_editor.h), the level editor's first feature, through the functions its
 // window calls, on profile-lua's layer for the current level (it has none): an actor added at the view and saved
 // spawns; moved, its actor follows at once and the move is in the file once saved; deleted and saved, it is gone. The
@@ -7807,6 +7877,7 @@ const Named* FeatureList()
         {"Mirage models", &TestModels, false},
         {"Mirage mesh replacement", &TestMeshReplacement, false},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage grapple", &TestGrapple, false},
+        {"Mirage blink", &TestBlink, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

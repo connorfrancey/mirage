@@ -1,0 +1,58 @@
+# A first-party mod: part of the menu, written against the public API only (Lua). It ships inside the menu's DLL and
+# is written to mirage\mods\mirage-blink at startup: edit a copy under another id, not this folder. See main.lua.
+id = "mirage-blink"
+name = "Blink"
+version = "1.0.0"
+description = "Hold to aim a short teleport, let go to dash there in a blink: onto floors, up ledges, through the air"
+authors = ["Mirage"]
+mirage = "^0.1"
+
+[actions.blink]
+key = "F"
+description = "Hold to aim; let go to blink to the marker"
+
+[actions.cancel]
+key = "RightMouseButton"
+description = "While aiming: put the blink away without using it"
+
+[settings.range]
+type = "float"
+name = "Range"
+description = "How far a blink reaches (Unreal units; Faith is about 192 tall)"
+default = 1200.0
+min = 300.0
+max = 4000.0
+format = "%.0f"
+
+[settings.speed]
+type = "float"
+name = "Dash speed"
+description = "Units per second while blinking: high enough that a full blink takes a fraction of a second"
+default = 7000.0
+min = 2000.0
+max = 20000.0
+format = "%.0f"
+
+[settings.ledge]
+type = "float"
+name = "Ledge reach"
+description = "How far above the aimed point on a wall a blink still finds a ledge to land on"
+default = 160.0
+min = 0.0
+max = 400.0
+format = "%.0f"
+
+[settings.cooldown]
+type = "float"
+name = "Cooldown"
+description = "Seconds after a blink before the next one"
+default = 0.5
+min = 0.0
+max = 5.0
+format = "%.2f"
+
+[settings.keep_momentum]
+type = "bool"
+name = "Keep momentum"
+description = "Off: a blink ends nearly at rest, as a short step. On: it keeps a little of its speed."
+default = false
