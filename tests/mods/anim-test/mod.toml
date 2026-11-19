@@ -1,0 +1,7 @@
+# Self-test ("Mirage custom animation"): a content mod's own animation. content/animations/MirageHandUp.json is a clip
+# (runtime/anim.h, "Custom animations") that holds the first-person left hand 40 units off its forearm; every other bone
+# holds where it is. The self-test plays it by name and sees the hand move.
+id = "anim-test"
+version = "1.0.0"
+mirage = "^0.1"
+content = ["content"]

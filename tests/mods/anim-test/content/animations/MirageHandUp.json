@@ -1,0 +1,11 @@
+{
+ "name": "MirageHandUp",
+ "length": 1.0,
+ "rate": 1.0,
+ "frames": 2,
+ "meshes": {
+  "Mesh1p": {
+   "LeftHand": { "pos": [[0, 0, 40]], "rot": [[0, 0, 0, 1]] }
+  }
+ }
+}

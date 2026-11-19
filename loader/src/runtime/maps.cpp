@@ -269,6 +269,14 @@ namespace mirage::maps
 
 	void** GMallocVariable() { return g_mallocVar; }
 
+	void* EngineRealloc(void* p, std::size_t bytes)
+	{
+		if (!g_mallocVar || !*g_mallocVar) return nullptr;
+		void* m = *g_mallocVar;
+		using Fn = void*(__thiscall*)(void*, void*, std::uint32_t, std::uint32_t);
+		return reinterpret_cast<Fn>((*reinterpret_cast<void***>(m))[2])(m, p, static_cast<std::uint32_t>(bytes), 8);
+	}
+
 	bool Install()
 	{
 		// InitializeListElementProviders: its prologue up to `lea ecx, [ebp+88h]; push ebx; call Empty`

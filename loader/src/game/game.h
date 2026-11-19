@@ -15,6 +15,7 @@
 
 namespace Classes {
 	class UObject;
+	class UClass;
 	class AWorldInfo;
 	class ATdPlayerController;
 	class ATdPlayerPawn;
@@ -135,4 +136,8 @@ namespace game {
 	Classes::ATdPlayerController* Controller();
 	Classes::ATdPlayerPawn*       Pawn();
 	Classes::AWorldInfo*          World();
+
+	// A new object of `cls` inside `outer`, made the way the script VM's `new` makes one (UObject::StaticConstructObject,
+	// runtime/symbols.toml): defaults from the class. nullptr if the constructor wasn't found or failed. Game thread.
+	Classes::UObject* Construct(Classes::UClass* cls, Classes::UObject* outer);
 }

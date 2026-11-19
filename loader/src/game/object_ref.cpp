@@ -1,6 +1,9 @@
 #include "game/object_ref.h"
 #include "core/string_cache.h"
+#include "runtime/symbols.h"
 
+#include <cstring>
+#include <string>
 #include <mutex>
 #include <unordered_map>
 
@@ -52,5 +55,19 @@ namespace game
 	{
 		const int index = NameIndex(name);
 		return Classes::FName(index < 0 ? 0 : index);
+	}
+
+	Classes::FName AddName(const char* name)
+	{
+		static_assert(sizeof(Classes::FName) == 8, "FName is an index and a number");
+		using Fn = void*(__thiscall*)(void* self, const wchar_t* text, int findType, int unused);
+		auto ctor = reinterpret_cast<Fn>(mirage::symbols::Find("FName::FName"));
+		if (!ctor || !name) return Classes::FName(0);
+		const std::wstring wide(name, name + std::strlen(name));		// Names are ASCII
+		std::uint32_t out[2] = {0, 0};
+		ctor(out, wide.c_str(), 1 /* FNAME_Add */, 1);
+		Classes::FName n(0);
+		std::memcpy(&n, out, sizeof n);
+		return n;
 	}
 }

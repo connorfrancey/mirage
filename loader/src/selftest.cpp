@@ -3361,7 +3361,9 @@ void TestAnimation()
             const std::string setPath = set.value("path", std::string());
             std::string why;
             const int fromFile = mirage::anim::ReadSetSequences(setPath, &why);
-            const int live = static_cast<int>(set["sequences"].size());
+            // Mods' animations (runtime/anim.h Install) are in the game's set but not in its file
+            const int live = static_cast<int>(std::count_if(set["sequences"].begin(), set["sequences"].end(),
+                                                            [](const auto& q) { return !q.value("custom", false); }));
             offline += fmt::format("{}{}: {} in the game, {}", offline.empty() ? "" : "; ", setPath, live,
                                    fromFile >= 0 ? std::to_string(fromFile) + " in the file" : "file: " + why);
             if (fromFile >= 0 && fromFile != live) p.Problem(fmt::format("{} has {} sequences in the game but {} in its file", setPath, live, fromFile));
@@ -3429,6 +3431,98 @@ void TestAnimation()
     if (looped != 1 || !looping.playing || !looping.looping) p.Problem("a looping sequence didn't keep playing past its length");
     if (stopped != 1 || (after.playing && pick == after.sequence)) p.Problem("anim_stop didn't stop it");
     p.Check(1, true);
+    End(s);
+}
+
+// Custom animations (runtime/anim.h): tests/mods/anim-test's content animation MirageHandUp is registered and plays by
+// name, moving the first-person left hand from where the idle pose has it; a game sequence baked (posed frame by frame,
+// the bones read back) and installed under a new name plays back the same: baked again, its keys match the original's.
+void TestCustomAnimation()
+{
+    Step& s = Begin("Mirage custom animation");
+    Probe p(s);
+    WaitPlayerReady(10.0);
+    WaitGrounded();
+    WaitTicks(3);       // anim::Tick puts the registered clips on the player
+    const auto registered = mirage::anim::Registered();
+    if (std::find(registered.begin(), registered.end(), std::pair<std::string, std::string>{"anim-test", "MirageHandUp"}) == registered.end())
+        p.Problem("anim-test's MirageHandUp isn't registered (content/animations)");
+
+    // The hand, relative to the pawn, on the first-person mesh
+    const auto hand = [&] {
+        Classes::FVector v{};
+        OnGameThread([&] {
+            auto* pawn = game::Pawn();
+            if (!pawn || !pawn->Mesh1p) return;
+            mirage::call::Params c(pawn->Mesh1p, "GetBoneLocation");
+            c.SetName("BoneName", "LeftHand");
+            c.Set("Space", std::int32_t{0});
+            if (mirage::call::Call(pawn->Mesh1p, c)) c.GetRaw("ReturnValue", &v, sizeof v);
+            v.X -= pawn->Location.X;
+            v.Y -= pawn->Location.Y;
+            v.Z -= pawn->Location.Z;
+        });
+        return v;
+    };
+    const auto distance = [](const Classes::FVector& a, const Classes::FVector& b) {
+        return std::sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
+    };
+    const int fullBody = mirage::anim::SlotFromName("FullBody");
+    const Classes::FVector idle = hand();
+    std::string error;
+    bool played = false;
+    OnGameThread([&] { played = mirage::anim::Play(game::Pawn(), fullBody, "MirageHandUp", 1.f, 0.f, 0.f, true, false, &error); });
+    const double t = GameSeconds();
+    while (!g_aborted && GameSeconds() - t < 0.3) WaitTicks(1);
+    const Classes::FVector up = hand();
+    OnGameThread([&] { mirage::anim::Stop(game::Pawn(), fullBody, 0.f); });
+    s.notes.push_back(fmt::format("MirageHandUp: played {} {}; the hand moved {:.1f} from idle", played, error, distance(idle, up)));
+    if (!played) p.Problem("MirageHandUp didn't play: " + error);
+    else if (distance(idle, up) < 10.f) p.Problem("MirageHandUp didn't move the hand");
+
+    // A game sequence baked, installed under a new name and baked again: the same keys
+    mirage::anim::Clip original, copy;
+    bool baked = false, installed = false, again = false;
+    OnGameThread([&] {
+        baked = mirage::anim::Bake(game::Pawn(), "SpringBoardLeftLeg", 20, &original, &error);
+        if (!baked) return;
+        mirage::anim::Clip c = original;
+        c.name = "MirageBakedCopy";
+        installed = mirage::anim::Install(game::Pawn(), c, &error);
+        if (installed) again = mirage::anim::Bake(game::Pawn(), "MirageBakedCopy", 20, &copy, &error);
+    });
+    if (!baked || !installed || !again) {
+        p.Problem(fmt::format("bake / install / bake again: {} {} {}: {}", baked, installed, again, error));
+        End(s);
+        return;
+    }
+    float worstPos = 0.f, worstDot = 1.f;
+    int bones = 0, moving = 0;
+    for (const auto& [mesh, keys] : original.meshes) {
+        const auto other = copy.meshes.find(mesh);
+        if (other == copy.meshes.end()) {
+            p.Problem("the copy has no " + mesh);
+            continue;
+        }
+        for (const auto& [bone, k] : keys) {
+            const auto o = other->second.find(bone);
+            if (o == other->second.end()) continue;
+            ++bones;
+            if (k.pos.size() > 1 || k.rot.size() > 1) ++moving;
+            for (int f = 0; f < original.frames; ++f) {
+                const auto& a = k.pos[std::min<std::size_t>(f, k.pos.size() - 1)];
+                const auto& b = o->second.pos[std::min<std::size_t>(f, o->second.pos.size() - 1)];
+                worstPos = std::max(worstPos, std::sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])));
+                const auto& q = k.rot[std::min<std::size_t>(f, k.rot.size() - 1)];
+                const auto& r = o->second.rot[std::min<std::size_t>(f, o->second.rot.size() - 1)];
+                worstDot = std::min(worstDot, std::abs(q[0] * r[0] + q[1] * r[1] + q[2] * r[2] + q[3] * r[3]));
+            }
+        }
+    }
+    s.notes.push_back(fmt::format("SpringBoardLeftLeg baked ({:.2f} s, {} meshes): {} bones, {} moving; copy baked again: worst position {:.2f}, "
+                                  "worst rotation dot {:.5f}", original.length, original.meshes.size(), bones, moving, worstPos, worstDot));
+    if (moving == 0) p.Problem("the bake held every bone still: the slot didn't pose the mesh");
+    if (worstPos > 1.f || worstDot < 0.999f) p.Problem("the installed copy doesn't play back what was baked");
     End(s);
 }
 
@@ -7838,6 +7932,7 @@ const Named* FeatureList()
         {"Mirage custom move", &TestCustomMove, false},
         {"Mirage animation", &TestAnimation, false},
         {"Mirage animation browser", &TestAnimationBrowser, false},
+        {"Mirage custom animation", &TestCustomAnimation, false},
         {"Mirage conflicts", &TestConflicts, false},
         {"Mirage safe mode", &TestSafeMode, false},
         {"Mirage Kismet (read)", &TestKismetRead, false},

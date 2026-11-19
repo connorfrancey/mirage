@@ -108,3 +108,12 @@ kind = "code"
 # first FCheckResult (0x4C bytes) out; TRUE when nothing was hit. runtime/physics.cpp calls it for world_trace.
 pattern = "83 EC 0C A1 ?? ?? ?? ?? 8B 54 24 28 55 56 8B 35 ?? ?? ?? ?? 52 8B 54 24 2C 89 44 24 10 8B 44 24 20 50 8B 44 24 34 81 CA 00 04 00 00 52 8B 54 24 30 50 8B 44 24 30 52 50 68"
 description = "The engine's single line or box trace (what Actor.Trace calls)"
+
+["FName::FName"]
+kind = "code"
+# FName::FName(const TCHAR* Name, EFindName FindType, UBOOL), __thiscall on the FName (ret 0Ch): it calls FName::Init
+# with (Name, NAME_NO_NUMBER_INTERNAL, FindType, bSplitName = TRUE). FNAME_Add (1) adds a name the table doesn't have,
+# which is how a mod's animation gets a name of its own (game::AddName). Found as the AnimSetViewer's
+# FName(*NewName, FNAME_Add, TRUE) (UnrealEd code ships in the executable).
+pattern = "8B 44 24 08 56 6A 01 50 8B F1 8B 4C 24 10 6A 00 51 8B CE E8 ?? ?? ?? ?? 8B C6 5E C2 0C 00"
+description = "Makes an FName from text, adding it to the name table when asked"

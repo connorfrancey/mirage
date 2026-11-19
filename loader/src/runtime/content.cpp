@@ -3,6 +3,7 @@
 #include "game/object_cache.h"
 #include "game/object_query.h"
 #include "game/uobject.h"
+#include "runtime/anim.h"
 #include "runtime/reflect.h"
 #include "runtime/texture_overlays.h"
 #include "sdk/SDK.hpp"
@@ -12,6 +13,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <mutex>
 
@@ -54,6 +56,7 @@ namespace mirage::content
 		std::string mod;
 		std::vector<Target> targets;
 		std::vector<textures::Replacement> textures;
+		std::vector<anim::Clip> clips;			// animations/<Name>.json
 		bool applied = false;
 		std::vector<Saved> saved;
 		Stats stats;
@@ -144,8 +147,22 @@ namespace mirage::content
 		auto set = std::make_shared<Set>();
 		set->mod = modId;
 		for (const auto& folder : folders) {
-			// textures/<full path of the texture>.<image>
 			std::error_code ec;
+			// animations/<Name>.json: custom animations, sequences of the player's meshes by that name
+			for (const auto& e : std::filesystem::directory_iterator(folder / "animations", ec)) {
+				if (!e.is_regular_file(ec) || e.path().extension() != ".json") continue;
+				std::ifstream in(e.path(), std::ios::binary);
+				const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+				anim::Clip clip;
+				std::string why;
+				if (!anim::ClipFromJson(text, &clip, &why)) {
+					problems.push_back("animations/" + e.path().filename().string() + ": " + why);
+					continue;
+				}
+				if (clip.name.empty()) clip.name = e.path().stem().string();
+				set->clips.push_back(std::move(clip));
+			}
+			// textures/<full path of the texture>.<image>
 			for (const auto& e : std::filesystem::directory_iterator(folder / "textures", ec)) {
 				if (!e.is_regular_file(ec)) continue;
 				std::string ext = e.path().extension().string();
@@ -213,16 +230,18 @@ namespace mirage::content
 		return set;
 	}
 
-	bool Empty(const Set& set) { return set.targets.empty() && set.textures.empty(); }
+	bool Empty(const Set& set) { return set.targets.empty() && set.textures.empty() && set.clips.empty(); }
 	bool Applied(const Set& set) { return set.applied; }
 	Stats GetStats(const Set& set) { return set.stats; }
 
 	void Apply(Set& set)
 	{
+		const bool wasApplied = set.applied;
 		set.applied = true;
 		set.stats = {};
 		set.stats.textures = static_cast<int>(set.textures.size());
 		if (!set.textures.empty()) textures::Activate(set.mod, set.textures);	// Again after a level load: a no-op
+		if (!set.clips.empty() && !wasApplied) anim::Register(set.mod, set.clips);		// Installed on the player by anim::Tick
 		for (const Target& t : set.targets) {
 			Classes::UObject* object = FindTarget(t.key);
 			if (!object) {
@@ -277,6 +296,7 @@ namespace mirage::content
 			}
 		}
 		if (!set.textures.empty()) textures::Deactivate(set.mod);
+		if (!set.clips.empty()) anim::Unregister(set.mod);
 		set.applied = false;
 		spdlog::info("[mod {}] content off: {} values put back{}", set.mod, restored,
 					 set.textures.empty() ? std::string() : ", textures original from the next level load");

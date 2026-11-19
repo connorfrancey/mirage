@@ -82,4 +82,8 @@ namespace game
 	// FName index of `name`, looked up in the engine's name table once and remembered (the SDK's FName(const char*) walks every name on each call). -1 if the engine doesn't have it. Any thread.
 	int NameIndex(const char* name);
 	Classes::FName Name(const char* name);
+	// `name` as an FName, added to the engine's name table when it isn't there yet (FName::FName with FNAME_Add,
+	// runtime/symbols.toml): for names the game never had, like a mod's animation. None if the constructor wasn't found.
+	// Game thread.
+	Classes::FName AddName(const char* name);
 }

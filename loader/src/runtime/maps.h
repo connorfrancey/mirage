@@ -27,6 +27,9 @@ namespace mirage::maps
 	bool Install();
 	// GMalloc, the engine's allocator (its variable's address, found by Install): nullptr before
 	void** GMallocVariable();
+	// GMalloc's Realloc (8-byte aligned): memory for arrays the engine owns and frees itself. nullptr before Install or
+	// when it fails; `bytes` 0 frees `p`.
+	void* EngineRealloc(void* p, std::size_t bytes);
 	// Game thread, every tick: registers the maps of mods that loaded (and drops those of mods that unloaded)
 	void Tick();
 

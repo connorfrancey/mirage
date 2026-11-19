@@ -52,14 +52,8 @@ namespace mirage::physics
 		constexpr std::uint32_t kTraceActorsToo = 0x20BF;	// ... and with them
 		constexpr std::uint32_t kTraceMaterial = 0x800;		// ... and with a TraceHitInfo (the material hit)
 
-		// UObject::StaticConstructObject (runtime/symbols.toml): a setup or instance object a joint needs
-		Classes::UObject* Construct(Classes::UClass* cls, Classes::UObject* outer)
-		{
-			using Fn = Classes::UObject*(__cdecl*)(Classes::UClass*, Classes::UObject*, int, int, std::uint32_t, std::uint32_t,
-												   Classes::UObject*, void*, Classes::UObject*, void*);
-			auto construct = reinterpret_cast<Fn>(symbols::Find("StaticConstructObject"));
-			return construct ? construct(cls, outer, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr) : nullptr;
-		}
+		// A setup or instance object a joint needs
+		Classes::UObject* Construct(Classes::UClass* cls, Classes::UObject* outer) { return game::Construct(cls, outer); }
 
 		// The engine's UWorld: the persistent level's outer (WorldInfo -> PersistentLevel -> TheWorld)
 		void* World()

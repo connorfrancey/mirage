@@ -45,13 +45,7 @@ namespace mirage::moves
 		}
 
 		// The engine's object constructor (as the script VM's `new` does)
-		Classes::UObject* Construct(Classes::UClass* cls, Classes::UObject* outer)
-		{
-			using Fn = Classes::UObject*(__cdecl*)(Classes::UClass*, Classes::UObject*, int, int, std::uint32_t, std::uint32_t,
-												   Classes::UObject*, void*, Classes::UObject*, void*);
-			auto construct = reinterpret_cast<Fn>(symbols::Find("StaticConstructObject"));
-			return construct ? construct(cls, outer, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr) : nullptr;
-		}
+		Classes::UObject* Construct(Classes::UClass* cls, Classes::UObject* outer) { return game::Construct(cls, outer); }
 
 		bool SlotFree(Classes::ATdPawn* pawn, int slot)
 		{

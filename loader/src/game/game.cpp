@@ -892,3 +892,11 @@ Classes::ATdPlayerPawn* game::Pawn()
     if (!IsA(controller->AcknowledgedPawn, Classes::ATdPlayerPawn::StaticClass())) return nullptr;
     return static_cast<Classes::ATdPlayerPawn*>(controller->AcknowledgedPawn);
 }
+
+Classes::UObject* game::Construct(Classes::UClass* cls, Classes::UObject* outer)
+{
+    using Fn = Classes::UObject*(__cdecl*)(Classes::UClass*, Classes::UObject*, int, int, std::uint32_t, std::uint32_t,
+                                           Classes::UObject*, void*, Classes::UObject*, void*);
+    auto construct = reinterpret_cast<Fn>(mirage::symbols::Find("StaticConstructObject"));
+    return construct && cls ? construct(cls, outer, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr) : nullptr;
+}

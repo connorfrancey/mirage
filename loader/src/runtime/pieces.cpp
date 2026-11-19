@@ -56,11 +56,7 @@ namespace mirage::pieces
 				std::int32_t count, max;
 			};
 			auto& raw = reinterpret_cast<Raw&>(arr);
-			void** var = maps::GMallocVariable();
-			if (!var || !*var) return false;
-			void* m = *var;
-			using Fn = void*(__thiscall*)(void*, void*, std::uint32_t, std::uint32_t);
-			void* p = reinterpret_cast<Fn>((*reinterpret_cast<void***>(m))[2])(m, raw.data, static_cast<std::uint32_t>(count * sizeof(Classes::FVector)), 8);
+			void* p = maps::EngineRealloc(raw.data, count * sizeof(Classes::FVector));
 			if (!p) return false;
 			raw.data = p;
 			raw.count = raw.max = count;

@@ -143,7 +143,7 @@ namespace mirage::anim
 											{"comment", e.Comment.GetName()}});
 					}
 					seqs.push_back({{"name", q->SequenceName.GetName()}, {"length", q->SequenceLength}, {"frames", q->NumFrames},
-									{"rate", q->RateScale}, {"notifies", std::move(notifies)}});
+									{"rate", q->RateScale}, {"custom", IsCustom(q)}, {"notifies", std::move(notifies)}});
 				}
 				sets.push_back({{"slot", i}, {"name", set->GetName()}, {"path", set->GetPathName()}, {"sequences", std::move(seqs)}});
 			}

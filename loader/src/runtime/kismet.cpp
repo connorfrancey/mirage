@@ -1,5 +1,6 @@
 #include "runtime/kismet.h"
 
+#include "game/game.h"
 #include "runtime/classes.h"
 #include "runtime/kismet_trace.h"
 #include "runtime/maps.h"
@@ -200,12 +201,8 @@ namespace mirage::kismet
 		bool Reserve(RawArray& a, std::size_t size)
 		{
 			if (a.count < a.max) return true;
-			void** var = maps::GMallocVariable();
-			if (!var || !*var) return false;
 			const std::int32_t grown = a.max < 4 ? 4 : a.max * 2;
-			void* m = *var;
-			using Fn = void*(__thiscall*)(void*, void*, std::uint32_t, std::uint32_t);
-			void* p = reinterpret_cast<Fn>((*reinterpret_cast<void***>(m))[2])(m, a.data, static_cast<std::uint32_t>(grown * size), 8);
+			void* p = maps::EngineRealloc(a.data, grown * size);
 			if (!p) return false;
 			a.data = static_cast<std::uint8_t*>(p);
 			a.max = grown;
@@ -244,10 +241,6 @@ namespace mirage::kismet
 			return false;
 		}
 
-		// UObject::StaticConstructObject (runtime/symbols.toml)
-		using ConstructFn = Classes::UObject*(__cdecl*)(Classes::UClass* cls, Classes::UObject* outer, int nameIndex, int nameNumber,
-														std::uint32_t flagsLo, std::uint32_t flagsHi, Classes::UObject* templ,
-														void* error, Classes::UObject* subobjectRoot, void* instanceGraph);
 	}
 
 	int OutputIndex(Classes::USequenceOp* op, const char* which)
@@ -298,9 +291,7 @@ namespace mirage::kismet
 		if (!sequence || !cls) return fail("no sequence or class");
 		if (!Derives(cls, Classes::USequenceOp::StaticClass())) return fail(cls->GetName() + " isn't a SequenceOp class");
 		if (classes::ClassFlags(cls) & 0x1) return fail(cls->GetName() + " is abstract");
-		auto construct = reinterpret_cast<ConstructFn>(symbols::Find("StaticConstructObject"));
-		if (!construct) return fail("StaticConstructObject wasn't found");
-		auto* op = static_cast<Classes::USequenceOp*>(construct(cls, sequence, 0, 0, 0, 0, nullptr, nullptr, nullptr, nullptr));
+		auto* op = static_cast<Classes::USequenceOp*>(game::Construct(cls, sequence));
 		if (!op) return fail("the engine didn't construct it");
 		op->ParentSequence = sequence;
 		kismet_trace::Invalidate();

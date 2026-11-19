@@ -37,6 +37,7 @@
 #include "runtime/actions.h"
 #include "runtime/layers.h"
 #include "runtime/world_events.h"
+#include "runtime/anim.h"
 #include "runtime/maps.h"
 #include "runtime/routes.h"
 #include "runtime/file_redirect.h"
@@ -179,6 +180,7 @@ static void Run(HMODULE module)
                 mirage::movers::Tick();          // Mods' moving platforms: moved toward where they were sent
                 mirage::moves::Tick(seconds);    // Mods' own moves: in the player's pawn, enter / tick / leave callbacks
                 mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
+                mirage::anim::Tick();            // Mods' animations: on the player's meshes, again for a new pawn
                 mirage::routes::Tick(seconds);   // Time-trial routes: the run in progress
                 modules::Tick();
             });
