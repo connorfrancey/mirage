@@ -257,6 +257,10 @@ namespace mirage::mods
 		static int SoundPlayFn(lua_State* L);
 		static int SoundStopFn(lua_State* L);
 		static int SoundPlayingFn(lua_State* L);
+		static int PostfxFn(lua_State* L);
+		static int PostfxSetFn(lua_State* L);
+		static int PostfxEnableFn(lua_State* L);
+		static int PostfxErrorFn(lua_State* L);
 		static int CollisionFn(lua_State* L);
 		static int SetCollisionFn(lua_State* L);
 		static int TraceFn(lua_State* L);
@@ -1605,6 +1609,45 @@ namespace mirage::mods
 		LuaMod& self = Self(L);
 		lua_pushboolean(L, MIRAGE_API_HAS(self.api_, sound_playing) && lua_isinteger(L, 1) &&
 							   self.api_->sound_playing(self.mod_, static_cast<int32_t>(lua_tointeger(L, 1))) == 1);
+		return 1;
+	}
+
+	// mirage.postfx("shaders/x.hlsl"): an effect's handle, or nil. mirage.postfx_set(h, index, x, y, z, w) sets c<index>
+	// (1 to 15); mirage.postfx_enable(h, on); mirage.postfx_error(h): the compile error, "" when none
+	int LuaMod::PostfxFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, postfx_create)) return luaL_error(L, "mirage.postfx: this runtime has no post-processing");
+		const int32_t h = self.api_->postfx_create(self.mod_, luaL_checkstring(L, 1));
+		if (h > 0) lua_pushinteger(L, h);
+		else lua_pushnil(L);
+		return 1;
+	}
+	int LuaMod::PostfxSetFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, postfx_set)) return 0;
+		const float v[4] = {static_cast<float>(luaL_optnumber(L, 3, 0.0)), static_cast<float>(luaL_optnumber(L, 4, 0.0)),
+							static_cast<float>(luaL_optnumber(L, 5, 0.0)), static_cast<float>(luaL_optnumber(L, 6, 0.0))};
+		lua_pushboolean(L, self.api_->postfx_set(self.mod_, static_cast<int32_t>(luaL_checkinteger(L, 1)),
+												 static_cast<int32_t>(luaL_checkinteger(L, 2)), v) == 1);
+		return 1;
+	}
+	int LuaMod::PostfxEnableFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, postfx_enable)) return 0;
+		lua_pushboolean(L, self.api_->postfx_enable(self.mod_, static_cast<int32_t>(luaL_checkinteger(L, 1)), lua_toboolean(L, 2) ? 1 : 0) == 1);
+		return 1;
+	}
+	int LuaMod::PostfxErrorFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, postfx_error)) return 0;
+		const int32_t h = static_cast<int32_t>(luaL_checkinteger(L, 1));
+		std::string text(self.api_->postfx_error(self.mod_, h, nullptr, 0) + 1, '\0');
+		text.resize(self.api_->postfx_error(self.mod_, h, text.data(), static_cast<uint32_t>(text.size())));
+		lua_pushlstring(L, text.data(), text.size());
 		return 1;
 	}
 
@@ -3010,7 +3053,7 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"sound_play", SoundPlayFn}, {"sound_stop", SoundStopFn}, {"sound_playing", SoundPlayingFn}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"sound_play", SoundPlayFn}, {"sound_stop", SoundStopFn}, {"sound_playing", SoundPlayingFn}, {"postfx", PostfxFn}, {"postfx_set", PostfxSetFn}, {"postfx_enable", PostfxEnableFn}, {"postfx_error", PostfxErrorFn}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
 			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn}, {"layer_actor", LayerActor},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},

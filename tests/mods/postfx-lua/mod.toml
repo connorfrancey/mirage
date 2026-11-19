@@ -1,0 +1,5 @@
+# Self-test mod ("Mirage post-processing"): shaders/tint.hlsl blends the frame toward the colour in c1 (its alpha the
+# amount); shaders/broken.hlsl does not compile, on purpose. The self-test drives them through the globals in main.lua.
+id = "postfx-lua"
+version = "1.0.0"
+mirage = "^0.1"

@@ -192,6 +192,10 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, byte*, float, uint, int> sound_play;
         public delegate* unmanaged[Cdecl]<void*, int, void> sound_stop;
         public delegate* unmanaged[Cdecl]<void*, int, int> sound_playing;
+        public delegate* unmanaged[Cdecl]<void*, byte*, int> postfx_create;
+        public delegate* unmanaged[Cdecl]<void*, int, int, void*, int> postfx_set;
+        public delegate* unmanaged[Cdecl]<void*, int, int, int> postfx_enable;
+        public delegate* unmanaged[Cdecl]<void*, int, byte*, uint, uint> postfx_error;
     }
 
     [StructLayout(LayoutKind.Sequential)]

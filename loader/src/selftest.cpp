@@ -32,6 +32,7 @@
 #include "runtime/classes.h"
 #include "runtime/layers.h"
 #include "runtime/maps.h"
+#include "render/postfx.h"
 #include "runtime/routes.h"
 #include <imgui.h>
 #include "runtime/inject.h"
@@ -5980,6 +5981,58 @@ void TestGrapple()
     End(s);
 }
 
+// Post-processing from mods (render/postfx.h): tests/mods/postfx-lua's tint shader turns the frame's centre pixel the
+// colour it is given (red, then blue: the parameter reaches the shader live), and off, the frame is the game's again; a
+// shader that doesn't compile says why.
+void TestPostfx()
+{
+    Step& s = Begin("Mirage post-processing");
+    Probe p(s);
+    p.Expect("undefined_thing");        // broken.hlsl's compile error, logged on purpose
+    const auto eval = [](const std::string& code) {
+        mirage::mods::EvalResult r;
+        OnGameThread([&] { r = mirage::mods::Eval("postfx-lua", code); });
+        return r;
+    };
+    // The centre pixel after the effects of a frame drawn from now
+    const auto centre = [] {
+        WaitTicks(3);
+        postfx::Probe();
+        std::uint32_t argb = 0;
+        if (!WaitFor(3.0, [&] { return postfx::ProbeResult(&argb); })) return std::uint32_t{0};
+        return argb;
+    };
+    const auto rgb = [](std::uint32_t c) { return fmt::format("{} {} {}", (c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF); };
+    const auto closeTo = [](std::uint32_t c, int r, int g, int b) {
+        return std::abs(static_cast<int>((c >> 16) & 0xFF) - r) < 12 && std::abs(static_cast<int>((c >> 8) & 0xFF) - g) < 12 &&
+               std::abs(static_cast<int>(c & 0xFF) - b) < 12;
+    };
+    const std::uint32_t before = centre();
+    const auto on = eval("tint_on(1, 0, 0, 1)");
+    const std::uint32_t red = centre();
+    eval("tint_on(0, 0, 1, 1)");
+    const std::uint32_t blue = centre();
+    const auto stats = postfx::GetStats();
+    eval("tint_off()");
+    const std::uint32_t after = centre();
+    std::string error;
+    WaitFor(3.0, [&] {
+        error = eval("broken_error()").value;
+        return !error.empty();
+    });
+    eval("broken_off()");
+    s.notes.push_back(fmt::format("centre pixel: {} before; {} tinted red; {} tinted blue; {} off ({} effects, {} drawn a frame, {} frames)",
+                                  rgb(before), rgb(red), rgb(blue), rgb(after), stats.effects, stats.drawn, stats.frames));
+    s.notes.push_back("broken.hlsl: " + error.substr(0, 160));
+    if (on.value != "true") p.Problem("tint_on: " + on.value + on.error);
+    if (!before) p.Problem("the probe read no pixel (no frame drawn?)");
+    if (!closeTo(red, 255, 0, 0)) p.Problem("the red tint didn't reach the frame: " + rgb(red));
+    if (!closeTo(blue, 0, 0, 255)) p.Problem("the blue tint didn't reach the frame (a parameter set while on): " + rgb(blue));
+    if (closeTo(after, 0, 0, 255)) p.Problem("the frame stayed blue after the effect was turned off");
+    if (error.find("undefined_thing") == std::string::npos) p.Problem("a shader that doesn't compile gave no error naming the problem: " + error);
+    End(s);
+}
+
 // Sound from mods (runtime/audio.h): tests/mods/sound-lua plays its own WAV (a half-second tone): it plays and ends by
 // itself; looped, it plays on until sound_stop; a path out of the mod's folder is refused.
 void TestSound()
@@ -8165,6 +8218,7 @@ const Named* FeatureList()
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage blink", &TestBlink, false},
         {"Mirage sound", &TestSound, false},
+        {"Mirage post-processing", &TestPostfx, false},
         {"Mirage world access", &TestWorldAccess, false},
         {"Mirage world access (C#)", &TestWorldAccessCs, false},
         {"Mirage change log", &TestChangeLog, false},

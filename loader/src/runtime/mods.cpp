@@ -1,6 +1,7 @@
 #include "runtime/mods.h"
 
 #include "runtime/audio.h"
+#include "render/postfx.h"
 #include "core/events.h"
 #include "core/notify.h"
 
@@ -942,6 +943,7 @@ namespace mirage::mods
 			game_api::MoverCreate, game_api::MoverMove, game_api::MoverMoving, game_api::MoveRegister, game_api::MoveStart,
 			game_api::MoveRemove, game_api::AnimPlay, game_api::AnimStop, game_api::AnimState, game_api::AnimSets,
 			game_api::ActorSpawn, game_api::SoundPlay, game_api::SoundStop, game_api::SoundPlaying,
+			game_api::PostfxCreate, game_api::PostfxSet, game_api::PostfxEnable, game_api::PostfxError,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -1077,6 +1079,7 @@ namespace mirage::mods
 			detail::RemoveGameHooks(mod);	// Before its code goes
 			world::Unloading(&mod);			// Its 3D drawing too
 			audio::StopAll(mod.id);			// And its sounds
+			postfx::RemoveAll(mod.id);		// And its post-processing
 			if (mod.content && content::Applied(*mod.content)) content::Restore(*mod.content);
 			if (!mod.manifest.dotnet.empty()) dotnet::UnloadMod(&mod);	// OnUnload, then its assembly context goes
 			mod.lua.reset();

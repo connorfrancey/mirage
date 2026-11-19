@@ -1180,6 +1180,20 @@ typedef struct MirageApi {
     void(MIRAGE_CALL* sound_stop)(MirageMod* mod, int32_t handle);
     /* 1 while it plays, else 0 */
     int32_t(MIRAGE_CALL* sound_playing)(MirageMod* mod, int32_t handle);
+
+    /* ---- Post-processing (step 31) */
+    /* A full-screen effect from an HLSL pixel shader of the mod's folder ("shaders/x.hlsl": ps_3_0, entry point
+     * `main(float2 uv : TEXCOORD0) : COLOR0`). Its inputs: s0 the game's frame so far, c0 (seconds, width, height,
+     * width / height), c1 to c15 the mod's (postfx_set). Drawn each frame while enabled, after the game's frame (its HUD
+     * too) and before the menu, in the order made. Compiled when first drawn: postfx_error says what went wrong. A
+     * handle (above 0), or 0 when the file can't be read. Removed when the mod unloads. Any thread. */
+    int32_t(MIRAGE_CALL* postfx_create)(MirageMod* mod, const char* path);
+    /* c`index` (1 to 15) of the effect: 4 floats. 0 for another mod's effect or an index out of range. */
+    int32_t(MIRAGE_CALL* postfx_set)(MirageMod* mod, int32_t handle, int32_t index, const float* value);
+    /* Drawn (1) or not (0) */
+    int32_t(MIRAGE_CALL* postfx_enable)(MirageMod* mod, int32_t handle, int32_t on);
+    /* The compile error ("" none, or not drawn yet). Copies up to capacity, returns the full length. */
+    uint32_t(MIRAGE_CALL* postfx_error)(MirageMod* mod, int32_t handle, char* buffer, uint32_t capacity);
 } MirageApi;
 
 #define MIRAGE_SOUND_LOOP 0x1u

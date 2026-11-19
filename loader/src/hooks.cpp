@@ -9,6 +9,7 @@
 #endif
 #if MIRAGE_GAME
 #include "render/debug_renderer.h"
+#include "render/postfx.h"
 #endif
 #include "paths.h"
 #include "core/hooking.h"
@@ -528,6 +529,9 @@ namespace
         debugrender::OnLostDevice();
 #endif
         if (g_imguiReady) ImGui_ImplDX9_InvalidateDeviceObjects();
+#if MIRAGE_GAME
+        postfx::OnLostDevice();
+#endif
         ReleaseLastFrame();
     }
     bool g_loggedOffscreen = false;
@@ -589,6 +593,7 @@ namespace
         else if (g_lastFrame) ReleaseLastFrame();
 
 #if MIRAGE_GAME
+        postfx::Render(dev);            // Mods' post-processing, on the game's frame (under the menu and debug drawing)
         debugrender::BeginFrame(dev);   // Matrices for this frame (labels use them too)
         debugrender::Render(dev);       // Overlay path, when the in-scene pass did not draw
 #endif
@@ -612,6 +617,7 @@ namespace
         }
 #if MIRAGE_GAME
         debugrender::OnLostDevice();
+        postfx::OnLostDevice();
 #endif
         if (g_imguiReady) ImGui_ImplDX9_InvalidateDeviceObjects();
         if (t_stalledDraw)

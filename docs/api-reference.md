@@ -50,6 +50,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Animation](#animation) (4)
 - [Actors](#actors) (1)
 - [Sound](#sound) (3)
+- [Post-processing](#post-processing) (4)
 - [Types](#types)
 
 ## Basics
@@ -1523,6 +1524,40 @@ int32_t(MIRAGE_CALL* sound_playing)(MirageMod* mod, int32_t handle);
 ```
 
 1 while it plays, else 0
+
+## Post-processing
+
+### `postfx_create`
+
+```c
+int32_t(MIRAGE_CALL* postfx_create)(MirageMod* mod, const char* path);
+```
+
+A full-screen effect from an HLSL pixel shader of the mod's folder ("shaders/x.hlsl": ps_3_0, entry point `main(float2 uv : TEXCOORD0) : COLOR0`). Its inputs: s0 the game's frame so far, c0 (seconds, width, height, width / height), c1 to c15 the mod's (postfx_set). Drawn each frame while enabled, after the game's frame (its HUD too) and before the menu, in the order made. Compiled when first drawn: postfx_error says what went wrong. A handle (above 0), or 0 when the file can't be read. Removed when the mod unloads. Any thread.
+
+### `postfx_set`
+
+```c
+int32_t(MIRAGE_CALL* postfx_set)(MirageMod* mod, int32_t handle, int32_t index, const float* value);
+```
+
+c`index` (1 to 15) of the effect: 4 floats. 0 for another mod's effect or an index out of range.
+
+### `postfx_enable`
+
+```c
+int32_t(MIRAGE_CALL* postfx_enable)(MirageMod* mod, int32_t handle, int32_t on);
+```
+
+Drawn (1) or not (0)
+
+### `postfx_error`
+
+```c
+uint32_t(MIRAGE_CALL* postfx_error)(MirageMod* mod, int32_t handle, char* buffer, uint32_t capacity);
+```
+
+The compile error ("" none, or not drawn yet). Copies up to capacity, returns the full length.
 
 ## Types
 

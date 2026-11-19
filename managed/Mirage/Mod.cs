@@ -283,6 +283,32 @@ namespace Mirage
         /// <summary>True while the sound plays.</summary>
         public bool SoundPlaying(int handle) => Bridge.Api->sound_playing(Handle, handle) != 0;
 
+        /// <summary>
+        /// A full-screen effect from an HLSL pixel shader of the mod's folder ("shaders/x.hlsl", ps_3_0, entry point
+        /// main): s0 is the game's frame, c0 (seconds, width, height, aspect), c1 to c15 the mod's
+        /// (<see cref="PostFxSet"/>). A handle, or 0 when the file can't be read. Any thread.
+        /// </summary>
+        public int PostFx(string path) => Bridge.Api->postfx_create(Handle, Utf8.Intern(path));
+
+        /// <summary>Sets c<paramref name="index"/> (1 to 15) of the effect's shader.</summary>
+        public bool PostFxSet(int handle, int index, float x, float y = 0f, float z = 0f, float w = 0f)
+        {
+            float* v = stackalloc float[4] { x, y, z, w };
+            return Bridge.Api->postfx_set(Handle, handle, index, v) != 0;
+        }
+
+        /// <summary>Draws the effect each frame (or stops).</summary>
+        public bool PostFxEnable(int handle, bool on) => Bridge.Api->postfx_enable(Handle, handle, on ? 1 : 0) != 0;
+
+        /// <summary>The effect's compile error, "" when there is none.</summary>
+        public string PostFxError(int handle)
+        {
+            uint n = Bridge.Api->postfx_error(Handle, handle, null, 0);
+            byte* buffer = stackalloc byte[(int)n + 1];
+            Bridge.Api->postfx_error(Handle, handle, buffer, n + 1);
+            return System.Text.Encoding.UTF8.GetString(buffer, (int)n);
+        }
+
         /// <summary>A line trace (or a box sweep with <paramref name="extent"/>); null when nothing was hit. Game thread.</summary>
         public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default,
                                bool material = false)

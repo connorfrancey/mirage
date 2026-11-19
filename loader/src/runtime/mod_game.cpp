@@ -6,9 +6,11 @@
 #include "game/object_ref.h"
 #include "game/player_state.h"
 #include <nlohmann/json.hpp>
+#include <fstream>
 #include "game/uobject.h"
 #include "gui.h"
 #include "runtime/audio.h"
+#include "render/postfx.h"
 #include "runtime/call.h"
 #include "runtime/changes.h"
 #include "runtime/class_source.h"
@@ -1220,6 +1222,40 @@ namespace mirage::mods
 		int32_t MIRAGE_CALL SoundPlaying(MirageMod* mod, int32_t handle)
 		{
 			return mod && audio::Playing(mod->id, handle) ? 1 : 0;
+		}
+
+		int32_t MIRAGE_CALL PostfxCreate(MirageMod* mod, const char* path)
+		{
+			if (!mod || !path) return 0;
+			const std::filesystem::path file = FileInMod(mod, path);
+			std::ifstream in(file, std::ios::binary);
+			if (file.empty() || !in) {
+				spdlog::warn("[mod {}] postfx_create {}: not a file of the mod's folder (like shaders/x.hlsl)", mod->id, path);
+				return 0;
+			}
+			std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+			return postfx::Create(mod->id, path, std::move(source));
+		}
+
+		int32_t MIRAGE_CALL PostfxSet(MirageMod* mod, int32_t handle, int32_t index, const float* value)
+		{
+			return mod && value && postfx::Set(mod->id, handle, index, value) ? 1 : 0;
+		}
+
+		int32_t MIRAGE_CALL PostfxEnable(MirageMod* mod, int32_t handle, int32_t on)
+		{
+			return mod && postfx::Enable(mod->id, handle, on != 0) ? 1 : 0;
+		}
+
+		uint32_t MIRAGE_CALL PostfxError(MirageMod* mod, int32_t handle, char* buffer, uint32_t capacity)
+		{
+			const std::string error = mod ? postfx::Error(mod->id, handle) : std::string("no mod");
+			if (buffer && capacity) {
+				const std::size_t n = std::min<std::size_t>(error.size(), capacity - 1);
+				std::memcpy(buffer, error.data(), n);
+				buffer[n] = '\0';
+			}
+			return static_cast<uint32_t>(error.size());
 		}
 
 		int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor)
