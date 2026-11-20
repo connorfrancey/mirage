@@ -61,7 +61,7 @@ namespace mirage::models
 			if (data.sourceHash != HashFile(file.string()))
 				return "it changed since it was converted: run `mirage model " + file.filename().string() + " --convert` again";
 			// Named by the converted model and the builder's version: a package of an older layout is built again
-			constexpr const char* kBuilderVersion = "mirage-model-package 2";		// 2: RB_BodySetup
+			constexpr const char* kBuilderVersion = "mirage-model-package 3";		// 2: RB_BodySetup; 3: its hull points
 			std::ifstream in(mmesh, std::ios::binary);
 			char hash[16];
 			std::snprintf(hash, sizeof hash, "%08x",

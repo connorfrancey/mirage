@@ -138,7 +138,7 @@ TEST(Models, BuildsAPackageTheGameCouldLoad)
     EXPECT_EQ(m.properties.get_bool("UseSimpleLineCollision"), std::optional<bool>(false));
     EXPECT_EQ(m.properties.get_bool("UseSimpleBoxCollision"), std::optional<bool>(false));
     EXPECT_EQ(m.properties.get_bool("UseSimpleRigidBodyCollision"), std::optional<bool>(true));
-    // Its rigid body: a subobject with the box's 8 corners as one convex element, and no cooked copy
+    // Its rigid body: a subobject with its corners as one convex element, and no cooked copy
     ASSERT_TRUE(m.body_setup.is_export());
     EXPECT_EQ(p->object_path(m.body_setup), "Cube.RB_BodySetup_0");
     EXPECT_EQ(p->class_name(m.body_setup), "RB_BodySetup");
@@ -151,9 +151,54 @@ TEST(Models, BuildsAPackageTheGameCouldLoad)
     PropertyFormatOptions fo;
     fo.names = &p->names();
     const std::string text = format_property_value(geometry->value, fo);
-    EXPECT_NE(text.find("VertexData=((X=-50.0,Y=-50.0,Z=-50.0)"), std::string::npos) << text;
+    // Its points: the cube's 8 corners, each once
+    std::size_t points = 0;
+    for (std::size_t at = text.find("(X="); at != std::string::npos; at = text.find("(X=", at + 1)) ++points;
+    EXPECT_EQ(points, 8u) << text;
+    EXPECT_NE(text.find("(X=-50.0,Y=-50.0,Z=-50.0)"), std::string::npos) << text;
+    EXPECT_NE(text.find("(X=50.0,Y=50.0,Z=50.0)"), std::string::npos) << text;
     const auto data = p->export_data(m.body_setup.export_index());
     EXPECT_EQ(data.size() - body.end_offset, 4u);       // PreCachedPhysData: an empty array
+    fs::remove_all(dir);
+}
+
+// A new mesh's rigid body follows the model's own shape, not its box: a pyramid (the cube's top pulled to one point)
+// gets its 5 corners, where a box would have 8 and stand on corners the model doesn't have
+TEST(Models, RigidBodyFollowsTheModelsShape)
+{
+    const fs::path cooked = Cooked();
+    if (cooked.empty()) GTEST_SKIP() << "Mirror's Edge not found";
+    const fs::path dir = fs::temp_directory_path() / "mirage_test_models_hull";
+    fs::remove_all(dir);
+    auto pyramid = Cube();
+    for (auto& v : pyramid.vertices)
+        if (v.position[2] > 0) v.position[0] = v.position[1] = 0;
+    std::string error;
+    {
+        Linker linker;
+        linker.add_search_path(cooked, true);
+        ASSERT_TRUE(mirage::models::BuildPackage(linker, pyramid, "Pyramid", dir / "MiragePyramid_1234.upk", &error)) << error;
+    }
+    Linker linker;
+    linker.add_search_path(cooked, true);
+    linker.add_search_path(dir, false);
+    const Package* p = linker.find_package("MiragePyramid_1234");
+    ASSERT_NE(p, nullptr);
+    const StaticMesh m = read_static_mesh(linker, {p, *p->find_export("Pyramid")});
+    ReflectionSchema schema(linker);
+    for (const char* name : {"Core", "Engine"})
+        if (const Package* s = linker.find_package(name)) schema.add_package(*s);
+    const ObjectProperties body = linker.read_properties({p, m.body_setup}, &schema);
+    const Property* geometry = find_property(body.properties, "AggGeom");
+    ASSERT_NE(geometry, nullptr);
+    PropertyFormatOptions fo;
+    fo.names = &p->names();
+    const std::string text = format_property_value(geometry->value, fo);
+    std::size_t points = 0;
+    for (std::size_t at = text.find("(X="); at != std::string::npos; at = text.find("(X=", at + 1)) ++points;
+    EXPECT_EQ(points, 5u) << text;
+    EXPECT_NE(text.find("(X=0.0,Y=0.0,Z=50.0)"), std::string::npos) << text;
+    EXPECT_EQ(text.find("(X=50.0,Y=50.0,Z=50.0)"), std::string::npos) << text;     // No box corner
     fs::remove_all(dir);
 }
 

@@ -8,7 +8,8 @@
 // the edges and a double-sided flag per triangle for shadow volumes, one fragment per section, InternalVersion 16, and
 // a kDOP collision tree over all its triangles (UnrealLib's build_kdop), so the player and traces collide with the
 // triangles themselves (UseSimpleLineCollision and UseSimpleBoxCollision off). A new mesh also gets an RB_BodySetup
-// for rigid bodies (physics props): a convex box around it, cooked by PhysX when a body is made. Each section's
+// for rigid bodies (physics props): one convex element of the model's own hull points, cooked by PhysX when a body is
+// made. Each section's
 // material is a game material named by the file's material name ("Package.Name"); else, if the file gives the section
 // a texture, a MaterialInstanceConstant of kTexturedParent with that texture (DXT1, every mip inline) as its
 // kTexturedParameter, both written into the package; else `defaultMaterial`.

@@ -1604,8 +1604,8 @@ lists static meshes too; runtime/texture_files' BuildOverlay writes the model la
 materials section by section, its RB_BodySetup and properties, with UseSimpleLineCollision and UseSimpleBoxCollision
 off). Self-test "Mirage mesh replacement": the Prologue's garbage bag (P_Waste.GarbageBag_01.S_GarbageBag_01, 123
 packages) is Suzanne in all 9 places the level draws it. A new mesh has a rigid body too: an RB_BodySetup subobject
-with one convex element, its box's corners (PhysX cooks it when a body is made, as for the game's: no cooked copy is
-stored), so `physics_spawn` makes props of it; in "Mirage models" a prop of Suzanne falls 340 units and rests on the
+with one convex element, the model's farthest vertex along each of 26 directions (all on its hull, at most 26 points;
+PhysX cooks their hull when a body is made, as for the game's: no cooked copy is stored), so `physics_spawn` makes props of it; in "Mirage models" a prop of Suzanne falls 340 units and rests on the
 floor. A model's own textures: the converter keeps each material's base-color (glTF) or diffuse texture, embedded or
 a file beside the model, in the `.mmesh` (version 2); a section with one and no game material gets a Texture2D (DXT1,
 every mip inline, NeverStream) and a MaterialInstanceConstant of `CH_Materials.M_Generic_Diff_Spec_Norm` (the
@@ -1613,7 +1613,7 @@ characters' lit generic material, a standalone package the game loads on demand,
 masters are used by no map, so theirs may not be) with it as "Diffuse Texture", both in the model's package. Sides
 must be powers of two. In "Mirage models" a crate (tests/mods/model-test/models/crate.obj, its .mtl naming a blue PNG)
 shows its MaterialInstanceConstant and texture, and turned to face it the frame is blue (the probe reads below the
-middle: the game's white reticle dot is there). Next: a body from the model's convex hull rather than its box; a
+middle: the game's white reticle dot is there). Next: a
 replaced mesh's own body (it keeps the original's RB_BodySetup); normal and specular maps (the parent takes both).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps

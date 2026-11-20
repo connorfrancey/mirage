@@ -75,10 +75,39 @@ namespace mirage::models
 			}
 		}
 
-		// The mesh's rigid body, a subobject of it as the game's are: one convex element, the corners of its box, which
-		// PhysX cooks when a body is made (the native data holds no cooked copy, like the game's own: an empty
-		// PreCachedPhysData). The export's data, header to native data.
-		// shortcut: a box around the model, not its convex hull; a hull when props need a closer shape.
+		// The mesh's farthest vertex along each of the 26 directions (x, y, z each -1, 0 or +1, not all 0), each place once
+		std::vector<Vec3> HullPoints(const StaticMesh& mesh)
+		{
+			const StaticMeshLod& lod = mesh.lods.front();
+			const std::size_t n = std::min(lod.positions.size(), static_cast<std::size_t>(lod.num_vertices));	// Not the shadow copies
+			std::vector<std::size_t> picked;
+			for (int d = 0; d < 27; ++d) {
+				const float dx = static_cast<float>(d % 3 - 1), dy = static_cast<float>(d / 3 % 3 - 1), dz = static_cast<float>(d / 9 - 1);
+				if (dx == 0 && dy == 0 && dz == 0) continue;
+				std::size_t best = 0;
+				float reach = -FLT_MAX;
+				for (std::size_t i = 0; i < n; ++i) {
+					const Vec3& p = lod.positions[i];
+					const float along = p.x * dx + p.y * dy + p.z * dz;
+					if (along > reach) reach = along, best = i;
+				}
+				picked.push_back(best);
+			}
+			std::vector<Vec3> points;		// Each place once (split vertices share places)
+			for (const std::size_t i : picked) {
+				const Vec3& p = lod.positions[i];
+				if (std::none_of(points.begin(), points.end(), [&](const Vec3& q) { return q.x == p.x && q.y == p.y && q.z == p.z; }))
+					points.push_back(p);
+			}
+			return points;
+		}
+
+		// The mesh's rigid body, a subobject of it as the game's are: one convex element, which PhysX cooks into the
+		// convex hull of its points when a body is made (the native data holds no cooked copy, like the game's own: an
+		// empty PreCachedPhysData). The points are the model's own: its farthest vertex along each of 26 directions (the
+		// axes, the face diagonals and the corners), so every point is on the model's hull and the shape follows it (a
+		// sphere-ish model rolls, a wedge rests on its slope) while PhysX gets few points to cook. The export's data,
+		// header to native data.
 		std::vector<std::byte> BodySetupData(PackageModel& model, Linker& linker, const StaticMesh& mesh, const FName& none,
 											 std::int32_t netIndex)
 		{
@@ -87,12 +116,11 @@ namespace mirage::models
 				if (const Package* p = linker.find_package(name)) schema.add_package(*p);
 			const auto type = schema.find_property("RB_BodySetup", "AggGeom");
 			if (!type) throw std::runtime_error("RB_BodySetup.AggGeom isn't in the game's Engine package");
-			const Vec3 o = mesh.bounds.origin, e = mesh.bounds.box_extent;
+			const std::vector<Vec3> hull = HullPoints(mesh);
 			std::string corners;
-			for (int i = 0; i < 8; ++i) {
+			for (std::size_t i = 0; i < hull.size(); ++i) {
 				char v[128];
-				std::snprintf(v, sizeof v, "%s(X=%.6f,Y=%.6f,Z=%.6f)", i ? "," : "", o.x + ((i & 1) ? e.x : -e.x),
-							  o.y + ((i & 2) ? e.y : -e.y), o.z + ((i & 4) ? e.z : -e.z));
+				std::snprintf(v, sizeof v, "%s(X=%.6f,Y=%.6f,Z=%.6f)", i ? "," : "", hull[i].x, hull[i].y, hull[i].z);
 				corners += v;
 			}
 			PropertyParseOptions options;
