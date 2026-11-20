@@ -23,7 +23,7 @@ namespace mirage::textures
 	namespace
 	{
 		constexpr const char* kIndexHeader = "mirage-texture-index 2";		// 2: static meshes too
-		constexpr const char* kOverlayVersion = "mirage-texture-overlay 3";	// Change when the copies' format changes
+		constexpr const char* kOverlayVersion = "mirage-texture-overlay 4";	// Change when the copies' format changes (4: a replaced mesh's body)
 
 		std::mutex g_lock;
 		std::condition_variable g_cv;

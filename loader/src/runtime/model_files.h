@@ -25,6 +25,8 @@
 namespace UnrealLib
 {
 	class Linker;
+	struct PackageModel;
+	struct Property;
 }
 
 namespace mirage::models
@@ -43,6 +45,13 @@ namespace mirage::models
 	// The properties, BodySetup and the rest are left at their defaults for the caller (a new package, or a replaced
 	// mesh keeping the original's). Throws std::runtime_error for no triangles or more than 32,767 vertices.
 	UnrealLib::Assets::StaticMesh MakeStaticMesh(const MeshData& mesh, const std::string& name, const MaterialFor& material);
+
+	// The AggGeom property of `mesh`'s RB_BodySetup (names made in `model`; `linker` has the game's Engine package): one
+	// convex element, which PhysX cooks into the hull of its points when a body is made. The points are the model's
+	// own: its farthest vertex along each of 26 directions (the axes, the face diagonals and the corners), so every point
+	// is on the model's hull and the shape follows it (a sphere-ish model rolls, a wedge rests on its slope) while PhysX
+	// gets few points to cook.
+	UnrealLib::Property BodyGeometry(UnrealLib::PackageModel& model, UnrealLib::Linker& linker, const UnrealLib::Assets::StaticMesh& mesh);
 
 	// `mesh` as package `packageName` (the file's stem) holding the StaticMesh `meshName` (and its sections' textures
 	// and material instances), written to `out`. `linker` has the game's packages (the summary to copy, the materials).

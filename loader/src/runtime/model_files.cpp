@@ -102,42 +102,18 @@ namespace mirage::models
 			return points;
 		}
 
-		// The mesh's rigid body, a subobject of it as the game's are: one convex element, which PhysX cooks into the
-		// convex hull of its points when a body is made (the native data holds no cooked copy, like the game's own: an
-		// empty PreCachedPhysData). The points are the model's own: its farthest vertex along each of 26 directions (the
-		// axes, the face diagonals and the corners), so every point is on the model's hull and the shape follows it (a
-		// sphere-ish model rolls, a wedge rests on its slope) while PhysX gets few points to cook. The export's data,
-		// header to native data.
+		// The mesh's rigid body, a subobject of it as the game's are (BodyGeometry; the native data holds no cooked copy,
+		// like the game's own: an empty PreCachedPhysData). The export's data, header to native data.
 		std::vector<std::byte> BodySetupData(PackageModel& model, Linker& linker, const StaticMesh& mesh, const FName& none,
 											 std::int32_t netIndex)
 		{
-			ReflectionSchema schema(linker);
-			for (const char* name : {"Core", "Engine"})
-				if (const Package* p = linker.find_package(name)) schema.add_package(*p);
-			const auto type = schema.find_property("RB_BodySetup", "AggGeom");
-			if (!type) throw std::runtime_error("RB_BodySetup.AggGeom isn't in the game's Engine package");
-			const std::vector<Vec3> hull = HullPoints(mesh);
-			std::string corners;
-			for (std::size_t i = 0; i < hull.size(); ++i) {
-				char v[128];
-				std::snprintf(v, sizeof v, "%s(X=%.6f,Y=%.6f,Z=%.6f)", i ? "," : "", hull[i].x, hull[i].y, hull[i].z);
-				corners += v;
-			}
-			PropertyParseOptions options;
-			options.make_name = [&](std::string_view s) { return model.make_name(s); };
-			options.resolve_object = [](std::string_view) -> std::optional<ObjectIndex> { return std::nullopt; };
-			options.schema = &schema;
-			Property geometry;
-			geometry.name = "AggGeom";
-			geometry.value = parse_property_value("(ConvexElems=((VertexData=(" + corners + "))))", *type, options);
-			geometry.tag = make_property_tag("AggGeom", 0, *type, options.make_name);
 			BinaryWriter w(model.summary.context());
 			ObjectHeader header;
 			header.net_index = netIndex;
 			ObjectHeaderInput input;
 			input.object_flags = kBodyFlags;
 			write_object_header(w, header, input);
-			write_properties(w, {geometry}, none);
+			write_properties(w, {BodyGeometry(model, linker, mesh)}, none);
 			w.write_i32(0);		// PreCachedPhysData: none
 			return w.take();
 		}
@@ -245,6 +221,31 @@ namespace mirage::models
 			build_kdop(mesh);
 			return mesh;
 		}
+	}
+
+	Property BodyGeometry(PackageModel& model, Linker& linker, const StaticMesh& mesh)
+	{
+		ReflectionSchema schema(linker);
+		for (const char* name : {"Core", "Engine"})
+			if (const Package* p = linker.find_package(name)) schema.add_package(*p);
+		const auto type = schema.find_property("RB_BodySetup", "AggGeom");
+		if (!type) throw std::runtime_error("RB_BodySetup.AggGeom isn't in the game's Engine package");
+		const std::vector<Vec3> hull = HullPoints(mesh);
+		std::string corners;
+		for (std::size_t i = 0; i < hull.size(); ++i) {
+			char v[128];
+			std::snprintf(v, sizeof v, "%s(X=%.6f,Y=%.6f,Z=%.6f)", i ? "," : "", hull[i].x, hull[i].y, hull[i].z);
+			corners += v;
+		}
+		PropertyParseOptions options;
+		options.make_name = [&](std::string_view s) { return model.make_name(s); };
+		options.resolve_object = [](std::string_view) -> std::optional<ObjectIndex> { return std::nullopt; };
+		options.schema = &schema;
+		Property geometry;
+		geometry.name = "AggGeom";
+		geometry.value = parse_property_value("(ConvexElems=((VertexData=(" + corners + "))))", *type, options);
+		geometry.tag = make_property_tag("AggGeom", 0, *type, options.make_name);
+		return geometry;
 	}
 
 	UnrealLib::Assets::StaticMesh MakeStaticMesh(const MeshData& data, const std::string& name, const MaterialFor& material)

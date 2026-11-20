@@ -6873,7 +6873,8 @@ void TestModels()
 // now has Suzanne's size. The engine's world box is the box around the mesh's own box turned with the actor: its
 // half-diagonal is at least the mesh box's (so its largest axis at least that over sqrt(3)) and no axis passes it.
 // The bag's box (25.7, 22.9, 34.4) has a half-diagonal of 48.7; Suzanne's (68.4, 42.6, 49.2), 94.4: a world box whose
-// largest axis is between 54.5 and 94.4 is Suzanne's, and can't be the bag's.
+// largest axis is between 54.5 and 94.4 is Suzanne's, and can't be the bag's. Its rigid body (the bag's RB_BodySetup,
+// kept) has Suzanne's shape: one convex element of her hull points, the farthest more than the bag's half-diagonal out.
 void TestMeshReplacement()
 {
     Step& s = Begin("Mirage mesh replacement");
@@ -6882,11 +6883,25 @@ void TestMeshReplacement()
     const auto st = mirage::textures::GetStatus("model-test");
     for (const auto& problem : st.problems) p.Problem(problem);
     constexpr float kBagDiagonal = 48.7f, kSuzanneDiagonal = 94.4f;
-    int count = 0, suzannes = 0;
-    float other = 0.f, reach = 0.f;
+    int count = 0, suzannes = 0, bodies = 0, suzanneBodies = 0;
+    float other = 0.f, reach = 0.f, bodyReach = 0.f;
+    std::size_t bodyPoints = 0;
     OnGameThread([&] {
+        std::set<Classes::UStaticMesh*> meshes;
         for (auto* c : game::ObjectsOf<Classes::UStaticMeshComponent>()) {
             if (!c->StaticMesh || c->StaticMesh->GetName() != "S_GarbageBag_01" || !c->Owner) continue;
+            if (meshes.insert(c->StaticMesh).second && c->StaticMesh->BodySetup) {
+                ++bodies;
+                auto& convex = c->StaticMesh->BodySetup->AggGeom.ConvexElems;
+                float farthest = 0.f;
+                bodyPoints = convex.Num() == 1 ? convex[0].VertexData.Num() : 0;
+                for (std::size_t i = 0; i < bodyPoints; ++i) {
+                    const auto& v = convex[0].VertexData[i];
+                    farthest = std::max({farthest, std::fabs(v.X), std::fabs(v.Y), std::fabs(v.Z)});
+                }
+                bodyReach = farthest;
+                suzanneBodies += convex.Num() == 1 && bodyPoints >= 4 && bodyPoints <= 26 && farthest > kBagDiagonal;
+            }
             const Classes::AActor* a = c->Owner;
             const float scale = a->DrawScale * std::max({a->DrawScale3D.X, a->DrawScale3D.Y, a->DrawScale3D.Z}) * c->Scale *
                                 std::max({c->Scale3D.X, c->Scale3D.Y, c->Scale3D.Z});
@@ -6901,9 +6916,14 @@ void TestMeshReplacement()
     });
     s.notes.push_back(fmt::format("{} component(s) draw the bag, {} at Suzanne's size (the last reaches {:.1f} on its longest axis: "
                                   "the bag can't pass {:.1f})", count, suzannes, reach, kBagDiagonal));
+    s.notes.push_back(fmt::format("{} bag mesh(es) with a rigid body, {} of Suzanne's shape (the last: {} point(s), the farthest {:.1f} out)",
+                                  bodies, suzanneBodies, bodyPoints, bodyReach));
     if (count == 0) p.Problem("no component in the level draws S_GarbageBag_01 (is the Prologue's art map loaded?)");
     else if (suzannes != count)
         p.Problem(fmt::format("{} of {} garbage bags aren't Suzanne (one reaches {:.1f})", count - suzannes, count, other));
+    if (bodies == 0) p.Problem("no replaced bag mesh has a rigid body");
+    else if (suzanneBodies != bodies)
+        p.Problem(fmt::format("{} of {} replaced bag meshes keep a body that isn't Suzanne's shape", bodies - suzanneBodies, bodies));
     End(s);
 }
 

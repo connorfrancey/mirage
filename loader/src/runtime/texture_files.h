@@ -12,8 +12,10 @@
 //
 // Static meshes are replaced the same way (step 31): maps hold copies of them too, and a replacement is a mod's model
 // file (glTF, FBX or OBJ) converted by `mirage model <file> --convert` (runtime/mesh_file.h), written in place of every
-// copy (runtime/model_files.h's layout), keeping the original's materials (section by section), its RB_BodySetup and
-// its properties, with UseSimpleLineCollision and UseSimpleBoxCollision off: the player collides with the new triangles.
+// copy (runtime/model_files.h's layout), keeping the original's materials (section by section) and its properties,
+// with UseSimpleLineCollision and UseSimpleBoxCollision off: the player collides with the new triangles. Its
+// RB_BodySetup subobject stays, its properties too, but its shape becomes the model's (models::BodyGeometry; no cooked
+// copy, PhysX cooks it when a body is made), so physics props of it are the new shape.
 
 #include <UnrealLib/Assets/Texture.hpp>
 

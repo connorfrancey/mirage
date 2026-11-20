@@ -1601,7 +1601,7 @@ Suzanne): built in 0.35 s, in play at twice her size, and the player dropped on 
 mesh's own triangles collide). Mesh replacement: a content mod's `meshes/<Package.Group.Name>.glb` (converted the
 same way) replaces that StaticMesh in every package holding a copy, through step 7's rewritten copies (the index now
 lists static meshes too; runtime/texture_files' BuildOverlay writes the model laid out as above, keeping the original's
-materials section by section, its RB_BodySetup and properties, with UseSimpleLineCollision and UseSimpleBoxCollision
+materials section by section, its RB_BodySetup (given the model's shape, below) and properties, with UseSimpleLineCollision and UseSimpleBoxCollision
 off). Self-test "Mirage mesh replacement": the Prologue's garbage bag (P_Waste.GarbageBag_01.S_GarbageBag_01, 123
 packages) is Suzanne in all 9 places the level draws it. A new mesh has a rigid body too: an RB_BodySetup subobject
 with one convex element, the model's farthest vertex along each of 26 directions (all on its hull, at most 26 points;
@@ -1613,8 +1613,10 @@ characters' lit generic material, a standalone package the game loads on demand,
 masters are used by no map, so theirs may not be) with it as "Diffuse Texture", both in the model's package. Sides
 must be powers of two. In "Mirage models" a crate (tests/mods/model-test/models/crate.obj, its .mtl naming a blue PNG)
 shows its MaterialInstanceConstant and texture, and turned to face it the frame is blue (the probe reads below the
-middle: the game's white reticle dot is there). Next: a
-replaced mesh's own body (it keeps the original's RB_BodySetup); normal and specular maps (the parent takes both).
+middle: the game's white reticle dot is there). A replaced
+mesh's body is the model's shape too: the original's RB_BodySetup subobject keeps its properties but its AggGeom
+becomes the model's hull points (no cooked copy); in "Mirage mesh replacement" the bag's loaded body is one convex
+element of 20 points reaching 68.4 (the bag's can't pass 48.7). Next: normal and specular maps (the parent takes both).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.

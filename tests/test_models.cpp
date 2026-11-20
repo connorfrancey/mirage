@@ -313,6 +313,29 @@ TEST(Models, ReplacesAMeshInAMapPackage)
     EXPECT_EQ(after.body_setup.value, before.body_setup.value);
     EXPECT_EQ(after.properties.get_bool("UseSimpleLineCollision"), std::optional<bool>(false));
     EXPECT_EQ(after.properties.get_bool("UseSimpleBoxCollision"), std::optional<bool>(false));
+    // Its rigid body, the same subobject, has the model's shape: the cube's 8 corners, no cooked copy of the bag's
+    const auto body = [&](const fs::path& file) {
+        Linker linker;
+        linker.add_search_path(cooked, true);
+        const Package& p = linker.load(file);
+        ReflectionSchema schema(linker);
+        for (const char* name : {"Core", "Engine"})
+            if (const Package* s = linker.find_package(name)) schema.add_package(*s);
+        const ObjectIndex index = read_static_mesh(linker, {&p, *p.find_export("P_Waste.GarbageBag_01.S_GarbageBag_01")}).body_setup;
+        const ObjectProperties props = linker.read_properties({&p, index}, &schema);
+        const Property* geometry = find_property(props.properties, "AggGeom");
+        PropertyFormatOptions fo;
+        fo.names = &p.names();
+        return std::pair{geometry ? format_property_value(geometry->value, fo) : std::string(),
+                         p.export_data(index.export_index()).size() - props.end_offset};
+    };
+    const auto [shape, native] = body(copy);
+    std::size_t points = 0;
+    for (std::size_t at = shape.find("(X="); at != std::string::npos; at = shape.find("(X=", at + 1)) ++points;
+    EXPECT_EQ(points, 8u) << shape;
+    EXPECT_NE(shape.find("(X=50.0,Y=50.0,Z=50.0)"), std::string::npos) << shape;
+    EXPECT_EQ(native, 4u);      // PreCachedPhysData: an empty array
+    EXPECT_NE(body(map).first, shape);
 
     // A stale conversion: refused with the reason
     std::ofstream(model, std::ios::app) << "# edited after converting\n";

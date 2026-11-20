@@ -451,6 +451,7 @@ namespace mirage::textures
 			Encoded encoded;
 			PixelFormat original = PixelFormat::Unknown;
 			std::shared_ptr<Assets::StaticMesh> mesh;		// A mesh's replacement (else a texture's)
+			std::shared_ptr<Assets::StaticMesh> bodyOf;		// A replaced mesh's RB_BodySetup, given this mesh's shape
 			std::string path;
 		};
 		std::vector<Edit> edits;
@@ -502,7 +503,21 @@ namespace mirage::textures
 					e.propertiesEnd = op.end_offset;
 					e.oldNative = pkg.export_data(i).size() - op.end_offset;
 					e.properties = std::move(op.properties);
-					e.mesh = std::move(mesh);
+					e.mesh = mesh;
+					// Its rigid body (the original's RB_BodySetup subobject, kept for its properties) takes the model's shape
+					if (original.body_setup.is_export() && pkg.class_name(original.body_setup) == "RB_BodySetup") {
+						const std::size_t b = original.body_setup.export_index();
+						ObjectProperties bp = linker.read_properties(ObjectRef{&pkg, original.body_setup});
+						Edit body;
+						body.index = original.body_setup;
+						body.path = path + ".body";
+						body.propertiesOffset = bp.header.properties_offset;
+						body.propertiesEnd = bp.end_offset;
+						body.oldNative = pkg.export_data(b).size() - bp.end_offset;
+						body.properties = std::move(bp.properties);
+						body.bodyOf = mesh;
+						edits.push_back(std::move(body));
+					}
 					edits.push_back(std::move(e));
 				} catch (const std::exception& ex) {
 					result.problems.push_back(path + ": " + ex.what());
@@ -531,9 +546,21 @@ namespace mirage::textures
 
 		PackageModel model = PackageModel::from_package(pkg);
 		const auto native = [&](const Edit& e, std::uint64_t base) {
+			if (e.bodyOf) return std::vector<std::byte>(4);		// PreCachedPhysData: none (PhysX cooks the new shape)
 			return e.mesh ? Assets::write_static_mesh(*e.mesh, ctx, base) : NativeData(ctx, e.sourceArt, e.encoded, base);
 		};
 		for (Edit& e : edits) {
+			if (e.bodyOf) {
+				std::erase_if(e.properties, [](const Property& p) { return Lower(p.name) == "agggeom"; });
+				e.properties.push_back(models::BodyGeometry(model, linker, *e.bodyOf));
+				replace_properties(model, e.index, e.propertiesOffset, e.propertiesEnd, e.properties);
+				auto& data = model.export_data[e.index.export_index()];
+				e.nativeStart = data.size() - e.oldNative;
+				data.resize(e.nativeStart);
+				const auto bytes = native(e, 0);
+				data.insert(data.end(), bytes.begin(), bytes.end());
+				continue;
+			}
 			if (e.mesh) {
 				// The new triangles are the collision, not the original's simple shapes
 				SetBool(e.properties, model, "UseSimpleLineCollision", false);
@@ -582,7 +609,8 @@ namespace mirage::textures
 		// The package flag says how it is stored, apart from the chunk table: the engine trusts it
 		if (options.compression == CompressionMethod::None) model.summary.package_flags &= ~PackageFlag::Compressed;
 		result.bytes = write_package(model, options);
-		for (const Edit& e : edits) result.replaced.push_back(e.path);
+		for (const Edit& e : edits)
+			if (!e.bodyOf) result.replaced.push_back(e.path);
 		return result;
 	}
 }
