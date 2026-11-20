@@ -10,6 +10,26 @@ public sealed class GameplayCs : Mod
     {
         On(GameEvent.Action, e => _actions++);      // The API is there; the key isn't pressed by the test
         Test("gameplay from C#", Run);
+        Test("vector math (Vec3, Mathf)", VectorMath);
+    }
+
+    // Vec3 and Mathf (managed/Mirage/Mathf.cs): null when they hold
+    private static string? VectorMath()
+    {
+        var v = new Vec3(1, 2, 3);
+        if (v + new Vec3(1) != new Vec3(2, 3, 4)) return "+";
+        if (v - v != Vec3.Zero || -v != new Vec3(-1, -2, -3)) return "-";
+        if (v * 2 != 2 * v || v * 2 != new Vec3(2, 4, 6) || v * v != new Vec3(1, 4, 9) || v / 2 != new Vec3(0.5f, 1, 1.5f)) return "* /";
+        var w = new Vec3(3, 4, 0);
+        if (w.Length != 5 || w.LengthSquared != 25 || w.Normalized != new Vec3(0.6f, 0.8f, 0) || Vec3.Zero.Normalized != Vec3.Zero) return "length";
+        if (w.Dot(Vec3.One) != 7 || Vec3.Forward.Cross(Vec3.Right) != Vec3.Up || w.Distance(Vec3.Zero) != 5) return "dot, cross, distance";
+        if (w.Lerp(Vec3.Zero, 0.5f) != new Vec3(1.5f, 2, 0)) return "lerp";
+        var (x, y, z) = v;
+        if (x != 1 || y != 2 || z != 3 || v.ToString() != "(1, 2, 3)") return "deconstruct, ToString: " + v;
+        var f = Vec3.FromRotation(0, Mathf.DegreesToUnreal(90));
+        if (!Mathf.Approximately(f.Y, 1) || MathF.Abs(f.X) > 1e-6f) return "FromRotation: " + f;
+        if (Mathf.Clamp(5, 0, 1) != 1 || Mathf.InverseLerp(10, 20, 15) != 0.5f || Mathf.UnrealToDegrees(16384) != 90) return "Mathf";
+        return null;
     }
 
     private string? Run()

@@ -737,8 +737,6 @@ namespace Mirage
 
 namespace Mirage
 {
-    /// <summary>A vector in Unreal units</summary>
-    public readonly record struct Vec3(float X, float Y, float Z);
 
     /// <summary>A rigid body's state (<see cref="Mod.Body"/>)</summary>
     public readonly record struct Body(Vec3 Location, int Pitch, int Yaw, int Roll, Vec3 Velocity, Vec3 Angular,
