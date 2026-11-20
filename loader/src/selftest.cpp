@@ -24,6 +24,7 @@
 #include "runtime/engine_calls.h"
 #include "runtime/fhooks.h"
 #include "runtime/file_redirect.h"
+#include "runtime/model_files.h"
 #include "runtime/texture_overlays.h"
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
@@ -6672,18 +6673,30 @@ void TestModels()
     monkey.cls = "Engine.DynamicSMActor_Spawnable";
     monkey.scale = 2.f;
     monkey.mesh = "model-test:models/suzanne.glb";
+    // A model with its own texture (crate.obj, whose crate.mtl gives it crate.png: blue inside a white border), a
+    // cube 200 units on a side at the player's left, its middle at eye height
+    mirage::layers::EditActor crate;
+    crate.name = "Crate";
+    crate.cls = "Engine.DynamicSMActor_Spawnable";
+    crate.scale = 2.f;
+    crate.mesh = "model-test:models/crate.obj";
     std::string map, error;
     Classes::FVector home{};
+    int yaw = 0;
     OnGameThread([&] {
         map = mirage::layers::CurrentMap();
         if (auto* pawn = game::Pawn()) {
             home = pawn->Location;
-            const float rad = static_cast<float>(pawn->Rotation.Yaw & 0xFFFF) * 6.2831853f / 65536.f;
+            yaw = pawn->Rotation.Yaw & 0xFFFF;
+            const float rad = static_cast<float>(yaw) * 6.2831853f / 65536.f;
             monkey.location[0] = pawn->Location.X + std::cos(rad) * 400.f;
             monkey.location[1] = pawn->Location.Y + std::sin(rad) * 400.f;
             monkey.location[2] = pawn->Location.Z;
+            crate.location[0] = pawn->Location.X + std::sin(rad) * 300.f;		// A quarter turn left
+            crate.location[1] = pawn->Location.Y - std::cos(rad) * 300.f;
+            crate.location[2] = pawn->Location.Z + pawn->BaseEyeHeight;
         }
-        mirage::layers::Write("profile-lua", {monkey}, &error);
+        mirage::layers::Write("profile-lua", {monkey, crate}, &error);
     });
     Classes::AActor* actor = nullptr;
     std::string meshName;
@@ -6710,6 +6723,77 @@ void TestModels()
     });
     s.notes.push_back(fmt::format("the layer's Suzanne: {} after {:.1f} s, mesh '{}', top at {:.0f} ({:.0f} above the player's middle)",
                                   actor ? "in play" : "not in play", GameSeconds() - t0, meshName, top, top - home.Z));
+
+    // The crate's section shows its own texture: its material is the MaterialInstanceConstant its package holds, of the
+    // game's lit character material, with the crate's texture as its diffuse; turned to face it, the view is the
+    // crate's blue, not the default material's grey
+    Classes::AActor* crateActor = nullptr;
+    std::string crateMaterial, crateParent, crateTexture;
+    WaitFor(30.0, [&] {
+        OnGameThread([&] {
+            auto* a = mirage::layers::Find("profile-lua", crate.name);
+            if (!a || !a->IsA(Classes::ADynamicSMActor::StaticClass())) return;
+            auto* c = static_cast<Classes::ADynamicSMActor*>(a)->StaticMeshComponent;
+            if (!c || !c->StaticMesh) return;
+            crateActor = a;
+            mirage::call::Params get(c, "GetMaterial");
+            get.Set("ElementIndex", std::int32_t{0});
+            if (!get.Valid() || !mirage::call::Call(c, get)) return;
+            Classes::UObject* m = nullptr;      // GetRaw: windows.h renames GetObject here
+            get.GetRaw("ReturnValue", &m, sizeof m);
+            if (!m) return;
+            crateMaterial = m->GetName();
+            if (!m->IsA(Classes::UMaterialInstanceConstant::StaticClass())) return;
+            auto* mic = static_cast<Classes::UMaterialInstanceConstant*>(m);
+            if (mic->Parent) crateParent = mic->Parent->GetFullName();
+            for (std::size_t i = 0; i < mic->TextureParameterValues.Num(); ++i) {
+                const auto& v = mic->TextureParameterValues[i];
+                if (v.ParameterName.GetName() == mirage::models::kTexturedParameter && v.ParameterValue) crateTexture = v.ParameterValue->GetName();
+            }
+        });
+        return crateActor != nullptr;
+    });
+    std::uint32_t centre = 0;
+    if (crateActor) {
+        int yawWas = 0, pitchWas = 0;
+        OnGameThread([&] {
+            if (auto* pc = game::Controller()) {
+                yawWas = pc->Rotation.Yaw;
+                pitchWas = pc->Rotation.Pitch;
+                pc->Rotation.Yaw = (yaw - 16384) & 0xFFFF;
+                pc->Rotation.Pitch = 0;
+            }
+        });
+        // The camera turns over a few frames: wait until the view it renders faces the crate, then a frame more
+        const int want = (yaw - 16384) & 0xFFFF;
+        WaitFor(3.0, [&] {
+            bool facing = false;
+            OnGameThread([&] {
+                auto* pc = game::Controller();
+                if (!pc || !pc->PlayerCamera) return;
+                const auto& r = pc->PlayerCamera->CameraCache.POV.Rotation;
+                const int off = std::abs(((r.Yaw - want) & 0xFFFF) > 32768 ? ((r.Yaw - want) & 0xFFFF) - 65536 : (r.Yaw - want) & 0xFFFF);
+                const int pitch = std::abs((r.Pitch & 0xFFFF) > 32768 ? (r.Pitch & 0xFFFF) - 65536 : r.Pitch & 0xFFFF);
+                facing = off < 600 && pitch < 1500;
+            });
+            return facing;
+        });
+        WaitTicks(3);
+        postfx::Probe(0.5f, 0.6f);      // Below the middle: the game's reticle dot is in it
+        WaitFor(3.0, [&] { return postfx::ProbeResult(&centre); });
+        OnGameThread([&] { if (auto* pc = game::Controller()) { pc->Rotation.Yaw = yawWas; pc->Rotation.Pitch = pitchWas; } });
+    }
+    const int cr = (centre >> 16) & 0xFF, cg = (centre >> 8) & 0xFF, cb = centre & 0xFF;
+    s.notes.push_back(fmt::format("the crate: {}, material '{}' of '{}', diffuse '{}'; the view facing it (below its middle) {} {} {}",
+                                  crateActor ? "in play" : "not in play", crateMaterial, crateParent, crateTexture, cr, cg, cb));
+    if (!crateActor) p.Problem("the textured model didn't come into play: " + (error.empty() ? std::string("the log says why") : error));
+    else {
+        if (crateMaterial != "crate_Material_0") p.Problem("the crate's material is '" + crateMaterial + "', not its own crate_Material_0");
+        if (crateParent.find(mirage::models::kTexturedParent) == std::string::npos)
+            p.Problem("the crate's material instance's parent is '" + crateParent + "', not " + mirage::models::kTexturedParent);
+        if (crateTexture != "crate_Texture_0") p.Problem("the crate's material shows '" + crateTexture + "', not its texture crate_Texture_0");
+        if (!(cb > cr + 40 && cb > cg + 20)) p.Problem(fmt::format("the crate in view isn't blue ({} {} {})", cr, cg, cb));
+    }
     if (!actor) p.Problem("the layer's model didn't come into play: " + (error.empty() ? std::string("the log says why") : error));
     else {
         if (meshName != "suzanne") p.Problem("the actor's mesh is '" + meshName + "', not suzanne");

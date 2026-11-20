@@ -314,8 +314,17 @@ namespace mirage::textures
 
 	Encoded LoadReplacement(const fs::path& file, PixelFormat target)
 	{
-		const std::vector<std::byte> bytes = ReadFile(file);
-		if (Lower(file.extension().string()) == ".dds") return ParseDds(bytes);
+		return EncodeImage(ReadFile(file), Lower(file.extension().string()) == ".dds", target);
+	}
+
+	std::vector<std::byte> TextureData(const SerializationContext& ctx, const Encoded& encoded, std::uint64_t base)
+	{
+		return NativeData(ctx, {}, encoded, base);
+	}
+
+	Encoded EncodeImage(const std::vector<std::byte>& bytes, bool dds, PixelFormat target)
+	{
+		if (dds) return ParseDds(bytes);
 		int w = 0, h = 0, comp = 0;
 		stbi_uc* rgba = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()),
 											  &w, &h, &comp, 4);

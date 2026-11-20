@@ -44,8 +44,8 @@ int main(int argc, char** argv)
 			std::fprintf(stderr, "mirage_model: not converted: %s\n", error.c_str());
 			return 2;
 		}
-		std::printf("converted: %s (%u vertices, %u triangles, %u section(s), %g game units a file unit)\n", out.c_str(), stats.vertices,
-					stats.triangles, stats.sections, scale);
+		std::printf("converted: %s (%u vertices, %u triangles, %u section(s), %u textured, %g game units a file unit)\n", out.c_str(), stats.vertices,
+					stats.triangles, stats.sections, stats.textures, scale);
 	}
 	return strict && !r.problems.empty() ? 1 : 0;
 }

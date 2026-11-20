@@ -1,6 +1,8 @@
 // A converted model built into a package holding one StaticMesh (model_files.h)
 #include "runtime/model_files.h"
 
+#include "runtime/texture_files.h"
+
 #include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Linker/Linker.hpp>
 #include <UnrealLib/Linker/ReflectionSchema.hpp>
@@ -251,17 +253,11 @@ namespace mirage::models
 			const FName none = model.make_name("None");
 			(void)model.make_name(packageName);
 			const ObjectIndex meshClass = ImportPath(model, "Engine.StaticMesh", "Core", "Class");
+			ReflectionSchema schema(linker);
+			for (const char* name : {"Core", "Engine"})
+				if (const Package* p = linker.find_package(name)) schema.add_package(*p);
 
-			// Each section's material: the game material its file names, else the default
-			StaticMesh mesh = MakeStaticMesh(data, meshName, [&](std::size_t, const std::string& name) {
-				std::string material = name, cls = MaterialClass(linker, material);
-				if (cls.empty()) {
-					material = defaultMaterial;
-					cls = MaterialClass(linker, material);
-					if (cls.empty()) cls = "Material";
-				}
-				return ImportPath(model, material, "Engine", cls);
-			});
+			// The exports: the mesh first, its body, then each textured section's texture and material instance
 			ExportEntry e;
 			e.class_index = meshClass;
 			e.object_name = model.make_name(meshName);
@@ -273,33 +269,122 @@ namespace mirage::models
 			body.object_name = model.make_name("RB_BodySetup_0");
 			body.object_flags = kBodyFlags;
 			const ObjectIndex bodyIndex = model.add_export(std::move(body), {});
-			model.export_data[bodyIndex.export_index()] = BodySetupData(model, linker, mesh, none, 1);
-			mesh.body_setup = bodyIndex;
-			model.summary.generations.back().net_object_count = 2;
-			// The player and traces collide with the triangles (the kDOP tree), rigid bodies with the body's shape
-			const std::vector<Property> properties = {BoolProperty(model, "UseSimpleLineCollision", false),
-													  BoolProperty(model, "UseSimpleBoxCollision", false),
-													  BoolProperty(model, "UseSimpleRigidBodyCollision", true)};
-			const SerializationContext ctx = model.summary.context();
-			// Inline bulk data stores its package offset: written once to learn where the export lands, then again
-			std::vector<std::byte> bytes;
-			std::uint64_t base = 0;
-			for (int pass = 0; pass < 2; ++pass) {
-				BinaryWriter w(ctx);
+
+			// A section the file gives no game material but a texture of its own: a MaterialInstanceConstant of a
+			// lit game material (kTexturedParent) with that texture as its diffuse
+			struct Textured
+			{
+				ObjectIndex texture, material;
+				textures::Encoded encoded;
+				std::size_t header = 0;		// The texture export's bytes before its native data
+			};
+			std::map<std::size_t, Textured> textured;
+			std::map<std::string, ObjectIndex, std::less<>> refs;		// The object texts the properties below name
+			PropertyParseOptions options;
+			options.make_name = [&](std::string_view text) { return model.make_name(text); };
+			options.resolve_object = [&](std::string_view text) -> std::optional<ObjectIndex> {
+				const auto it = refs.find(text);
+				return it == refs.end() ? std::nullopt : std::optional<ObjectIndex>(it->second);
+			};
+			options.schema = &schema;
+			const auto property = [&](const char* owner, const char* name, const std::string& text) {
+				const auto type = schema.find_property(owner, name);
+				if (!type) throw std::runtime_error(std::string(owner) + "." + name + " isn't in the game's Engine package");
+				Property p;
+				p.name = name;
+				p.value = parse_property_value(text, *type, options);
+				p.tag = make_property_tag(name, 0, *type, options.make_name);
+				return p;
+			};
+			const auto exportData = [&](const std::vector<Property>& properties) {
+				BinaryWriter w(model.summary.context());
 				ObjectHeader header;
 				header.net_index = 0;		// Cooked packages: the export's index
 				ObjectHeaderInput input;
 				input.object_flags = kMeshFlags;
 				write_object_header(w, header, input);
 				write_properties(w, properties, none);
-				const std::size_t native = w.size();
-				const std::vector<std::byte> payload = write_static_mesh(mesh, ctx, base + native);
-				w.write_bytes(payload);
-				model.export_data[index.export_index()] = w.take();
+				return w.take();
+			};
+			for (std::size_t s = 0; s < data.sections.size(); ++s) {
+				const MeshSection& section = data.sections[s];
+				if (section.image.empty() || !MaterialClass(linker, section.material).empty()) continue;
+				if (MaterialClass(linker, kTexturedParent).empty())
+					throw std::runtime_error(std::string("the game material textured models use, ") + kTexturedParent + ", wasn't found");
+				Textured t;
+				try {
+					const auto* image = reinterpret_cast<const std::byte*>(section.image.data());
+					const bool dds = section.image.compare(0, 4, "DDS ") == 0;
+					t.encoded = textures::EncodeImage(std::vector<std::byte>(image, image + section.image.size()), dds, PixelFormat::DXT1);
+				} catch (const std::exception& ex) {
+					throw std::runtime_error("material " + std::to_string(s) + " ('" + section.material + "')'s texture: " + ex.what());
+				}
+				const std::string suffix = "_" + std::to_string(s), textureName = meshName + "_Texture" + suffix;
+				ExportEntry tex;
+				tex.class_index = ImportPath(model, "Engine.Texture2D", "Core", "Class");
+				tex.object_name = model.make_name(textureName);
+				tex.object_flags = kMeshFlags;
+				t.texture = model.add_export(std::move(tex), {});
+				const textures::Mip& top = t.encoded.mips.front();
+				auto& texData = model.export_data[t.texture.export_index()];
+				texData = exportData({property("Texture2D", "SizeX", std::to_string(top.width)),
+									  property("Texture2D", "SizeY", std::to_string(top.height)),
+									  property("Texture2D", "Format", std::string(to_string(t.encoded.format))),
+									  property("Texture2D", "MipTailBaseIdx", std::to_string(t.encoded.mips.size() - 1)),
+									  property("Texture2D", "NeverStream", "True")});
+				t.header = texData.size();
+				ExportEntry mic;
+				mic.class_index = ImportPath(model, "Engine.MaterialInstanceConstant", "Core", "Class");
+				mic.object_name = model.make_name(meshName + "_Material" + suffix);
+				mic.object_flags = kMeshFlags;
+				t.material = model.add_export(std::move(mic), {});
+				const std::string parentText = std::string("Material'") + kTexturedParent + "'", textureText = "Texture2D'" + textureName + "'";
+				refs[parentText] = ImportPath(model, kTexturedParent, "Engine", "Material");
+				refs[textureText] = t.texture;
+				model.export_data[t.material.export_index()] = exportData(
+					{property("MaterialInstanceConstant", "Parent", parentText),
+					 property("MaterialInstanceConstant", "TextureParameterValues",
+							  std::string("((ParameterName=\"") + kTexturedParameter + "\",ParameterValue=" + textureText + "))")});
+				textured[s] = std::move(t);
+			}
+
+			// Each section's material: the game material its file names, else its own texture's, else the default
+			StaticMesh mesh = MakeStaticMesh(data, meshName, [&](std::size_t s, const std::string& name) {
+				if (const auto it = textured.find(s); it != textured.end()) return it->second.material;
+				std::string material = name, cls = MaterialClass(linker, material);
+				if (cls.empty()) {
+					material = defaultMaterial;
+					cls = MaterialClass(linker, material);
+					if (cls.empty()) cls = "Material";
+				}
+				return ImportPath(model, material, "Engine", cls);
+			});
+			model.export_data[bodyIndex.export_index()] = BodySetupData(model, linker, mesh, none, 1);
+			mesh.body_setup = bodyIndex;
+			model.summary.generations.back().net_object_count = static_cast<std::int32_t>(model.exports.size());
+			// The player and traces collide with the triangles (the kDOP tree), rigid bodies with the body's shape
+			const std::vector<std::byte> meshHeader = exportData({BoolProperty(model, "UseSimpleLineCollision", false),
+																  BoolProperty(model, "UseSimpleBoxCollision", false),
+																  BoolProperty(model, "UseSimpleRigidBodyCollision", true)});
+			const SerializationContext ctx = model.summary.context();
+			// Inline bulk data stores its package offset: written once to learn where each export lands, then again
+			std::vector<std::byte> bytes;
+			std::vector<std::uint64_t> bases(model.exports.size(), 0);
+			for (int pass = 0; pass < 2; ++pass) {
+				auto& meshData = model.export_data[index.export_index()];
+				meshData = meshHeader;
+				const std::vector<std::byte> payload = write_static_mesh(mesh, ctx, bases[index.export_index()] + meshHeader.size());
+				meshData.insert(meshData.end(), payload.begin(), payload.end());
+				for (const auto& [s, t] : textured) {
+					auto& texData = model.export_data[t.texture.export_index()];
+					texData.resize(t.header);
+					const std::vector<std::byte> native = textures::TextureData(ctx, t.encoded, bases[t.texture.export_index()] + t.header);
+					texData.insert(texData.end(), native.begin(), native.end());
+				}
 				bytes = write_package(model);
 				Package check;
 				check.load_from_memory(std::vector<std::byte>(bytes), packageName);
-				base = static_cast<std::uint64_t>(check.exports()[0].serial_offset);
+				for (std::size_t i = 0; i < bases.size(); ++i) bases[i] = static_cast<std::uint64_t>(check.exports()[i].serial_offset);
 			}
 			std::error_code ec;
 			std::filesystem::create_directories(out.parent_path(), ec);

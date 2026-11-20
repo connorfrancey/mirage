@@ -9,7 +9,9 @@
 // a kDOP collision tree over all its triangles (UnrealLib's build_kdop), so the player and traces collide with the
 // triangles themselves (UseSimpleLineCollision and UseSimpleBoxCollision off). A new mesh also gets an RB_BodySetup
 // for rigid bodies (physics props): a convex box around it, cooked by PhysX when a body is made. Each section's
-// material is a game material named by the file's material name ("Package.Name"), else `defaultMaterial`.
+// material is a game material named by the file's material name ("Package.Name"); else, if the file gives the section
+// a texture, a MaterialInstanceConstant of kTexturedParent with that texture (DXT1, every mip inline) as its
+// kTexturedParameter, both written into the package; else `defaultMaterial`.
 
 #include "runtime/mesh_file.h"
 
@@ -28,6 +30,10 @@ namespace mirage::models
 {
 	// The game material every section without one of the game's gets
 	inline constexpr const char* kDefaultMaterial = "EngineMaterials.DefaultMaterial";
+	// The lit game material a section's own texture is shown with, and its diffuse texture parameter: the characters'
+	// generic material (diffuse, specular and normal textures; a standalone package the game loads on demand)
+	inline constexpr const char* kTexturedParent = "CH_Materials.M_Generic_Diff_Spec_Norm";
+	inline constexpr const char* kTexturedParameter = "Diffuse Texture";
 
 	// The ObjectIndex (in the package being written) of section `index`'s material; `name` is the file's material name
 	using MaterialFor = std::function<UnrealLib::ObjectIndex(std::size_t index, const std::string& name)>;
@@ -37,9 +43,10 @@ namespace mirage::models
 	// mesh keeping the original's). Throws std::runtime_error for no triangles or more than 32,767 vertices.
 	UnrealLib::Assets::StaticMesh MakeStaticMesh(const MeshData& mesh, const std::string& name, const MaterialFor& material);
 
-	// `mesh` as package `packageName` (the file's stem) holding the StaticMesh `meshName`, written to `out`. `linker`
-	// has the game's packages (the summary to copy, the materials). False and `error` if it can't be built (more than
-	// 32,767 vertices: the game's 16-bit index buffers also hold the shadow copies).
+	// `mesh` as package `packageName` (the file's stem) holding the StaticMesh `meshName` (and its sections' textures
+	// and material instances), written to `out`. `linker` has the game's packages (the summary to copy, the materials).
+	// False and `error` if it can't be built (more than 32,767 vertices: the game's 16-bit index buffers also hold the
+	// shadow copies; a texture that isn't an image stb reads, or whose sides aren't powers of two).
 	bool BuildPackage(UnrealLib::Linker& linker, const MeshData& mesh, const std::string& meshName, const std::filesystem::path& out,
 					  std::string* error = nullptr, const std::string& defaultMaterial = kDefaultMaterial);
 }

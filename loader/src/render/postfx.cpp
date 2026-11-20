@@ -7,6 +7,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <map>
@@ -39,6 +40,7 @@ namespace postfx
 		IDirect3DSurface9* g_probeCopy = nullptr;
 		std::atomic<bool> g_probeWanted{false}, g_probeDone{false};
 		std::atomic<std::uint32_t> g_probeColor{0};
+		std::atomic<float> g_probeX{0.5f}, g_probeY{0.5f};
 		Stats g_stats;
 
 		using CompileFn = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, LPCSTR, LPCSTR, UINT, UINT,
@@ -102,8 +104,9 @@ namespace postfx
 				FAILED(dev->CreateRenderTarget(1, 1, desc.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &g_probeTarget, nullptr)))
 				return;
 			if (!g_probeCopy && FAILED(dev->CreateOffscreenPlainSurface(1, 1, desc.Format, D3DPOOL_SYSTEMMEM, &g_probeCopy, nullptr))) return;
-			const RECT centre{static_cast<LONG>(desc.Width / 2), static_cast<LONG>(desc.Height / 2), static_cast<LONG>(desc.Width / 2 + 1),
-							  static_cast<LONG>(desc.Height / 2 + 1)};
+			const LONG x = std::clamp(static_cast<LONG>(g_probeX.load() * static_cast<float>(desc.Width)), 0L, static_cast<LONG>(desc.Width) - 1);
+			const LONG y = std::clamp(static_cast<LONG>(g_probeY.load() * static_cast<float>(desc.Height)), 0L, static_cast<LONG>(desc.Height) - 1);
+			const RECT centre{x, y, x + 1, y + 1};
 			if (FAILED(dev->StretchRect(back, &centre, g_probeTarget, nullptr, D3DTEXF_NONE))) return;
 			if (FAILED(dev->GetRenderTargetData(g_probeTarget, g_probeCopy))) return;
 			D3DLOCKED_RECT lr{};
@@ -272,8 +275,10 @@ namespace postfx
 		return g_stats;
 	}
 
-	void Probe()
+	void Probe(float x, float y)
 	{
+		g_probeX = x;
+		g_probeY = y;
 		g_probeDone = false;
 		g_probeWanted = true;
 	}

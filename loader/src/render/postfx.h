@@ -42,8 +42,8 @@ namespace postfx
 		unsigned long long frames = 0;
 	};
 	Stats GetStats();
-	// For the self-test: the back buffer's centre pixel after the next frame's effects, as 0xAARRGGBB (before the menu
+	// For the self-test: a pixel of the back buffer after the next frame's effects, as 0xAARRGGBB (before the menu
 	// draws). Probe() asks for it; ProbeResult() is true once it came.
-	void Probe();
+	void Probe(float x = 0.5f, float y = 0.5f);		// Where, as fractions of the frame (the middle by default)
 	bool ProbeResult(std::uint32_t* argb);
 }

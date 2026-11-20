@@ -1,6 +1,7 @@
 # Self-test (step 31, "Mirage models"): a mod's model in the game. models/suzanne.glb is Blender's Suzanne, exported
 # from Blender 5.3 (glTF); models/suzanne.glb.mmesh is it converted (`mirage model models/suzanne.glb --convert`). The
-# self-test writes a level layer placing it and stands the player on it. content/meshes/ replaces the Prologue's garbage
+# self-test writes a level layer placing it and stands the player on it, and models/crate.obj beside it (its crate.mtl
+# gives it crate.png, blue inside a white border: a model's own texture as its material). content/meshes/ replaces the Prologue's garbage
 # bag (P_Waste.GarbageBag_01.S_GarbageBag_01) with her too (step 31's mesh replacement, "Mirage mesh replacement").
 id = "model-test"
 version = "1.0.0"

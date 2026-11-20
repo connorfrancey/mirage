@@ -6,10 +6,11 @@
 // Already in the game's space: Unreal units, Z up, left-handed (the file's Y and Z swapped, which also makes the front
 // faces clockwise, as Unreal draws them), UVs with V down. Little-endian:
 //
-//   "MMSH" u32 version (1)
+//   "MMSH" u32 version (2)
 //   u32 source hash (HashBytes of the model file it was converted from: a changed model is converted again)
 //   u32 vertices, u32 indices (3 a triangle), u32 sections
-//   per section: u32 first index, u32 triangles, u16 material name length, the name (UTF-8)
+//   per section: u32 first index, u32 triangles, u16 material name length, the name (UTF-8), u32 image size, the image
+//     (the file's diffuse or base-color texture as stored: PNG, JPEG, ...; size 0 for none)
 //   per vertex: f32 position[3], f32 normal[3], f32 tangent[4] (w: the binormal's sign, +1 or -1), f32 uv[2]
 //   u32 index[indices]
 
@@ -29,6 +30,7 @@ namespace mirage::models
 	{
 		std::uint32_t firstIndex = 0, triangles = 0;
 		std::string material;		// The file's material name ("" if none)
+		std::string image;			// Its diffuse texture's file bytes (PNG, JPEG, ...; empty if none)
 	};
 	struct MeshData
 	{
@@ -38,7 +40,7 @@ namespace mirage::models
 		std::vector<MeshSection> sections;
 	};
 
-	inline constexpr std::uint32_t kMeshFileVersion = 1;
+	inline constexpr std::uint32_t kMeshFileVersion = 2;
 
 	// FNV-1a
 	inline std::uint32_t HashBytes(const std::string& bytes)
@@ -75,6 +77,8 @@ namespace mirage::models
 			const auto n = static_cast<std::uint16_t>(s.material.size() > 0xFFFF ? 0xFFFF : s.material.size());
 			out.write(reinterpret_cast<const char*>(&n), 2);
 			out.write(s.material.data(), n);
+			u32(static_cast<std::uint32_t>(s.image.size()));
+			out.write(s.image.data(), static_cast<std::streamsize>(s.image.size()));
 		}
 		static_assert(sizeof(MeshVertex) == 48);
 		out.write(reinterpret_cast<const char*>(m.vertices.data()), static_cast<std::streamsize>(m.vertices.size() * sizeof(MeshVertex)));
@@ -117,6 +121,10 @@ namespace mirage::models
 			if (!take(&s.firstIndex, 4) || !take(&s.triangles, 4) || !take(&n, 2)) return fail("cut short");
 			s.material.resize(n);
 			if (n && !take(&s.material[0], n)) return fail("cut short");
+			std::uint32_t image = 0;
+			if (!take(&image, 4) || image > bytes.size() - at) return fail("cut short");
+			s.image.assign(bytes.data() + at, image);
+			at += image;
 			if (s.firstIndex > indices || s.triangles > (indices - s.firstIndex) / 3) return fail("a section past the indices");
 		}
 		if (bytes.size() - at != static_cast<std::size_t>(vertices) * sizeof(MeshVertex) + static_cast<std::size_t>(indices) * 4)

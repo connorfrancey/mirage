@@ -71,7 +71,8 @@ namespace
 
 TEST(Models, MeshFileRoundTrip)
 {
-    const auto cube = Cube();
+    auto cube = Cube();
+    cube.sections[0].image = std::string("\x89PNG\0 not really", 18);
     const fs::path file = fs::temp_directory_path() / "mirage_test_cube.mmesh";
     std::string error;
     ASSERT_TRUE(mirage::models::WriteMeshFile(file.string(), cube, &error)) << error;
@@ -81,6 +82,7 @@ TEST(Models, MeshFileRoundTrip)
     EXPECT_EQ(back.indices, cube.indices);
     ASSERT_EQ(back.sections.size(), 1u);
     EXPECT_EQ(back.sections[0].material, "NoSuchPackage.NoSuchMaterial");
+    EXPECT_EQ(back.sections[0].image, cube.sections[0].image);
     EXPECT_EQ(std::memcmp(back.vertices.data(), cube.vertices.data(), 24 * sizeof(mirage::models::MeshVertex)), 0);
     // Cut short: refused
     fs::resize_file(file, fs::file_size(file) - 4);
@@ -152,6 +154,70 @@ TEST(Models, BuildsAPackageTheGameCouldLoad)
     EXPECT_NE(text.find("VertexData=((X=-50.0,Y=-50.0,Z=-50.0)"), std::string::npos) << text;
     const auto data = p->export_data(m.body_setup.export_index());
     EXPECT_EQ(data.size() - body.end_offset, 4u);       // PreCachedPhysData: an empty array
+    fs::remove_all(dir);
+}
+
+// A section the model gives its own texture (and no game material): the package holds that texture, DXT1 with every
+// mip inline, and a MaterialInstanceConstant of the game's lit character material showing it
+TEST(Models, TexturedSectionsGetTheirOwnMaterial)
+{
+    const fs::path cooked = Cooked();
+    if (cooked.empty()) GTEST_SKIP() << "Mirror's Edge not found";
+    const fs::path dir = fs::temp_directory_path() / "mirage_test_models_textured";
+    fs::remove_all(dir);
+    const fs::path out = dir / "MirageCrate_1234.upk";
+    auto cube = Cube();
+    // An 8x4 uncompressed TGA (stb reads it like a PNG): the left half red, the right half green
+    std::string tga(18, '\0');
+    tga[2] = 2;
+    tga[12] = 8;
+    tga[14] = 4;
+    tga[16] = 32;
+    tga[17] = 0x28;     // Top-left origin, 8 alpha bits
+    for (int y = 0; y < 4; ++y)
+        for (int x = 0; x < 8; ++x) tga += x < 4 ? std::string("\x00\x00\xFF\xFF", 4) : std::string("\x00\xFF\x00\xFF", 4);
+    cube.sections[0].image = tga;
+    std::string error;
+    {
+        Linker linker;
+        linker.add_search_path(cooked, true);
+        ASSERT_TRUE(mirage::models::BuildPackage(linker, cube, "Cube", out, &error)) << error;
+    }
+    Linker linker;
+    linker.add_search_path(cooked, true);
+    linker.add_search_path(dir, false);
+    const Package* p = linker.find_package("MirageCrate_1234");
+    ASSERT_NE(p, nullptr);
+    const StaticMesh m = read_static_mesh(linker, {p, *p->find_export("Cube")});
+    ASSERT_EQ(m.lods.at(0).sections.size(), 1u);
+    const ObjectIndex material = m.lods[0].sections[0].material;
+    ASSERT_TRUE(material.is_export());
+    EXPECT_EQ(p->object_path(material), "Cube_Material_0");
+    EXPECT_EQ(p->class_name(material), "MaterialInstanceConstant");
+    ReflectionSchema schema(linker);
+    for (const char* name : {"Core", "Engine"})
+        if (const Package* s = linker.find_package(name)) schema.add_package(*s);
+    const MaterialInfo info = read_material(linker, {p, material}, &schema);
+    EXPECT_EQ(p->object_path(info.parent), mirage::models::kTexturedParent);
+    ASSERT_EQ(info.parameters.size(), 1u);
+    EXPECT_EQ(info.parameters[0].name, mirage::models::kTexturedParameter);
+    ASSERT_TRUE(info.parameters[0].texture.is_export());
+    EXPECT_EQ(p->object_path(info.parameters[0].texture), "Cube_Texture_0");
+    EXPECT_EQ(p->export_data(material.export_index()).size(), linker.read_properties({p, material}).end_offset);  // No native data
+    const Texture2D tex = read_texture2d(linker, {p, info.parameters[0].texture}, &schema);
+    EXPECT_EQ(tex.size_x, 8);
+    EXPECT_EQ(tex.size_y, 4);
+    EXPECT_EQ(tex.format, PixelFormat::DXT1);
+    EXPECT_EQ(tex.properties.get_bool("NeverStream"), std::optional<bool>(true));
+    ASSERT_EQ(tex.mips.size(), 4u);     // 8x4 down to 1x1
+    const auto top = load_mip(*p, tex, 0);
+    const Image rgba = decode_pixels(top, tex.format, 8, 4);
+    EXPECT_GT(rgba.rgba[0 * 4 + 0], 200);     // Left: red
+    EXPECT_LT(rgba.rgba[0 * 4 + 1], 50);
+    EXPECT_GT(rgba.rgba[7 * 4 + 1], 200);     // Right: green
+    EXPECT_LT(rgba.rgba[7 * 4 + 0], 50);
+    // The last mip's bulk data offset is where its bytes are: the engine reads it from there
+    EXPECT_EQ(load_mip(*p, tex, 3).size(), 8u);
     fs::remove_all(dir);
 }
 

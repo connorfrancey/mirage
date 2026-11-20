@@ -1587,8 +1587,8 @@ below as self-tests. **Costs (targets):** a full-screen pass under 0.5 ms at 108
 - **Models and materials at runtime:** load a mesh and textures from a mod's files (glTF/FBX converted by the CLI
   through UnrealLib), swap the player's arms and body (step 7's texture path extended to meshes).
 
-**Status (2026-11-18): static models from mods and mesh replacement work; materials, skeletal meshes and the rest
-not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
+**Status (2026-11-19): static models from mods, with their own textures, and mesh replacement work; skeletal meshes
+and the rest not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
 which stays out of Mirage.dll) to `<file>.mmesh` (runtime/mesh_file.h: the game's space, 50 units a meter by default,
 and a hash of the source so a changed model must be converted again). The runtime builds it on a worker into a package
 holding one StaticMesh (runtime/model_files, UnrealLib's new `write_static_mesh` and `build_kdop`; every cooked mesh
@@ -1606,8 +1606,15 @@ off). Self-test "Mirage mesh replacement": the Prologue's garbage bag (P_Waste.G
 packages) is Suzanne in all 9 places the level draws it. A new mesh has a rigid body too: an RB_BodySetup subobject
 with one convex element, its box's corners (PhysX cooks it when a body is made, as for the game's: no cooked copy is
 stored), so `physics_spawn` makes props of it; in "Mirage models" a prop of Suzanne falls 340 units and rests on the
-floor. Next: the model's own textures as materials; a body from the model's convex hull rather than its box; a
-replaced mesh's own body (it keeps the original's RB_BodySetup).
+floor. A model's own textures: the converter keeps each material's base-color (glTF) or diffuse texture, embedded or
+a file beside the model, in the `.mmesh` (version 2); a section with one and no game material gets a Texture2D (DXT1,
+every mip inline, NeverStream) and a MaterialInstanceConstant of `CH_Materials.M_Generic_Diff_Spec_Norm` (the
+characters' lit generic material, a standalone package the game loads on demand, its shaders cooked; Engine_MI_Shaders'
+masters are used by no map, so theirs may not be) with it as "Diffuse Texture", both in the model's package. Sides
+must be powers of two. In "Mirage models" a crate (tests/mods/model-test/models/crate.obj, its .mtl naming a blue PNG)
+shows its MaterialInstanceConstant and texture, and turned to face it the frame is blue (the probe reads below the
+middle: the game's white reticle dot is there). Next: a body from the model's convex hull rather than its box; a
+replaced mesh's own body (it keeps the original's RB_BodySetup); normal and specular maps (the parent takes both).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.
