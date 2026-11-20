@@ -372,10 +372,10 @@ namespace mirage::mods
 		};
 		// Its code where a new mod's project has it (src/, `mirage new`) or at the top of its folder: main.lua, else a C#
 		// script mod's main.cs (only when nothing else is its code)
-		for (const char* file : {"main.lua", "src/main.lua"})
-			if (m.lua.empty() && std::filesystem::is_regular_file(dir / file)) m.lua = file;
-		for (const char* file : {"main.cs", "src/main.cs"})
-			if (m.lua.empty() && m.entry.empty() && m.dotnet.empty() && std::filesystem::is_regular_file(dir / file)) m.dotnet = file;
+		for (const char* code : {"main.lua", "src/main.lua"})
+			if (m.lua.empty() && std::filesystem::is_regular_file(dir / code)) m.lua = code;
+		for (const char* code : {"main.cs", "src/main.cs"})
+			if (m.lua.empty() && m.entry.empty() && m.dotnet.empty() && std::filesystem::is_regular_file(dir / code)) m.dotnet = code;
 		if (Utf8(dir.filename()) != m.id) fail("the folder is '" + Utf8(dir.filename()) + "' but the id is '" + m.id + "' (they must match)");
 		else if (!m.entry.empty() && !std::filesystem::is_regular_file(dir / FromUtf8(m.entry)))
 			fail("entry " + m.entry + " is not in the folder");
