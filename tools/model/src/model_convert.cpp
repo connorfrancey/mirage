@@ -14,14 +14,16 @@ namespace model
 {
 	namespace
 	{
-		// The file bytes of a material's base-color (glTF) or diffuse texture: embedded in the model (a .glb's PNG or
-		// JPEG) or a file beside it. Empty if it has none, or only raw texels assimp decoded itself.
-		std::string Image(const aiScene& scene, const aiMaterial& material, const std::string& modelPath)
+		// The file bytes of a material's first texture of the first of `types` it has: embedded in the model (a .glb's
+		// PNG or JPEG) or a file beside it. Empty if it has none, or only raw texels assimp decoded itself.
+		std::string Image(const aiScene& scene, const aiMaterial& material, const std::string& modelPath,
+						  std::initializer_list<aiTextureType> types)
 		{
 			aiString name;
-			if (material.GetTexture(aiTextureType_BASE_COLOR, 0, &name) != AI_SUCCESS &&
-				material.GetTexture(aiTextureType_DIFFUSE, 0, &name) != AI_SUCCESS)
-				return {};
+			bool found = false;
+			for (const aiTextureType type : types)
+				if (!found) found = material.GetTexture(type, 0, &name) == AI_SUCCESS;
+			if (!found) return {};
 			if (const aiTexture* embedded = scene.GetEmbeddedTexture(name.C_Str()))
 				return embedded->mHeight == 0 ? std::string(reinterpret_cast<const char*>(embedded->pcData), embedded->mWidth) : std::string{};
 			std::ifstream in(std::filesystem::path(modelPath).parent_path() / std::filesystem::u8path(name.C_Str()), std::ios::binary);
@@ -88,7 +90,8 @@ namespace model
 			if (src->mMaterialIndex < scene->mNumMaterials) {
 				const aiMaterial* material = scene->mMaterials[src->mMaterialIndex];
 				section.material = material->GetName().C_Str();
-				section.image = Image(*scene, *material, path);
+				section.image = Image(*scene, *material, path, {aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE});
+				section.normal = Image(*scene, *material, path, {aiTextureType_NORMALS});
 			}
 			m.sections.push_back(section);
 		}
@@ -97,7 +100,7 @@ namespace model
 			stats->vertices = static_cast<unsigned>(m.vertices.size());
 			stats->triangles = static_cast<unsigned>(m.indices.size() / 3);
 			stats->sections = static_cast<unsigned>(m.sections.size());
-			for (const auto& s : m.sections) stats->textures += !s.image.empty();
+			for (const auto& s : m.sections) stats->textures += !s.image.empty() + !s.normal.empty();
 		}
 		return mirage::models::WriteMeshFile(out, m, error);
 	}

@@ -11,8 +11,9 @@
 // for rigid bodies (physics props): one convex element of the model's own hull points, cooked by PhysX when a body is
 // made. Each section's
 // material is a game material named by the file's material name ("Package.Name"); else, if the file gives the section
-// a texture, a MaterialInstanceConstant of kTexturedParent with that texture (DXT1, every mip inline) as its
-// kTexturedParameter, both written into the package; else `defaultMaterial`.
+// a texture or normal map, a MaterialInstanceConstant of kTexturedParent with them (DXT1, every mip inline; a normal
+// map's green flipped from glTF's convention to the game's) as its kTexturedParameter and kNormalParameter, all written
+// into the package; else `defaultMaterial`.
 
 #include "runtime/mesh_file.h"
 
@@ -37,6 +38,7 @@ namespace mirage::models
 	// generic material (diffuse, specular and normal textures; a standalone package the game loads on demand)
 	inline constexpr const char* kTexturedParent = "CH_Materials.M_Generic_Diff_Spec_Norm";
 	inline constexpr const char* kTexturedParameter = "Diffuse Texture";
+	inline constexpr const char* kNormalParameter = "Normal Texture";
 
 	// The ObjectIndex (in the package being written) of section `index`'s material; `name` is the file's material name
 	using MaterialFor = std::function<UnrealLib::ObjectIndex(std::size_t index, const std::string& name)>;

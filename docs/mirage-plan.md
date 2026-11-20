@@ -1616,7 +1616,11 @@ shows its MaterialInstanceConstant and texture, and turned to face it the frame 
 middle: the game's white reticle dot is there). A replaced
 mesh's body is the model's shape too: the original's RB_BodySetup subobject keeps its properties but its AggGeom
 becomes the model's hull points (no cooked copy); in "Mirage mesh replacement" the bag's loaded body is one convex
-element of 20 points reaching 68.4 (the bag's can't pass 48.7). Next: normal and specular maps (the parent takes both).
+element of 20 points reaching 68.4 (the bag's can't pass 48.7). Normal maps too (`.mmesh` version 3): glTF's normalTexture (an
+OBJ's `norm`) becomes the instance's "Normal Texture", stored as the game's are (DXT1, SRGB off, TC_Normalmap,
+UnpackMin -1, the world normal-map LOD group) with its green flipped (glTF's convention is green up, the game's green
+down); the crate has one. Next: specular maps (the parent takes "Specular Texture"; glTF has no specular, its
+metallic-roughness would have to be turned into one).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.

@@ -322,13 +322,18 @@ namespace mirage::textures
 		return NativeData(ctx, {}, encoded, base);
 	}
 
-	Encoded EncodeImage(const std::vector<std::byte>& bytes, bool dds, PixelFormat target)
+	Encoded EncodeImage(const std::vector<std::byte>& bytes, bool dds, PixelFormat target, bool flipGreen)
 	{
-		if (dds) return ParseDds(bytes);
+		if (dds) {
+			if (flipGreen) throw Fail("a DDS normal map is taken as stored, so its green can't be flipped: give it as a PNG");
+			return ParseDds(bytes);
+		}
 		int w = 0, h = 0, comp = 0;
 		stbi_uc* rgba = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()),
 											  &w, &h, &comp, 4);
 		if (!rgba) throw Fail(std::string("can't read the image: ") + stbi_failure_reason());
+		if (flipGreen)
+			for (std::size_t i = 0; i < static_cast<std::size_t>(w) * h; ++i) rgba[i * 4 + 1] = static_cast<stbi_uc>(255 - rgba[i * 4 + 1]);
 		try {
 			Encoded enc = EncodeChain(rgba, w, h, target);
 			stbi_image_free(rgba);

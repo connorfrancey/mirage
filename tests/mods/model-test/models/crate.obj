@@ -1,4 +1,4 @@
-# A crate for the self-test: one textured material (crate.mtl, crate.png)
+# A crate for the self-test: one textured material (crate.mtl: crate.png, its normal map crate_n.png)
 mtllib crate.mtl
 v -1 -1 -1
 v 1 -1 -1

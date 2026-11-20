@@ -47,8 +47,9 @@ namespace mirage::textures
 	// .png / .tga / .bmp / .jpg are decoded, given a full mip chain (box filter) and encoded to `target`, the replaced
 	// texture's own format. Sides must be powers of two. Throws std::runtime_error saying what is wrong.
 	Encoded LoadReplacement(const std::filesystem::path& file, PixelFormat target);
-	// An image file's bytes as LoadReplacement reads them (`dds`: taken as stored), encoded to `target`.
-	Encoded EncodeImage(const std::vector<std::byte>& file, bool dds, PixelFormat target);
+	// An image file's bytes as LoadReplacement reads them (`dds`: taken as stored), encoded to `target`. `flipGreen`: a
+	// normal map in OpenGL's convention (glTF's: green up) turned to the game's (DirectX's: green down); not for a DDS.
+	Encoded EncodeImage(const std::vector<std::byte>& file, bool dds, PixelFormat target, bool flipGreen = false);
 	// A Texture2D's native data holding `encoded` (version 536: empty source art, then every mip inline and
 	// uncompressed). `base`: the package offset of its first byte (bulk data stores absolute offsets).
 	std::vector<std::byte> TextureData(const UnrealLib::SerializationContext& ctx, const Encoded& encoded, std::uint64_t base);

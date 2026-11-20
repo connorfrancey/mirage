@@ -202,8 +202,8 @@ TEST(Models, RigidBodyFollowsTheModelsShape)
     fs::remove_all(dir);
 }
 
-// A section the model gives its own texture (and no game material): the package holds that texture, DXT1 with every
-// mip inline, and a MaterialInstanceConstant of the game's lit character material showing it
+// A section the model gives its own texture and normal map (and no game material): the package holds them, DXT1 with
+// every mip inline, and a MaterialInstanceConstant of the game's lit character material showing them
 TEST(Models, TexturedSectionsGetTheirOwnMaterial)
 {
     const fs::path cooked = Cooked();
@@ -222,6 +222,15 @@ TEST(Models, TexturedSectionsGetTheirOwnMaterial)
     for (int y = 0; y < 4; ++y)
         for (int x = 0; x < 8; ++x) tga += x < 4 ? std::string("\x00\x00\xFF\xFF", 4) : std::string("\x00\xFF\x00\xFF", 4);
     cube.sections[0].image = tga;
+    // A normal map in glTF's convention, 4x4: every pixel (R 128, G 200, B 255), its green up
+    std::string normal(18, '\0');
+    normal[2] = 2;
+    normal[12] = 4;
+    normal[14] = 4;
+    normal[16] = 32;
+    normal[17] = 0x28;
+    for (int i = 0; i < 16; ++i) normal += std::string("\xFF\xC8\x80\xFF", 4);     // B G R A
+    cube.sections[0].normal = normal;
     std::string error;
     {
         Linker linker;
@@ -244,7 +253,7 @@ TEST(Models, TexturedSectionsGetTheirOwnMaterial)
         if (const Package* s = linker.find_package(name)) schema.add_package(*s);
     const MaterialInfo info = read_material(linker, {p, material}, &schema);
     EXPECT_EQ(p->object_path(info.parent), mirage::models::kTexturedParent);
-    ASSERT_EQ(info.parameters.size(), 1u);
+    ASSERT_EQ(info.parameters.size(), 2u);
     EXPECT_EQ(info.parameters[0].name, mirage::models::kTexturedParameter);
     ASSERT_TRUE(info.parameters[0].texture.is_export());
     EXPECT_EQ(p->object_path(info.parameters[0].texture), "Cube_Texture_0");
@@ -263,6 +272,20 @@ TEST(Models, TexturedSectionsGetTheirOwnMaterial)
     EXPECT_LT(rgba.rgba[7 * 4 + 0], 50);
     // The last mip's bulk data offset is where its bytes are: the engine reads it from there
     EXPECT_EQ(load_mip(*p, tex, 3).size(), 8u);
+    // The normal map: stored as the game's are, its green turned to the game's convention (down)
+    EXPECT_EQ(info.parameters[1].name, mirage::models::kNormalParameter);
+    ASSERT_TRUE(info.parameters[1].texture.is_export());
+    EXPECT_EQ(p->object_path(info.parameters[1].texture), "Cube_Normal_0");
+    const Texture2D n = read_texture2d(linker, {p, info.parameters[1].texture}, &schema);
+    EXPECT_EQ(n.format, PixelFormat::DXT1);
+    EXPECT_EQ(n.srgb, false);
+    EXPECT_EQ(n.compression_settings, "TC_Normalmap");
+    EXPECT_EQ(n.lod_group, "TEXTUREGROUP_WorldNormalMap");
+    EXPECT_EQ(n.properties.get_float("UnpackMin", 2), std::optional<float>(-1.f));
+    const Image np = decode_pixels(load_mip(*p, n, 0), n.format, 4, 4);
+    EXPECT_NEAR(np.rgba[0], 128, 8);
+    EXPECT_NEAR(np.rgba[1], 55, 8);     // 255 - 200
+    EXPECT_NEAR(np.rgba[2], 255, 8);
     fs::remove_all(dir);
 }
 

@@ -299,15 +299,16 @@ namespace mirage::models
 			body.object_flags = kBodyFlags;
 			const ObjectIndex bodyIndex = model.add_export(std::move(body), {});
 
-			// A section the file gives no game material but a texture of its own: a MaterialInstanceConstant of a
-			// lit game material (kTexturedParent) with that texture as its diffuse
-			struct Textured
+			// A section the file gives no game material but textures of its own: a MaterialInstanceConstant of a lit
+			// game material (kTexturedParent) with them as its diffuse and normal map
+			struct Texture
 			{
-				ObjectIndex texture, material;
+				ObjectIndex index;
 				textures::Encoded encoded;
-				std::size_t header = 0;		// The texture export's bytes before its native data
+				std::size_t header = 0;		// The export's bytes before its native data
 			};
-			std::map<std::size_t, Textured> textured;
+			std::vector<Texture> textures;
+			std::map<std::size_t, ObjectIndex> textured;					// Section -> its material instance
 			std::map<std::string, ObjectIndex, std::less<>> refs;		// The object texts the properties below name
 			PropertyParseOptions options;
 			options.make_name = [&](std::string_view text) { return model.make_name(text); };
@@ -316,13 +317,14 @@ namespace mirage::models
 				return it == refs.end() ? std::nullopt : std::optional<ObjectIndex>(it->second);
 			};
 			options.schema = &schema;
-			const auto property = [&](const char* owner, const char* name, const std::string& text) {
+			const auto property = [&](const char* owner, const char* name, const std::string& text, std::int32_t index = 0) {
 				const auto type = schema.find_property(owner, name);
 				if (!type) throw std::runtime_error(std::string(owner) + "." + name + " isn't in the game's Engine package");
 				Property p;
 				p.name = name;
+				p.array_index = index;
 				p.value = parse_property_value(text, *type, options);
-				p.tag = make_property_tag(name, 0, *type, options.make_name);
+				p.tag = make_property_tag(name, index, *type, options.make_name);
 				return p;
 			};
 			const auto exportData = [&](const std::vector<Property>& properties) {
@@ -335,51 +337,68 @@ namespace mirage::models
 				write_properties(w, properties, none);
 				return w.take();
 			};
+			// A texture export of `file` (the model's bytes) named `name`; a normal map is stored as the game's are
+			// (DXT1, not sRGB, TC_Normalmap, unpacked from [0, 1] to [-1, 1])
+			const auto addTexture = [&](const std::string& file, const std::string& name, bool normal) {
+				Texture t;
+				const auto* bytes = reinterpret_cast<const std::byte*>(file.data());
+				t.encoded = textures::EncodeImage(std::vector<std::byte>(bytes, bytes + file.size()), file.compare(0, 4, "DDS ") == 0,
+												  PixelFormat::DXT1, normal);
+				ExportEntry tex;
+				tex.class_index = ImportPath(model, "Engine.Texture2D", "Core", "Class");
+				tex.object_name = model.make_name(name);
+				tex.object_flags = kMeshFlags;
+				t.index = model.add_export(std::move(tex), {});
+				const textures::Mip& top = t.encoded.mips.front();
+				std::vector<Property> properties = {property("Texture2D", "SizeX", std::to_string(top.width)),
+													property("Texture2D", "SizeY", std::to_string(top.height)),
+													property("Texture2D", "Format", std::string(to_string(t.encoded.format))),
+													property("Texture2D", "MipTailBaseIdx", std::to_string(t.encoded.mips.size() - 1)),
+													property("Texture2D", "NeverStream", "True")};
+				if (normal) {
+					properties.push_back(property("Texture2D", "SRGB", "False"));
+					for (std::int32_t i = 0; i < 3; ++i) properties.push_back(property("Texture2D", "UnpackMin", "-1.0", i));
+					properties.push_back(property("Texture2D", "CompressionSettings", "TC_Normalmap"));
+					properties.push_back(property("Texture2D", "LODGroup", "TEXTUREGROUP_WorldNormalMap"));
+				}
+				model.export_data[t.index.export_index()] = exportData(properties);
+				t.header = model.export_data[t.index.export_index()].size();
+				refs["Texture2D'" + name + "'"] = t.index;
+				textures.push_back(std::move(t));
+				return "Texture2D'" + name + "'";
+			};
 			for (std::size_t s = 0; s < data.sections.size(); ++s) {
 				const MeshSection& section = data.sections[s];
-				if (section.image.empty() || !MaterialClass(linker, section.material).empty()) continue;
+				if ((section.image.empty() && section.normal.empty()) || !MaterialClass(linker, section.material).empty()) continue;
 				if (MaterialClass(linker, kTexturedParent).empty())
 					throw std::runtime_error(std::string("the game material textured models use, ") + kTexturedParent + ", wasn't found");
-				Textured t;
+				const std::string suffix = "_" + std::to_string(s);
+				std::string values;
+				const auto value = [&](const char* parameter, const std::string& texture) {
+					values += std::string(values.empty() ? "" : ",") + "(ParameterName=\"" + parameter + "\",ParameterValue=" + texture + ")";
+				};
 				try {
-					const auto* image = reinterpret_cast<const std::byte*>(section.image.data());
-					const bool dds = section.image.compare(0, 4, "DDS ") == 0;
-					t.encoded = textures::EncodeImage(std::vector<std::byte>(image, image + section.image.size()), dds, PixelFormat::DXT1);
+					if (!section.image.empty()) value(kTexturedParameter, addTexture(section.image, meshName + "_Texture" + suffix, false));
+					if (!section.normal.empty()) value(kNormalParameter, addTexture(section.normal, meshName + "_Normal" + suffix, true));
 				} catch (const std::exception& ex) {
 					throw std::runtime_error("material " + std::to_string(s) + " ('" + section.material + "')'s texture: " + ex.what());
 				}
-				const std::string suffix = "_" + std::to_string(s), textureName = meshName + "_Texture" + suffix;
-				ExportEntry tex;
-				tex.class_index = ImportPath(model, "Engine.Texture2D", "Core", "Class");
-				tex.object_name = model.make_name(textureName);
-				tex.object_flags = kMeshFlags;
-				t.texture = model.add_export(std::move(tex), {});
-				const textures::Mip& top = t.encoded.mips.front();
-				auto& texData = model.export_data[t.texture.export_index()];
-				texData = exportData({property("Texture2D", "SizeX", std::to_string(top.width)),
-									  property("Texture2D", "SizeY", std::to_string(top.height)),
-									  property("Texture2D", "Format", std::string(to_string(t.encoded.format))),
-									  property("Texture2D", "MipTailBaseIdx", std::to_string(t.encoded.mips.size() - 1)),
-									  property("Texture2D", "NeverStream", "True")});
-				t.header = texData.size();
 				ExportEntry mic;
 				mic.class_index = ImportPath(model, "Engine.MaterialInstanceConstant", "Core", "Class");
 				mic.object_name = model.make_name(meshName + "_Material" + suffix);
 				mic.object_flags = kMeshFlags;
-				t.material = model.add_export(std::move(mic), {});
-				const std::string parentText = std::string("Material'") + kTexturedParent + "'", textureText = "Texture2D'" + textureName + "'";
+				const ObjectIndex material = model.add_export(std::move(mic), {});
+				const std::string parentText = std::string("Material'") + kTexturedParent + "'";
 				refs[parentText] = ImportPath(model, kTexturedParent, "Engine", "Material");
-				refs[textureText] = t.texture;
-				model.export_data[t.material.export_index()] = exportData(
-					{property("MaterialInstanceConstant", "Parent", parentText),
-					 property("MaterialInstanceConstant", "TextureParameterValues",
-							  std::string("((ParameterName=\"") + kTexturedParameter + "\",ParameterValue=" + textureText + "))")});
-				textured[s] = std::move(t);
+				model.export_data[material.export_index()] =
+					exportData({property("MaterialInstanceConstant", "Parent", parentText),
+								property("MaterialInstanceConstant", "TextureParameterValues", "(" + values + ")")});
+				textured[s] = material;
 			}
 
 			// Each section's material: the game material its file names, else its own texture's, else the default
 			StaticMesh mesh = MakeStaticMesh(data, meshName, [&](std::size_t s, const std::string& name) {
-				if (const auto it = textured.find(s); it != textured.end()) return it->second.material;
+				if (const auto it = textured.find(s); it != textured.end()) return it->second;
 				std::string material = name, cls = MaterialClass(linker, material);
 				if (cls.empty()) {
 					material = defaultMaterial;
@@ -404,10 +423,10 @@ namespace mirage::models
 				meshData = meshHeader;
 				const std::vector<std::byte> payload = write_static_mesh(mesh, ctx, bases[index.export_index()] + meshHeader.size());
 				meshData.insert(meshData.end(), payload.begin(), payload.end());
-				for (const auto& [s, t] : textured) {
-					auto& texData = model.export_data[t.texture.export_index()];
+				for (const Texture& t : textures) {
+					auto& texData = model.export_data[t.index.export_index()];
 					texData.resize(t.header);
-					const std::vector<std::byte> native = textures::TextureData(ctx, t.encoded, bases[t.texture.export_index()] + t.header);
+					const std::vector<std::byte> native = textures::TextureData(ctx, t.encoded, bases[t.index.export_index()] + t.header);
 					texData.insert(texData.end(), native.begin(), native.end());
 				}
 				bytes = write_package(model);
