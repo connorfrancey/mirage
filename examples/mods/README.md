@@ -115,6 +115,13 @@ for _, bot in ipairs(mirage.actors { class = "TdBotPawn", near = pawn, radius = 
 mirage.actors { tag = "Door" }                   -- by Actor.Tag; also name = "TdBotPawn_3", near = {x, y, z}
 mirage.valid(obj)                                -- false once the object is gone (or another took its place)
 
+-- Vectors: mirage.vec, a {x, y, z} table with math (anything that takes {x, y, z} takes one; the API's locations,
+-- velocities and hits are vectors)
+local v = mirage.vec(1, 2, 3)                    -- or mirage.vec{x = 1, y = 2, z = 3}, mirage.vec{1, 2, 3}, mirage.vec(5)
+local ahead = (v + mirage.vec.forward * 100):normalized()   -- + - * / and unary -, by a number or each component
+-- v:len(), v:len2(), v:dist(w), v:dot(w), v:cross(w), v:lerp(w, 0.5), v:copy(), v:unpack()
+-- mirage.vec.zero, .up (the game's Z is up), .forward, .right, mirage.vec.is(x), tostring(v) == "vec(1, 2, 3)"
+
 local hook = mirage.hook("Engine.Actor.CheckMaxEffectDistance", function(call)
     call.params.CullDistance = 0                 -- before the function: change its parameters...
     -- call:skip()                               -- ...or don't run it

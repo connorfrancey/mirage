@@ -6,6 +6,7 @@
 
 #include "runtime/mod_lua.h"
 
+#include "runtime/lua_vec.h"
 #include "runtime/lua_vm.h"
 #include "runtime/mod_lua_ui.h"
 
@@ -1226,13 +1227,7 @@ namespace mirage::mods
 		lua_setfield(L, -2, "previous");
 		lua_pushinteger(L, m.physics);
 		lua_setfield(L, -2, "physics");
-		lua_createtable(L, 0, 3);
-		lua_pushnumber(L, m.velocity[0]);
-		lua_setfield(L, -2, "x");
-		lua_pushnumber(L, m.velocity[1]);
-		lua_setfield(L, -2, "y");
-		lua_pushnumber(L, m.velocity[2]);
-		lua_setfield(L, -2, "z");
+		lua::PushVec(L, m.velocity[0], m.velocity[1], m.velocity[2]);
 		lua_setfield(L, -2, "velocity");
 		lua_pushnumber(L, m.speed);
 		lua_setfield(L, -2, "speed");
@@ -1389,16 +1384,7 @@ namespace mirage::mods
 			}
 			return true;
 		}
-		void PushVec(lua_State* L, const float v[3])
-		{
-			lua_createtable(L, 0, 3);
-			lua_pushnumber(L, v[0]);
-			lua_setfield(L, -2, "x");
-			lua_pushnumber(L, v[1]);
-			lua_setfield(L, -2, "y");
-			lua_pushnumber(L, v[2]);
-			lua_setfield(L, -2, "z");
-		}
+		void PushVec(lua_State* L, const float v[3]) { lua::PushVec(L, v[0], v[1], v[2]); }	// A mirage.vec
 		void CheckVec(lua_State* L, int index, float out[3])
 		{
 			if (!ReadVec(L, index, out)) luaL_typeerror(L, index, "vector {x, y, z}");
@@ -3104,6 +3090,7 @@ namespace mirage::mods
 		const luaL_Reg scriptLib[] = {{"open", ScriptOpen}, {"restore", ScriptRestore}, {nullptr, nullptr}};
 		set(scriptLib);
 		lua_setfield(L, -2, "script");
+		if (!lua::InstallVec(L, -1)) Log(MIRAGE_LOG_ERROR, "mirage.vec didn't install");
 		lua_setglobal(L, "mirage");
 
 		lua_pushlightuserdata(L, this);

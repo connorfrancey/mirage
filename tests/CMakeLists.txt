@@ -80,6 +80,12 @@ if(MSVC)
   target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
 endif()
 
+# mirage.vec runs in a plain Lua state (Lua is built with the game layer)
+if(TARGET lua::lua)
+  target_sources(mirage_tests PRIVATE test_lua_vec.cpp ${CMAKE_SOURCE_DIR}/loader/src/runtime/lua_vec.cpp)
+  target_link_libraries(mirage_tests PRIVATE lua::lua)
+endif()
+
 # One CTest test per TEST(); listed when ctest runs (not at build time, so a build never runs the exe)
 include(GoogleTest)
 gtest_discover_tests(mirage_tests DISCOVERY_MODE PRE_TEST)
