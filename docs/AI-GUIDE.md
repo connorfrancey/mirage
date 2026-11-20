@@ -13,7 +13,7 @@ commands; [mirage-plan.md](mirage-plan.md) has the plan (its steps are also call
   `main.lua`, `main.cs` (C#), UnrealScript `.uc` classes, and data (`levels/`, `kismet/`, `maps/`, `packages/`,
   `content/`, `routes/`).
 - Mods reach the game only through the **mod API**: a C function table, `MirageApi` in `loader/include/mirage/api.h`.
-  Lua (`runtime/mod_lua.cpp`) and C# (`managed/Mirage`) are bindings over the same table.
+  Lua (`runtime/mod_lua.cpp` and `runtime/lua/`) and C# (`managed/Mirage`) are bindings over the same table.
 - The game's own types come from a **generated SDK** (`sdk/`, namespace `Classes`): C++ structs that match the game's
   memory. Never edit `sdk/`; change `tools/sdkgen` and run `uv run mirage sdk`.
 - There is an **in-game UI** (ImGui over D3D9): the mod manager, modules (switches and settings per feature).
@@ -42,7 +42,7 @@ commands; [mirage-plan.md](mirage-plan.md) has the plan (its steps are also call
 
 - `loader/include/mirage/api.h`: the C ABI. **Frozen**: only append fields to `MirageApi` (tests/test_abi.cpp checks).
 - `loader/src/runtime/`: the mod runtime. `mods.cpp` (loading, the gates into mod code), `mod_game.cpp` (the API's game
-  functions, event dispatch), `mod_lua.cpp` (the Lua binding, `mirage.*`), `layers.cpp` (level layers),
+  functions, event dispatch), `mod_lua.cpp` and `lua/` (the Lua binding, `mirage.*`: one file per area), `layers.cpp` (level layers),
   `kismet*.cpp` (Kismet read, layers, trace), `classes.cpp` / `class_source.cpp` (`.uc` compiled in the game).
 - `loader/src/game/`: the game layer: `game::Pawn()`, `World()`, levels, object lookups, `FindPattern`.
 - `loader/src/core/`: modules, settings, hooking, caches, events, the scheduler.
@@ -81,7 +81,7 @@ UnrealLib into its own package, then the engine loads it. Until it is built the 
    native SDK function directly can pass bools wrong.
 5. **`AActor::SetLocation()` does not move the player**: write `pawn->Location`.
 6. **Engine hooks by pattern** (`game::FindPattern`), never fixed addresses.
-7. **ABI**: append to `MirageApi` only; mirror a new function in Lua (`mod_lua.cpp`) and C# (`managed/Mirage`).
+7. **ABI**: append to `MirageApi` only; mirror a new function in Lua (`runtime/lua/lua_<area>.cpp`) and C# (`managed/Mirage`).
 8. **`OnDisable` undoes everything** a module did (it also runs on unload).
 9. **UnrealScript in mods**: each `.uc` file is its **own package**. A class can't name another mod class
    (`class'MyOther'` fails); find it by name (`A.IsA('MyOther')`). Qualify game classes in literals:
@@ -122,10 +122,12 @@ In-game results: `<game>\Binaries\mirage\selftest-result.json` (steps, problems,
 `tests/CMakeLists.txt`. Code that touches the game can't be unit tested: split the pure part into its own file
 (like `runtime/mod_profile.cpp`).
 
-**Add a Lua function.** Declare `static int MyFn(lua_State* L);` in the `LuaMod` class and write
-`int LuaMod::MyFn(lua_State* L)` in `runtime/mod_lua.cpp` next to similar ones, with a
-`// mirage.my_fn(args): what it returns` comment, and add `{"my_fn", MyFn}` to the `fns[]` table in the same file. If
-it needs a new API entry, append it to `MirageApi` (api.h), implement it in `mod_game.cpp`, and check
+**Add a Lua function.** All in the file of its area, `runtime/lua/lua_<area>.cpp` (modules, draw, objects, kismet,
+world, events, script): write it there with a `// mirage.my_fn(args): what it returns` comment, as a free function
+(`static int MyFn(lua_State* L) { LuaMod& self = LuaMod::Self(L); ... }`) or a `LuaMod` member declared in
+`runtime/lua/lua_mod.h`, and add `{"my_fn", MyFn}` to the `LuaFunctions` list at the end of that file (a list for a
+table of `mirage`, like `draw`, names it: `LuaFunctions kDrawFunctions("draw", {...})`). Bind puts every list in. If it
+needs a new API entry, append it to `MirageApi` (api.h), implement it in `mod_game.cpp`, and check
 `MIRAGE_API_HAS(self.api_, my_fn)` before calling it.
 
 **Add something to a level from data (no code).** `levels/<map>.toml` in the mod:
@@ -155,7 +157,7 @@ editor, a feature every stage").
 
 | Task | Start in |
 |---|---|
-| A mod API function misbehaves | `runtime/mod_game.cpp` (C side), `runtime/mod_lua.cpp` (Lua side) |
+| A mod API function misbehaves | `runtime/mod_game.cpp` (C side), `runtime/lua/lua_<area>.cpp` (Lua side) |
 | A mod doesn't load | `runtime/mods.cpp`, `runtime/manifest.cpp`, `runtime/resolve.cpp`, the log |
 | Something about levels / actors placed by mods | `runtime/layers.cpp` |
 | Kismet | `runtime/kismet.cpp`, `runtime/kismet_layers.cpp` |

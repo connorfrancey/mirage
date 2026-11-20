@@ -59,9 +59,10 @@ uv run mirage model <file>          # what a glTF/FBX/OBJ model holds for the ga
   `mirage::call` (`loader/src/runtime/call.h`), which also lays out 4-byte UBOOL params correctly.
 - **Runtime** (`loader/src/runtime/`): mods are folders in `Binaries\mirage\mods` with `mod.toml` plus a native DLL,
   `main.lua`, C# (.NET 10 x86 via hostfxr), and/or content (`content/`, `levels/`, `maps/`). The C ABI is frozen by
-  `tests/test_abi.cpp`: only append to `MirageApi`, and mirror it in the Lua binding (`mod_lua.cpp`) and C#
-  (`managed/Mirage`). UnrealLib (packages, decompiler, UnrealScript compiler) builds classes from `.uc` source in the
-  game (`runtime/classes`, `class_source`). `firstparty.cpp` migrates a memenu install's user data once.
+  `tests/test_abi.cpp`: only append to `MirageApi`, and mirror it in the Lua binding (`runtime/lua/lua_<area>.cpp`
+  and its `LuaFunctions` list) and C# (`managed/Mirage`). UnrealLib (packages, decompiler, UnrealScript compiler)
+  builds classes from `.uc` source in the game (`runtime/classes`, `class_source`). `firstparty.cpp` migrates a
+  memenu install's user data once.
 - **Input service** (`loader/src/tas/engine`, `input_monitor`): key injection on the game thread, all that is left of
   the TAS; the self-test presses keys with `KeyEvent`/`HoldKey`.
 - **Self-test** (`loader/src/selftest.cpp`): one function per step, listed in `FeatureList()`. Test mods live in
