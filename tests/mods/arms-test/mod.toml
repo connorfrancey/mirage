@@ -1,0 +1,11 @@
+# Self-test (step 31, "Mirage arms"): Faith's first-person arms (CH_TKY_Crim_Fixer_1P.SK_UpperBody) replaced by a
+# skinned model, content/meshes/CH_TKY_Crim_Fixer_1P.SK_UpperBody.glb: a box along each upper arm, forearm and hand,
+# skinned to those bones (made by make_box_arms.py; its .mmesh is it converted). The arms are loaded with the game's
+# scripts, before Mirage, so they are swapped in memory (runtime/models.h) as soon as the copy is built, and back when
+# the mod is turned off.
+id = "arms-test"
+name = "Box Arms"
+version = "1.0.0"
+description = "Faith's arms as boxes: a skinned model replacing a skeletal mesh"
+mirage = "^0.1"
+content = ["content"]

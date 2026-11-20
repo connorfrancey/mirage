@@ -6,8 +6,10 @@
 #include "runtime/texture_files.h"
 
 #include <UnrealLib/UnrealLib.hpp>
+#include <UnrealLib/Assets/SkeletalMesh.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Linker/ReflectionSchema.hpp>
+#include <UnrealLib/Writer/PackageWriter.hpp>
 
 #include <gtest/gtest.h>
 
@@ -87,10 +89,26 @@ TEST(Models, MeshFileRoundTrip)
     EXPECT_EQ(back.sections[0].specular, "");
     EXPECT_EQ(back.sections[0].roughness, "roughness");
     EXPECT_EQ(std::memcmp(back.vertices.data(), cube.vertices.data(), 24 * sizeof(mirage::models::MeshVertex)), 0);
+    EXPECT_TRUE(back.bones.empty());
+    EXPECT_TRUE(back.skin.empty());
     // Cut short: refused
     fs::resize_file(file, fs::file_size(file) - 4);
     EXPECT_FALSE(mirage::models::ReadMeshFile(file.string(), back, &error));
-    EXPECT_NE(error.find("size"), std::string::npos) << error;
+    EXPECT_NE(error.find("short"), std::string::npos) << error;
+
+    // A skinned model keeps its bones and each vertex's influences; a bone past the names is refused
+    cube.bones = {"LeftHand", "RightHand"};
+    cube.skin.assign(cube.vertices.size(), {});
+    cube.skin[3] = {{1, 0, 0, 0}, {0.75f, 0.25f, 0, 0}};
+    ASSERT_TRUE(mirage::models::WriteMeshFile(file.string(), cube, &error)) << error;
+    ASSERT_TRUE(mirage::models::ReadMeshFile(file.string(), back, &error)) << error;
+    EXPECT_EQ(back.bones, cube.bones);
+    ASSERT_EQ(back.skin.size(), 24u);
+    EXPECT_EQ(back.skin[3].bone[0], 1);
+    EXPECT_EQ(back.skin[3].weight[1], 0.25f);
+    cube.skin[3].bone[0] = 2;
+    ASSERT_TRUE(mirage::models::WriteMeshFile(file.string(), cube, &error)) << error;
+    EXPECT_FALSE(mirage::models::ReadMeshFile(file.string(), back, &error));
     fs::remove(file);
 }
 
@@ -377,5 +395,104 @@ TEST(Models, ReplacesAMeshInAMapPackage)
     const auto stale = mirage::textures::BuildOverlay(map, {{target, model}});
     ASSERT_EQ(stale.problems.size(), 1u);
     EXPECT_NE(stale.problems[0].find("changed since it was converted"), std::string::npos) << stale.problems[0];
+    fs::remove_all(dir);
+}
+
+
+// A skeletal mesh replaced: Faith's first-person arms (the game's layout, which models::MakeSkeletalMesh follows: one
+// LOD, a chunk a section with CPU copies of its vertices, bForceCPUSkinning) become a cube skinned to her hands, half to
+// each and the four corners of one face shared between them, keeping her skeleton, materials and properties
+TEST(Models, ReplacesASkeletalMesh)
+{
+    const fs::path cooked = Cooked();
+    if (cooked.empty()) GTEST_SKIP() << "Mirror's Edge not found";
+    const fs::path package = cooked / "Characters" / "CH_TKY_Crim_Fixer_1P.upk";
+    const std::string target = "ch_tky_crim_fixer_1p.sk_upperbody";
+    const auto read = [&](const fs::path& file) {
+        Linker linker;
+        linker.add_search_path(cooked, true);
+        const Package& p = linker.load(file);
+        const ObjectRef ref{&p, *p.find_export("SK_UpperBody")};
+        SkeletalMesh m = read_skeletal_mesh(linker, ref);
+        // What is read writes back as stored
+        const std::size_t native = open_asset(linker, ref).native_offset;
+        const auto data = p.export_data(ref.index.export_index());
+        PackageModel names = PackageModel::from_package(p);
+        const auto written = write_skeletal_mesh(m, p.context(), p.profile().assets, [&](std::string_view t) { return names.make_name(t); },
+                                                 static_cast<std::uint64_t>(p.exports()[ref.index.export_index()].serial_offset) + native);
+        EXPECT_TRUE(std::ranges::equal(written, data.subspan(native))) << file.filename();
+        return m;
+    };
+    const SkeletalMesh before = read(package);
+    // The game's arms, as the builder follows them
+    EXPECT_EQ(before.skeleton.size(), 74u);
+    ASSERT_EQ(before.lods.size(), 1u);
+    EXPECT_EQ(before.lods[0].chunks.size(), 2u);
+    EXPECT_EQ(before.lods[0].chunks[0].stored_rigid_vertices, static_cast<std::size_t>(before.lods[0].chunks[0].rigid_vertices));
+    EXPECT_EQ(before.lods[0].shadow_indices.size(), before.lods[0].indices.size());
+    EXPECT_EQ(before.properties.get_bool("bForceCPUSkinning"), std::optional<bool>(true));
+
+    const fs::path dir = fs::temp_directory_path() / "mirage_test_skeletal_replacement";
+    fs::create_directories(dir);
+    const fs::path model = dir / "arms.glb";
+    std::ofstream(model) << "# the arms' source\n";
+    auto cube = Cube();
+    cube.sourceHash = mirage::models::HashFile(model.string());
+    cube.bones = {"lefthand", "RightHand"};		// Any case
+    cube.skin.assign(cube.vertices.size(), {});
+    for (std::size_t v = 0; v < cube.vertices.size(); ++v)
+    {
+        const float x = cube.vertices[v].position[0];
+        if (v < 4) cube.skin[v] = {{0, 1, 0, 0}, {0.5f, 0.5f, 0, 0}};		// The +X face: both hands
+        else cube.skin[v] = {{static_cast<std::uint16_t>(x < 0 ? 0 : 1), 0, 0, 0}, {2.f, 0, 0, 0}};		// Weights normalized
+    }
+    std::string error;
+    ASSERT_TRUE(mirage::models::WriteMeshFile(model.string() + ".mmesh", cube, &error)) << error;
+
+    const auto overlay = mirage::textures::BuildOverlay(package, {{target, model}});
+    ASSERT_TRUE(overlay.problems.empty()) << overlay.problems.front();
+    ASSERT_EQ(overlay.replaced, std::vector<std::string>{target});
+    const fs::path copy = dir / package.filename();
+    std::ofstream(copy, std::ios::binary).write(reinterpret_cast<const char*>(overlay.bytes.data()),
+                                                static_cast<std::streamsize>(overlay.bytes.size()));
+    const SkeletalMesh after = read(copy);
+    EXPECT_EQ(after.skeleton.size(), 74u);
+    EXPECT_EQ(after.name_index_map, before.name_index_map);
+    EXPECT_EQ(after.materials.size(), before.materials.size());
+    EXPECT_EQ(after.properties.get_bool("bForceCPUSkinning"), std::optional<bool>(true));
+    EXPECT_NEAR(after.bounds.sphere_radius, 86.6f, 0.1f);		// The cube's corner: 50 * sqrt(3)
+    ASSERT_EQ(after.lods.size(), 1u);
+    const SkeletalLod& lod = after.lods[0];
+    EXPECT_EQ(lod.vertices.size(), 24u);
+    EXPECT_EQ(lod.indices.size(), 36u);
+    EXPECT_EQ(lod.shadow_indices.size(), 36u);
+    EXPECT_EQ(lod.shadow_triangle_double_sided, std::vector<std::uint8_t>(12, 1));
+    EXPECT_EQ(lod.num_edges, 30);		// A face's own 4 vertices: its 4 sides open, its diagonal shared, 6 faces
+    EXPECT_EQ(lod.required_bones.size(), 74u);
+    ASSERT_EQ(lod.sections.size(), 1u);
+    EXPECT_EQ(lod.sections[0].material_index, before.lods[0].sections[0].material_index);
+    ASSERT_EQ(lod.chunks.size(), 1u);
+    const SkeletalChunk& chunk = lod.chunks[0];
+    EXPECT_EQ(chunk.bone_map, (std::vector<std::int16_t>{19, 48}));		// LeftHand, RightHand: as the vertices use them
+    EXPECT_EQ(chunk.rigid_vertices, 20);
+    EXPECT_EQ(chunk.soft_vertices, 4);
+    EXPECT_EQ(chunk.max_influences, 2);
+    EXPECT_EQ(chunk.stored_rigid_bytes.size(), 20u * (12 + 12 + 3 * 8 + 1));
+    EXPECT_EQ(chunk.stored_soft_bytes.size(), 4u * (12 + 12 + 3 * 8 + 8));
+    // Rigid vertices first, each on its hand with all the weight; the shared face's on both hands, half each
+    for (std::size_t v = 0; v < 24; ++v)
+    {
+        const SkinnedVertex& sv = lod.vertices[v];
+        EXPECT_EQ(sv.weights[0] + sv.weights[1] + sv.weights[2] + sv.weights[3], 255) << v;
+        if (v < 20) EXPECT_EQ(sv.bones[0], sv.position.x < 0 ? 19 : 48) << v;
+        else EXPECT_TRUE(sv.weights[0] >= 127 && sv.weights[1] >= 127) << v;
+    }
+
+    // A bone her skeleton doesn't have: not replaced, and said why
+    cube.bones[1] = "Tail";
+    ASSERT_TRUE(mirage::models::WriteMeshFile(model.string() + ".mmesh", cube, &error)) << error;
+    const auto refused = mirage::textures::BuildOverlay(package, {{target, model}});
+    ASSERT_EQ(refused.problems.size(), 1u);
+    EXPECT_NE(refused.problems[0].find("Tail"), std::string::npos) << refused.problems[0];
     fs::remove_all(dir);
 }

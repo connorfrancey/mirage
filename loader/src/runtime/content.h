@@ -17,13 +17,16 @@
 //       textures/M_Rooftops.Textures.T_Roof_02_D.png     # PNG, TGA, BMP or JPG: encoded to the texture's format,
 //       textures/B_C_01.Facade.T_Window_01.dds           # with a full mip chain; DDS: used as stored (DXT1/3/5, ARGB, L8)
 //
-//   meshes/         replacement static meshes (step 31), one model per mesh, named by the mesh's full path, each
-//                   converted first (`mirage model <file> --convert` writes the .mmesh beside it):
+//   meshes/         replacement meshes (step 31), one model per mesh, named by the mesh's full path, each converted
+//                   first (`mirage model <file> --convert` writes the .mmesh beside it):
 //
 //       meshes/P_Waste.GarbageBag_01.S_GarbageBag_01.glb     # glTF, FBX or OBJ; the original's materials stay
+//       meshes/CH_TKY_Crim_Fixer_1P.SK_UpperBody.glb         # a skeletal mesh: a skinned model, its bones named as
+//                                                            # the original's (Faith's first-person arms here)
 //
 //   Every package holding a copy of the texture or mesh opens as a rewritten copy (runtime/texture_overlays.h): the new
 //   one shows from the next level load on, and turning the content off gives the original on the one after.
+//   A skeletal mesh already loaded (Faith's arms) is swapped in memory at once, and back when turned off (runtime/models.h).
 //
 // Applied on the game thread, re-applied after every level load (objects that came with the level), and undone
 // exactly (each value's bytes as they were) when the content is turned off or the mod unloads. The game's files are

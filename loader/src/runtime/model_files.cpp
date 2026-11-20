@@ -3,6 +3,7 @@
 
 #include "runtime/texture_files.h"
 
+#include <UnrealLib/Assets/SkeletalMesh.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Linker/Linker.hpp>
 #include <UnrealLib/Linker/ReflectionSchema.hpp>
@@ -14,6 +15,7 @@
 #include <UnrealLib/Writer/PackageWriter.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <map>
@@ -30,6 +32,7 @@ namespace mirage::models
 		constexpr std::uint64_t kMeshFlags = 0x000F000400000000ull;		// As the game's StaticMesh exports store them
 		constexpr std::uint64_t kBodyFlags = 0x0007000000000000ull;		// ... and their RB_BodySetup subobjects
 		constexpr std::uint32_t kPackageFlags = 0x00000009u;			// AllowDownload | Cooked
+		constexpr std::size_t kMaxChunkBones = 75;						// The GPU skin shader's bone matrices
 		constexpr std::size_t kMaxVertices = 32767;						// Twice that (the shadow copies) in 16-bit indices
 
 		std::uint32_t Pack(float x, float y, float z, std::uint8_t w)
@@ -255,6 +258,184 @@ namespace mirage::models
 			throw std::runtime_error("the model has " + std::to_string(data.vertices.size()) + " vertices; a game mesh holds at most " +
 									 std::to_string(kMaxVertices) + " (split it)");
 		return Mesh(data, name, material);
+	}
+
+	UnrealLib::Assets::SkeletalMesh MakeSkeletalMesh(const MeshData& data, const UnrealLib::Assets::SkeletalMesh& original,
+													 const UnrealLib::AssetRules& rules)
+	{
+		using namespace UnrealLib::Assets;
+		if (data.vertices.empty() || data.indices.empty()) throw std::runtime_error("the model has no triangles");
+		if (data.bones.empty()) throw std::runtime_error("the model has no bones: a skeletal mesh is replaced by a skinned model");
+		if (original.skeleton.empty() || original.skeleton.size() > 255) throw std::runtime_error("the original's skeleton isn't one the game draws");
+		const std::size_t uvSets = static_cast<std::size_t>(std::max(1, int{rules.skeletal_chunk_uv_sets}));
+
+		// The model's bones are the original's, by name (any case)
+		const auto same = [](const std::string& x, const std::string& y) {
+			return x.size() == y.size() && std::equal(x.begin(), x.end(), y.begin(), [](char p, char q) {
+					   return std::tolower(static_cast<unsigned char>(p)) == std::tolower(static_cast<unsigned char>(q));
+				   });
+		};
+		std::vector<std::int16_t> boneOf(data.bones.size(), -1);
+		for (std::size_t b = 0; b < data.bones.size(); ++b)
+			for (std::size_t k = 0; k < original.skeleton.size(); ++k)
+				if (same(original.skeleton[k].name, data.bones[b])) boneOf[b] = static_cast<std::int16_t>(k);
+
+		struct Influence
+		{
+			std::int16_t bone = 0;
+			std::uint8_t weight = 0;
+		};
+		// A vertex's influences: weights to 255 in all (the largest takes what rounding leaves), strongest first
+		const auto influences = [&](std::size_t v) {
+			const MeshSkin& s = data.skin[v];
+			float sum = 0;
+			for (const float w : s.weight) sum += std::max(w, 0.f);
+			std::vector<std::pair<float, std::int16_t>> in;
+			for (int k = 0; k < 4; ++k) {
+				if (!(s.weight[k] > 0.f)) continue;
+				if (boneOf[s.bone[k]] < 0)
+					throw std::runtime_error("bone '" + data.bones[s.bone[k]] + "' isn't one of the original's (" + original.name + ")");
+				in.emplace_back(s.weight[k] / sum, boneOf[s.bone[k]]);
+			}
+			if (in.empty()) throw std::runtime_error("vertex " + std::to_string(v) + " has no bone");
+			std::sort(in.begin(), in.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+			std::vector<Influence> out;
+			int total = 0;
+			for (const auto& [w, bone] : in) {
+				const int q = static_cast<int>(std::lround(w * 255.f));
+				if (q > 0) out.push_back({bone, static_cast<std::uint8_t>(q)});
+				total += q;
+			}
+			if (out.empty()) out.push_back({in.front().second, 0});
+			out.front().weight = static_cast<std::uint8_t>(out.front().weight + 255 - total);
+			return out;
+		};
+
+		SkeletalMesh mesh = original;
+		mesh.per_poly_collision.clear();		// Per-bone collision of the original's triangles
+		SkeletalLod lod;
+		lod.num_uv_sets = 1;
+		lod.full_precision_uvs = false;
+
+		std::vector<MeshSection> sections = data.sections;
+		if (sections.empty()) sections.push_back({0, static_cast<std::uint32_t>(data.indices.size() / 3), ""});
+		const std::size_t originalSections = original.lods.empty() ? 0 : original.lods.front().sections.size();
+		for (std::size_t s = 0; s < sections.size(); ++s) {
+			const MeshSection& in = sections[s];
+			// The section's vertices (its own copies: a chunk's vertices are a range), rigid ones first
+			std::map<std::uint32_t, std::uint32_t> newIndex;
+			std::vector<std::uint32_t> order;
+			for (std::uint32_t i = in.firstIndex; i < in.firstIndex + in.triangles * 3; ++i)
+				if (newIndex.emplace(data.indices[i], 0).second) order.push_back(data.indices[i]);
+			std::vector<std::vector<Influence>> skin(order.size());
+			for (std::size_t k = 0; k < order.size(); ++k) skin[k] = influences(order[k]);
+			std::vector<std::size_t> sorted(order.size());
+			for (std::size_t k = 0; k < sorted.size(); ++k) sorted[k] = k;
+			std::stable_partition(sorted.begin(), sorted.end(), [&](std::size_t k) { return skin[k].size() == 1; });
+
+			SkeletalChunk chunk;
+			chunk.first_vertex = static_cast<std::int32_t>(lod.vertices.size());
+			for (const std::size_t k : sorted) {
+				const MeshVertex& v = data.vertices[order[k]];
+				newIndex[order[k]] = static_cast<std::uint32_t>(lod.vertices.size());
+				for (const Influence& f : skin[k])
+					if (std::find(chunk.bone_map.begin(), chunk.bone_map.end(), f.bone) == chunk.bone_map.end()) chunk.bone_map.push_back(f.bone);
+				chunk.max_influences = std::max(chunk.max_influences, static_cast<std::int32_t>(skin[k].size()));
+				(skin[k].size() == 1 ? chunk.rigid_vertices : chunk.soft_vertices)++;
+
+				SkinnedVertex out;
+				out.position = {v.position[0], v.position[1], v.position[2]};
+				out.packed_tangent = Pack(v.tangent[0], v.tangent[1], v.tangent[2], 128);
+				out.packed_normal = Pack(v.normal[0], v.normal[1], v.normal[2], v.tangent[3] < 0 ? 0 : 255);
+				out.uv[0] = {v.uv[0], v.uv[1]};
+				for (std::size_t f = 0; f < 4; ++f) {
+					out.bones[f] = skin[k][std::min(f, skin[k].size() - 1)].bone;		// Unused: the first's bone, weight 0
+					out.weights[f] = f < skin[k].size() ? skin[k][f].weight : 0;
+				}
+				lod.vertices.push_back(out);
+			}
+			if (chunk.bone_map.size() > kMaxChunkBones)
+				throw std::runtime_error("a section uses " + std::to_string(chunk.bone_map.size()) + " bones; the game skins at most " +
+										 std::to_string(kMaxChunkBones) + " a section (split it)");
+
+			// The chunk's CPU copies (the game skins some meshes on the CPU from them, the first-person arms among them):
+			// position, tangents X, Y (the binormal) and Z, the UV sets, then the bone (rigid) or 4 bones and 4 weights
+			BinaryWriter rigid, soft;
+			for (std::size_t n = 0; n < sorted.size(); ++n) {
+				const MeshVertex& v = data.vertices[order[sorted[n]]];
+				const SkinnedVertex& g = lod.vertices[static_cast<std::size_t>(chunk.first_vertex) + n];
+				const bool isRigid = skin[sorted[n]].size() == 1;
+				BinaryWriter& w = isRigid ? rigid : soft;
+				for (const float c : v.position) w.write_f32(c);
+				const float sign = v.tangent[3] < 0 ? -1.f : 1.f;
+				const float* t = v.tangent;
+				const float* z = v.normal;
+				const float y[3] = {sign * (z[1] * t[2] - z[2] * t[1]), sign * (z[2] * t[0] - z[0] * t[2]), sign * (z[0] * t[1] - z[1] * t[0])};
+				w.write_u32(g.packed_tangent);
+				w.write_u32(Pack(y[0], y[1], y[2], 128));
+				w.write_u32(g.packed_normal);
+				for (std::size_t u = 0; u < uvSets; ++u) {
+					w.write_f32(v.uv[0]);
+					w.write_f32(v.uv[1]);
+				}
+				const auto local = [&](std::int16_t bone) {
+					return static_cast<std::uint8_t>(std::find(chunk.bone_map.begin(), chunk.bone_map.end(), bone) - chunk.bone_map.begin());
+				};
+				if (isRigid) w.write_u8(local(g.bones[0]));
+				else {
+					for (const std::int16_t b : g.bones) w.write_u8(local(b));
+					for (const std::uint8_t wt : g.weights) w.write_u8(wt);
+				}
+			}
+			chunk.stored_rigid_vertices = static_cast<std::size_t>(chunk.rigid_vertices);
+			chunk.stored_soft_vertices = static_cast<std::size_t>(chunk.soft_vertices);
+			chunk.stored_rigid_bytes = rigid.take();
+			chunk.stored_soft_bytes = soft.take();
+
+			SkeletalSection section;
+			section.material_index = originalSections ? original.lods.front().sections[std::min(s, originalSections - 1)].material_index : 0;
+			section.chunk_index = static_cast<std::int16_t>(lod.chunks.size());
+			section.first_index = static_cast<std::int32_t>(lod.indices.size());
+			section.num_triangles = static_cast<std::int32_t>(in.triangles);
+			for (std::uint32_t i = in.firstIndex; i < in.firstIndex + in.triangles * 3; ++i) lod.indices.push_back(newIndex[data.indices[i]]);
+			for (const std::int16_t b : chunk.bone_map)
+				if (std::find(lod.active_bones.begin(), lod.active_bones.end(), b) == lod.active_bones.end()) lod.active_bones.push_back(b);
+			lod.sections.push_back(section);
+			lod.chunks.push_back(std::move(chunk));
+		}
+		const std::size_t n = lod.vertices.size();
+		if (n > 65535) throw std::runtime_error("the model has " + std::to_string(n) + " vertices; a skeletal mesh holds at most 65535 (split it)");
+
+		// As the game's: the shadow indices a copy of the indices, every triangle double-sided for shadows, the edges, every
+		// bone required, the source point index of each vertex (itself)
+		std::vector<std::uint16_t> indices16(lod.indices.begin(), lod.indices.end());
+		lod.shadow_indices = indices16;
+		lod.shadow_triangle_double_sided.assign(lod.indices.size() / 3, 1);
+		lod.edges = Edges(indices16);
+		lod.num_edges = static_cast<std::int32_t>(lod.edges.size() / 16);
+		for (std::size_t b = 0; b < original.skeleton.size(); ++b) lod.required_bones.push_back(static_cast<std::uint8_t>(b));
+		lod.num_vertices = static_cast<std::int32_t>(n);
+		lod.raw_point_indices.element_count = static_cast<std::int32_t>(n);
+		BinaryWriter points;
+		for (std::size_t i = 0; i < n; ++i) points.write_u16(static_cast<std::uint16_t>(i));
+		lod.raw_point_index_bytes = points.take();
+
+		Vec3 lo{FLT_MAX, FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+		for (const SkinnedVertex& v : lod.vertices) {
+			lo = {std::min(lo.x, v.position.x), std::min(lo.y, v.position.y), std::min(lo.z, v.position.z)};
+			hi = {std::max(hi.x, v.position.x), std::max(hi.y, v.position.y), std::max(hi.z, v.position.z)};
+		}
+		mesh.bounds.origin = {(lo.x + hi.x) / 2, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2};
+		mesh.bounds.box_extent = {(hi.x - lo.x) / 2, (hi.y - lo.y) / 2, (hi.z - lo.z) / 2};
+		float radius = 0;
+		for (const SkinnedVertex& v : lod.vertices) {
+			const float dx = v.position.x - mesh.bounds.origin.x, dy = v.position.y - mesh.bounds.origin.y, dz = v.position.z - mesh.bounds.origin.z;
+			radius = std::max(radius, std::sqrt(dx * dx + dy * dy + dz * dz));
+		}
+		mesh.bounds.sphere_radius = radius;
+		// The model at every level of detail the original has (its LODInfo stays, one entry a level)
+		mesh.lods.assign(std::max<std::size_t>(1, original.lods.size()), lod);
+		return mesh;
 	}
 
 	bool BuildPackage(UnrealLib::Linker& linker, const MeshData& data, const std::string& meshName, const std::filesystem::path& out,

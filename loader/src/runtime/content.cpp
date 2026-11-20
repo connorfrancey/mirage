@@ -4,6 +4,7 @@
 #include "game/object_query.h"
 #include "game/uobject.h"
 #include "runtime/anim.h"
+#include "runtime/models.h"
 #include "runtime/reflect.h"
 #include "runtime/texture_overlays.h"
 #include "sdk/SDK.hpp"
@@ -241,6 +242,7 @@ namespace mirage::content
 		set.stats = {};
 		set.stats.textures = static_cast<int>(set.textures.size());
 		if (!set.textures.empty()) textures::Activate(set.mod, set.textures);	// Again after a level load: a no-op
+		if (!set.textures.empty()) models::ActivateSkeletal(set.mod, set.textures);	// Skeletal meshes already loaded
 		if (!set.clips.empty() && !wasApplied) anim::Register(set.mod, set.clips);		// Installed on the player by anim::Tick
 		for (const Target& t : set.targets) {
 			Classes::UObject* object = FindTarget(t.key);
@@ -296,6 +298,7 @@ namespace mirage::content
 			}
 		}
 		if (!set.textures.empty()) textures::Deactivate(set.mod);
+		if (!set.textures.empty()) models::DeactivateSkeletal(set.mod);
 		if (!set.clips.empty()) anim::Unregister(set.mod);
 		set.applied = false;
 		spdlog::info("[mod {}] content off: {} values put back{}", set.mod, restored,

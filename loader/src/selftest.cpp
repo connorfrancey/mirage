@@ -25,6 +25,7 @@
 #include "runtime/fhooks.h"
 #include "runtime/file_redirect.h"
 #include "runtime/model_files.h"
+#include "runtime/models.h"
 #include "runtime/texture_overlays.h"
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
@@ -6932,6 +6933,100 @@ void TestMeshReplacement()
     End(s);
 }
 
+// Step 31's skeletal mesh replacement, with tests/mods/arms-test: Faith's first-person arms
+// (CH_TKY_Crim_Fixer_1P.SK_UpperBody, loaded with the game's scripts before Mirage) replaced by box arms, a skinned
+// model swapped in memory (runtime/models.h). Its module turns it on and off. On: the pawn's first-person mesh and the
+// template new pawns copy (TdGame.Default__TdPlayerPawn.TdPawnMesh1p) draw the copy's mesh, with the box arms' bounds
+// (radius 63.8; the arms' are 123.0), her hand still where her skeleton puts it (the arms' animations play on the
+// model), and a respawned pawn gets it too. Off: the original on the pawn now and on the next one. Left on.
+void TestArms()
+{
+    Step& s = Begin("Mirage arms");
+    Probe p(s);
+    Module* m = modules::Find("Box Arms");
+    if (!m) {
+        p.Problem("the Box Arms module (tests/mods/arms-test) is missing");
+        End(s);
+        return;
+    }
+    constexpr float kArmsRadius = 123.0f, kBoxRadius = 63.8f;
+    struct Arms
+    {
+        std::string mesh, templ;
+        float radius = 0.f, hand = -1.f;
+    };
+    const auto read = [&] {
+        Arms a;
+        OnGameThread([&] {
+            auto* pawn = game::Pawn();
+            if (pawn && pawn->Mesh1p && pawn->Mesh1p->SkeletalMesh) {
+                a.mesh = pawn->Mesh1p->SkeletalMesh->GetPathName();
+                a.radius = pawn->Mesh1p->SkeletalMesh->Bounds.SphereRadius;
+                mirage::call::Params c(pawn->Mesh1p, "GetBoneLocation");
+                c.SetName("BoneName", "LeftHand");
+                c.Set("Space", std::int32_t{0});
+                Classes::FVector v{};
+                if (mirage::call::Call(pawn->Mesh1p, c) && c.GetRaw("ReturnValue", &v, sizeof v)) {
+                    const float dx = v.X - pawn->Location.X, dy = v.Y - pawn->Location.Y, dz = v.Z - pawn->Location.Z;
+                    a.hand = std::sqrt(dx * dx + dy * dy + dz * dz);
+                }
+            }
+            auto* t = game::FindObject<Classes::USkeletalMeshComponent>("TdSkeletalMeshComponent TdGame.Default__TdPlayerPawn.TdPawnMesh1p");
+            if (t && t->SkeletalMesh) a.templ = t->SkeletalMesh->GetPathName();
+        });
+        return a;
+    };
+    const auto set = [&](bool on) {
+        OnRenderThread([m, on] { m->SetEnabled(on); });
+        WaitTicks(3);       // Applied on the game thread; the copy built on a worker, swapped in on a tick
+        const bool built = WaitFor(60.0, [] {
+            bool pending = true;
+            OnGameThread([&] { pending = mirage::models::SkeletalPending(); });
+            return !pending;
+        });
+        if (!built) p.Problem("the arms' copy took more than a minute to build");
+        WaitTicks(3);
+    };
+    const auto isCopy = [](const std::string& path) {
+        return path.rfind("CH_TKY_Crim_Fixer_1P_", 0) == 0 && path.size() > 13 && path.ends_with(".SK_UpperBody");
+    };
+    const auto respawn = [&] {
+        if (!RestartAndWait()) p.Problem("the player wasn't respawned");
+        WaitTicks(10);
+    };
+
+    set(false);
+    Arms a = read();
+    s.notes.push_back(fmt::format("off: {} (radius {:.1f}), the template {}, the left hand {:.0f} from the pawn", a.mesh, a.radius, a.templ, a.hand));
+    if (a.mesh != "CH_TKY_Crim_Fixer_1P.SK_UpperBody" || std::fabs(a.radius - kArmsRadius) > 1.f)
+        p.Problem(fmt::format("off: the arms are {} (radius {:.1f}), not Faith's", a.mesh, a.radius));
+    const float hand = a.hand;
+
+    set(true);
+    a = read();
+    s.notes.push_back(fmt::format("on: {} (radius {:.1f}), the template {}, the left hand {:.0f} from the pawn", a.mesh, a.radius, a.templ, a.hand));
+    if (!isCopy(a.mesh) || std::fabs(a.radius - kBoxRadius) > 0.5f)
+        p.Problem(fmt::format("on: the arms are {} (radius {:.1f}), not the box arms (radius {:.1f})", a.mesh, a.radius, kBoxRadius));
+    if (!isCopy(a.templ)) p.Problem("on: new pawns' arms (the template) are " + a.templ + ", not the box arms");
+    if (a.hand < 0.f || a.hand > 300.f || (hand > 0.f && std::fabs(a.hand - hand) > 100.f))
+        p.Problem(fmt::format("on: the left hand is {:.0f} from the pawn (off: {:.0f}): the skeleton doesn't drive the box arms", a.hand, hand));
+    respawn();
+    a = read();
+    if (!isCopy(a.mesh)) p.Problem("on: a respawned pawn's arms are " + a.mesh + ", not the box arms");
+
+    set(false);
+    a = read();
+    if (a.mesh != "CH_TKY_Crim_Fixer_1P.SK_UpperBody" || a.templ != a.mesh)
+        p.Problem("off again: the arms are " + a.mesh + " and the template's " + a.templ + ", not Faith's");
+    respawn();
+    a = read();
+    if (a.mesh != "CH_TKY_Crim_Fixer_1P.SK_UpperBody") p.Problem("off again: a respawned pawn's arms are " + a.mesh + ", not Faith's");
+
+    set(true);      // As the player would have it
+    p.Check(1, true);
+    End(s);
+}
+
 // Step 28's navigation, its first question: the editor's path builder (AScout::DefinePaths, through a TdScout's Exec)
 // run in the game on the loaded level. It must run, leave reach specs between the navigation points, and leave the game
 // playing: a garbage collection right after (the old reach specs freed: none may still be reachable from the
@@ -8338,6 +8433,7 @@ const Named* FeatureList()
         {"Mirage path building", &TestPathBuilding, false, true},
         {"Mirage models", &TestModels, false},
         {"Mirage mesh replacement", &TestMeshReplacement, false},     // Opt-in: fails until every point gets reach specs (step 28)
+        {"Mirage arms", &TestArms, false},
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage blink", &TestBlink, false},
         {"Mirage sound", &TestSound, false},

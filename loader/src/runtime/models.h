@@ -19,6 +19,10 @@
 #include <filesystem>
 #include <string>
 
+#include "runtime/texture_files.h"
+
+#include <vector>
+
 namespace Classes
 {
 	class UStaticMesh;
@@ -30,4 +34,18 @@ namespace mirage::models
 	// true until it is (ask again on a later tick). nullptr and `why` if there's no converted model, it was converted
 	// from another version of the file (its source hash), or it doesn't build or load. Game thread.
 	Classes::UStaticMesh* MeshOf(const std::filesystem::path& file, std::string* why, bool* pending);
+
+	// Skeletal meshes replaced in memory. A content mod's replacement of a skeletal mesh that is already loaded (Faith's
+	// first-person arms, CH_TKY_Crim_Fixer_1P.SK_UpperBody, come with the game's scripts, before Mirage) can't go
+	// through the overlay (runtime/texture_overlays.h): its package isn't opened again. Instead the package is rewritten
+	// the same way (textures::BuildOverlay) on a worker, under a name of its own
+	// ("CH_TKY_Crim_Fixer_1P_1a2b3c4d.upk" in <mirage>\models\), loaded beside the original, and every SkeletalMeshComponent drawing the
+	// original draws the copy's mesh: a live one through SetSkeletalMesh, a template (a class's default subobject, which
+	// new pawns copy) by its property. Turned off, they draw the original again. Game thread.
+	void ActivateSkeletal(const std::string& owner, const std::vector<textures::Replacement>& replacements);
+	void DeactivateSkeletal(const std::string& owner);
+	// Copies built since the last tick are loaded and swapped in. Game thread, every tick.
+	void TickSkeletal();
+	// A copy is still being built (for the self-test)
+	bool SkeletalPending();
 }

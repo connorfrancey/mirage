@@ -1587,8 +1587,8 @@ below as self-tests. **Costs (targets):** a full-screen pass under 0.5 ms at 108
 - **Models and materials at runtime:** load a mesh and textures from a mod's files (glTF/FBX converted by the CLI
   through UnrealLib), swap the player's arms and body (step 7's texture path extended to meshes).
 
-**Status (2026-11-19): static models from mods, with their own textures, and mesh replacement work; skeletal meshes
-and the rest not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
+**Status (2026-11-20): static models from mods, with their own textures, mesh replacement and skeletal mesh
+replacement (Faith's arms) work; the post-process pass and the options-menu page not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
 which stays out of Mirage.dll) to `<file>.mmesh` (runtime/mesh_file.h: the game's space, 50 units a meter by default,
 and a hash of the source so a changed model must be converted again). The runtime builds it on a worker into a package
 holding one StaticMesh (runtime/model_files, UnrealLib's new `write_static_mesh` and `build_kdop`; every cooked mesh
@@ -1621,7 +1621,20 @@ OBJ's `norm`) becomes the instance's "Normal Texture", stored as the game's are 
 UnpackMin -1, the world normal-map LOD group) with its green flipped (glTF's convention is green up, the game's green
 down); the crate has one. Specular maps too (`.mmesh` version 4): an OBJ's `map_Ks` (an FBX's specular) becomes the
 instance's "Specular Texture" as stored; glTF has none, so its metallic-roughness image stands in, made a grey specular
-map of 1 - roughness (its green; metalness is not used); the crate has one (crate_s.png).
+map of 1 - roughness (its green; metalness is not used); the crate has one (crate_s.png). Skeletal meshes (`.mmesh`
+version 5: a skinned model's bone names and each vertex's 4 strongest influences): UnrealLib writes them
+(`write_skeletal_mesh`; all 742 of the game's write back byte-identically, the source point indices they keep and a
+re-saved package's stale bulk offsets included), and a skinned model replaces one as `meshes/<path>.glb`, keeping the
+original's skeleton (bones matched by name), materials, sockets and properties (models::MakeSkeletalMesh, laid out as
+Faith's arms are: a chunk a section, rigid vertices first, the chunks' CPU copies, which the arms are drawn from:
+bForceCPUSkinning). Faith's arms (CH_TKY_Crim_Fixer_1P.SK_UpperBody) load with the game's scripts, before Mirage, so
+the overlay can't reach them: their package is rewritten under a name of its own, loaded beside it, and every
+component drawing the original (the template new pawns copy too) draws the copy's mesh, rooted while it is in use (a
+level change collected it from under the arms and crashed the game); turned off, the original again. Self-test
+"Mirage arms" (tests/mods/arms-test: box arms skinned to the upper arms, forearms and hands): off, the arms' radius
+123.0; on, 63.8 on the pawn, its template and a respawned pawn, the left hand still where the skeleton puts it; off
+again, Faith's. The copy holds the whole package (about 10 MB of textures again), and the self-test warns that the
+largest free block of the address space is shrinking.
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.

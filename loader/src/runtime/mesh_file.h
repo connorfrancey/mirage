@@ -6,7 +6,7 @@
 // Already in the game's space: Unreal units, Z up, left-handed (the file's Y and Z swapped, which also makes the front
 // faces clockwise, as Unreal draws them), UVs with V down. Little-endian:
 //
-//   "MMSH" u32 version (4)
+//   "MMSH" u32 version (5)
 //   u32 source hash (HashBytes of the model file it was converted from: a changed model is converted again)
 //   u32 vertices, u32 indices (3 a triangle), u32 sections
 //   per section: u32 first index, u32 triangles, u16 material name length, the name (UTF-8), u32 image size, the image
@@ -16,6 +16,8 @@
 //     stored, roughness in its green; size 0 for none, and always 0 when the section has a specular map)
 //   per vertex: f32 position[3], f32 normal[3], f32 tangent[4] (w: the binormal's sign, +1 or -1), f32 uv[2]
 //   u32 index[indices]
+//   u32 bones, per bone u16 name length and the name (UTF-8); with any bones (a skinned model), per vertex u16 bone[4]
+//     (indices into those names) and f32 weight[4] (0 for an unused influence)
 
 #include <cstdint>
 #include <cstring>
@@ -38,15 +40,23 @@ namespace mirage::models
 		std::string specular;		// Its specular map's file bytes (empty if none)
 		std::string roughness;		// Else its glTF metallic-roughness image's (roughness in green; empty if none)
 	};
+	// A vertex's bones (indices into MeshData::bones) and their weights, up to 4
+	struct MeshSkin
+	{
+		std::uint16_t bone[4]{};
+		float weight[4]{};
+	};
 	struct MeshData
 	{
 		std::uint32_t sourceHash = 0;
 		std::vector<MeshVertex> vertices;
 		std::vector<std::uint32_t> indices;
 		std::vector<MeshSection> sections;
+		std::vector<std::string> bones;		// The bone names a skinned model's vertices use (empty: a static model)
+		std::vector<MeshSkin> skin;			// One per vertex when it has bones
 	};
 
-	inline constexpr std::uint32_t kMeshFileVersion = 4;
+	inline constexpr std::uint32_t kMeshFileVersion = 5;
 
 	// FNV-1a
 	inline std::uint32_t HashBytes(const std::string& bytes)
@@ -91,6 +101,20 @@ namespace mirage::models
 		static_assert(sizeof(MeshVertex) == 48);
 		out.write(reinterpret_cast<const char*>(m.vertices.data()), static_cast<std::streamsize>(m.vertices.size() * sizeof(MeshVertex)));
 		out.write(reinterpret_cast<const char*>(m.indices.data()), static_cast<std::streamsize>(m.indices.size() * 4));
+		u32(static_cast<std::uint32_t>(m.bones.size()));
+		for (const std::string& b : m.bones) {
+			const auto n = static_cast<std::uint16_t>(b.size() > 0xFFFF ? 0xFFFF : b.size());
+			out.write(reinterpret_cast<const char*>(&n), 2);
+			out.write(b.data(), n);
+		}
+		static_assert(sizeof(MeshSkin) == 24);
+		if (!m.bones.empty()) {
+			if (m.skin.size() != m.vertices.size()) {
+				if (error) *error = "the skin isn't one entry a vertex";
+				return false;
+			}
+			out.write(reinterpret_cast<const char*>(m.skin.data()), static_cast<std::streamsize>(m.skin.size() * sizeof(MeshSkin)));
+		}
 		if (!out && error) *error = "writing " + path + " failed";
 		return static_cast<bool>(out);
 	}
@@ -137,7 +161,7 @@ namespace mirage::models
 			}
 			if (s.firstIndex > indices || s.triangles > (indices - s.firstIndex) / 3) return fail("a section past the indices");
 		}
-		if (bytes.size() - at != static_cast<std::size_t>(vertices) * sizeof(MeshVertex) + static_cast<std::size_t>(indices) * 4)
+		if (bytes.size() - at < static_cast<std::size_t>(vertices) * sizeof(MeshVertex) + static_cast<std::size_t>(indices) * 4)
 			return fail("its size doesn't match its counts");
 		m.vertices.resize(vertices);
 		m.indices.resize(indices);
@@ -145,6 +169,23 @@ namespace mirage::models
 		take(m.indices.data(), m.indices.size() * 4);
 		for (const std::uint32_t i : m.indices)
 			if (i >= vertices) return fail("an index past the vertices");
+		std::uint32_t bones = 0;
+		if (!take(&bones, 4) || bones > 0xFFFF) return fail("cut short");
+		m.bones.resize(bones);
+		for (std::string& b : m.bones) {
+			std::uint16_t n = 0;
+			if (!take(&n, 2)) return fail("cut short");
+			b.resize(n);
+			if (n && !take(&b[0], n)) return fail("cut short");
+		}
+		if (bones) {
+			m.skin.resize(vertices);
+			if (!take(m.skin.data(), m.skin.size() * sizeof(MeshSkin))) return fail("cut short");
+			for (const MeshSkin& s : m.skin)
+				for (int k = 0; k < 4; ++k)
+					if (s.weight[k] > 0 && s.bone[k] >= bones) return fail("a vertex's bone past the bones");
+		}
+		if (at != bytes.size()) return fail("its size doesn't match its counts");
 		return true;
 	}
 }

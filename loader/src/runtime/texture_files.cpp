@@ -3,6 +3,7 @@
 #include "runtime/model_files.h"
 
 #include <UnrealLib/Assets/BulkData.hpp>
+#include <UnrealLib/Assets/SkeletalMesh.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Core/Error.hpp>
 #include <UnrealLib/Linker/Linker.hpp>
@@ -467,7 +468,7 @@ namespace mirage::textures
 		for (std::size_t i = 0; i < exports.size(); ++i) {
 			const ObjectIndex idx = ObjectIndex::from_export(i);
 			const std::string cls = className(idx);
-			if (!Assets::is_texture2d_class(cls) && cls != "StaticMesh") continue;
+			if (!Assets::is_texture2d_class(cls) && cls != "StaticMesh" && cls != "SkeletalMesh") continue;
 			out.push_back(ObjectPath(idx, packageName, name, outer, className));
 		}
 		return out;
@@ -503,13 +504,15 @@ namespace mirage::textures
 			PixelFormat original = PixelFormat::Unknown;
 			std::shared_ptr<Assets::StaticMesh> mesh;		// A mesh's replacement (else a texture's)
 			std::shared_ptr<Assets::StaticMesh> bodyOf;		// A replaced mesh's RB_BodySetup, given this mesh's shape
+			std::shared_ptr<Assets::SkeletalMesh> skeletal;	// A skeletal mesh's replacement
 			std::string path;
 		};
 		std::vector<Edit> edits;
 		for (std::size_t i = 0; i < pkg.exports().size(); ++i) {
 			const ObjectIndex idx = ObjectIndex::from_export(i);
 			const std::string cls = pkg.class_name(idx);
-			const bool isMesh = cls == "StaticMesh";
+			const bool isSkeletal = cls == "SkeletalMesh";
+			const bool isMesh = cls == "StaticMesh" || isSkeletal;
 			if (!isMesh && !Assets::is_texture2d_class(cls)) continue;
 			const std::string path = ObjectPath(idx, packageName, [&](ObjectIndex o) { return pkg.object_name(o); },
 												[&](ObjectIndex o) { return pkg.outer(o); },
@@ -521,18 +524,41 @@ namespace mirage::textures
 																 : "a texture is replaced by an image, not a model"));
 				continue;
 			}
+			// The converted model of a mesh's replacement (current: converted since the model last changed)
+			const auto converted = [&](const fs::path& model) {
+				models::MeshData data;
+				std::string error;
+				if (!models::ReadMeshFile(model.string() + ".mmesh", data, &error))
+					throw Fail(model.filename().string() + " isn't converted: run `mirage model " + model.filename().string() +
+							   " --convert` (" + error + ")");
+				if (data.sourceHash != models::HashFile(model.string()))
+					throw Fail(model.filename().string() + " changed since it was converted: run `mirage model " +
+							   model.filename().string() + " --convert` again");
+				return data;
+			};
+			if (isSkeletal) {
+				try {
+					const Assets::SkeletalMesh original = Assets::read_skeletal_mesh(linker, ObjectRef{&pkg, idx});
+					ObjectProperties op = linker.read_properties(ObjectRef{&pkg, idx});
+					Edit e;
+					e.index = idx;
+					e.path = path;
+					e.propertiesOffset = op.header.properties_offset;
+					e.propertiesEnd = op.end_offset;
+					e.oldNative = pkg.export_data(i).size() - op.end_offset;
+					e.properties = std::move(op.properties);
+					e.skeletal = std::make_shared<Assets::SkeletalMesh>(
+						models::MakeSkeletalMesh(converted(it->second->file), original, pkg.profile().assets));
+					edits.push_back(std::move(e));
+				} catch (const std::exception& ex) {
+					result.problems.push_back(path + ": " + ex.what());
+				}
+				continue;
+			}
 			if (isMesh) {
 				try {
 					const Assets::StaticMesh original = Assets::read_static_mesh(linker, ObjectRef{&pkg, idx});
-					const fs::path model = it->second->file;
-					models::MeshData data;
-					std::string error;
-					if (!models::ReadMeshFile(model.string() + ".mmesh", data, &error))
-						throw Fail(model.filename().string() + " isn't converted: run `mirage model " + model.filename().string() +
-								   " --convert` (" + error + ")");
-					if (data.sourceHash != models::HashFile(model.string()))
-						throw Fail(model.filename().string() + " changed since it was converted: run `mirage model " +
-								   model.filename().string() + " --convert` again");
+					const models::MeshData data = converted(it->second->file);
 					// Section by section the original's materials (the last one for any more sections than it had)
 					std::vector<ObjectIndex> materials;
 					if (!original.lods.empty())
@@ -598,6 +624,9 @@ namespace mirage::textures
 		PackageModel model = PackageModel::from_package(pkg);
 		const auto native = [&](const Edit& e, std::uint64_t base) {
 			if (e.bodyOf) return std::vector<std::byte>(4);		// PreCachedPhysData: none (PhysX cooks the new shape)
+			if (e.skeletal)
+				return Assets::write_skeletal_mesh(*e.skeletal, ctx, pkg.profile().assets,
+												   [&](std::string_view text) { return model.make_name(text); }, base);
 			return e.mesh ? Assets::write_static_mesh(*e.mesh, ctx, base) : NativeData(ctx, e.sourceArt, e.encoded, base);
 		};
 		for (Edit& e : edits) {
@@ -612,10 +641,12 @@ namespace mirage::textures
 				data.insert(data.end(), bytes.begin(), bytes.end());
 				continue;
 			}
-			if (e.mesh) {
+			if (e.mesh || e.skeletal) {
 				// The new triangles are the collision, not the original's simple shapes
-				SetBool(e.properties, model, "UseSimpleLineCollision", false);
-				SetBool(e.properties, model, "UseSimpleBoxCollision", false);
+				if (e.mesh) {
+					SetBool(e.properties, model, "UseSimpleLineCollision", false);
+					SetBool(e.properties, model, "UseSimpleBoxCollision", false);
+				}
 				replace_properties(model, e.index, e.propertiesOffset, e.propertiesEnd, e.properties);
 				auto& data = model.export_data[e.index.export_index()];
 				e.nativeStart = data.size() - e.oldNative;

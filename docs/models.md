@@ -1,11 +1,11 @@
 # Exporting models from Blender
 
-A mod's 3D model can be a prop placed in a level, or a replacement for one of the game's static meshes. The model is
+A mod's 3D model can be a prop placed in a level, or a replacement for one of the game's meshes (static, or skeletal such as Faith's arms). The model is
 made in Blender (or any tool that writes glTF, FBX or OBJ) and converted once by the `mirage` tool to a `.mmesh` file
 beside it; the game builds that into a mesh when it loads. This page gives the Blender settings that give the right
 result, and what the converter does with what Blender writes.
 
-Skeletal meshes (anything with bones, such as Faith's arms) are not supported yet: only static meshes.
+A skeletal mesh (anything with bones) can only replace one of the game's: see [Skeletal meshes](#skeletal-meshes).
 
 ## The short version
 
@@ -32,7 +32,7 @@ the textures inside the file, and its axes and units are fixed by the standard.
 | Data > Mesh | Tangents | Either | The converter makes them when the file has none |
 | Data > Material | Materials | Export | Material names and textures come from here |
 | Data > Material | Images | Automatic (PNG or JPEG) | The game decodes PNG, JPEG, TGA and BMP, not WebP |
-| Data > Shape Keys, Armature, Skinning | | Off | Static meshes don't deform |
+| Data > Shape Keys, Armature, Skinning | | Off (On for a skeletal mesh) | Static meshes don't deform |
 | Data > Compression | Draco | **Off** | The converter can't read Draco-compressed meshes |
 | Animation | Animation | Off | Not used |
 
@@ -100,6 +100,32 @@ UnrealPackageExtractor <CookedPC>\P_Waste.upk -o out -t meshes --filter GarbageB
 Import that OBJ into Blender with the default axes (Forward -Z, Up Y). It comes in in game units (1 Blender meter =
 1 unit), already at the right pivot. Model over it, delete it, export, and convert with `--scale 1` so the units stay
 as they are.
+
+## Skeletal meshes
+
+A skinned model replaces one of the game's skeletal meshes, keeping the original's skeleton, so every animation the
+game plays on it plays on the model. Name it after the mesh in a content mod, like a static one:
+`content/meshes/CH_TKY_Crim_Fixer_1P.SK_UpperBody.glb` replaces Faith's first-person arms (see `tests/mods/arms-test`,
+whose box arms are made by `make_box_arms.py`). Faith's arms are loaded before Mirage starts, so they are swapped in
+memory as soon as the converted copy is built (about a second), and back when the mod is turned off.
+
+- **Bones.** Only the names count: each bone the model's vertices are weighted to must have the name of one of the
+  original's bones (any case). Where the model's bones sit, and their rotations, are ignored: the original's are used.
+- **Pose.** The model is used as it lies in the file, so it must be modelled in the original's reference pose, in its
+  place: build it on top of the original (below).
+- **Weights.** Every vertex needs a bone; at most 4 bones a vertex (the converter keeps the 4 strongest) and at most
+  75 different bones in one material.
+- **Export.** As above, with Armature and Skinning **on**. Converting it prints its bones (`6 bone(s): skinned`).
+
+To start from the original, the extractor writes a skeletal mesh as ActorX PSK, with its skeleton and weights:
+
+```
+UnrealPackageExtractor <CookedPC>\Characters\CH_TKY_Crim_Fixer_1P.upk -o out -t meshes --filter SK_UpperBody
+```
+
+Blender reads PSK with a PSK add-on (Blender doesn't by itself). It comes in in game units, so convert with
+`--scale 1`, and check with `mirage model <file>` that its size is the original's (the arms are about 224 x 73 x 69
+units); this path hasn't been tried end to end yet.
 
 ## FBX and OBJ
 

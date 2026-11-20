@@ -7,7 +7,7 @@ namespace model
 {
 	struct ConvertStats
 	{
-		unsigned vertices = 0, triangles = 0, sections = 0, textures = 0;	// textures: the sections' own images (diffuse and normal maps)
+		unsigned vertices = 0, triangles = 0, sections = 0, textures = 0, bones = 0;	// textures: the sections' own images (diffuse and normal maps)
 	};
 
 	// `scale`: Unreal units per file unit (glTF is in meters; the game's unit is about 2 cm, so 50). False and `error`

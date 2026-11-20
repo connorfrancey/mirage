@@ -107,7 +107,6 @@ namespace model
 			std::fill(std::begin(r.min), std::end(r.min), 0.f);
 			std::fill(std::begin(r.max), std::end(r.max), 0.f);
 		}
-		if (r.bones) r.problems.push_back("it has bones (" + std::to_string(r.bones) + "): static meshes don't animate; skeletal meshes aren't supported yet");
 		return r;
 	}
 
@@ -121,6 +120,7 @@ namespace model
 		o << r.file << " (" << r.format << "): " << r.meshes.size() << " mesh(es), " << r.vertices << " vertices, " << r.triangles
 		  << " triangles, " << r.materials.size() << " material(s), " << r.nodes << " node(s)";
 		if (r.animations) o << ", " << r.animations << " animation(s)";
+		if (r.bones) o << ", " << r.bones << " bone(s): skinned, it replaces a game skeletal mesh whose bones have those names";
 		o << "\n  size " << (r.max[0] - r.min[0]) << " x " << (r.max[1] - r.min[1]) << " x " << (r.max[2] - r.min[2])
 		  << " (the file's units; the game's are about 2 cm: Faith is ~192 units tall)\n";
 		for (const Mesh& m : r.meshes)
@@ -131,7 +131,7 @@ namespace model
 			for (const auto& t : m.textures) o << " " << t;
 			o << "\n";
 		}
-		if (r.problems.empty()) o << "  ok for a game static mesh\n";
+		if (r.problems.empty()) o << "  ok for a game mesh\n";
 		for (const auto& p : r.problems) o << "  problem: " << p << "\n";
 		return o.str();
 	}

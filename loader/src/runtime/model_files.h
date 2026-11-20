@@ -18,6 +18,7 @@
 
 #include "runtime/mesh_file.h"
 
+#include <UnrealLib/Assets/SkeletalMesh.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
 
 #include <filesystem>
@@ -49,6 +50,18 @@ namespace mirage::models
 	// The properties, BodySetup and the rest are left at their defaults for the caller (a new package, or a replaced
 	// mesh keeping the original's). Throws std::runtime_error for no triangles or more than 32,767 vertices.
 	UnrealLib::Assets::StaticMesh MakeStaticMesh(const MeshData& mesh, const std::string& name, const MaterialFor& material);
+
+	// `mesh`, a skinned model, as the replacement of the game's skeletal mesh `original`: the original's skeleton (the
+	// model's bones are its bones, matched by name), materials (section by section), sockets and properties, so its
+	// animations play on the model. Laid out as the game's are (read from Faith's first-person arms,
+	// CH_TKY_Crim_Fixer_1P.SK_UpperBody, tests/test_models.cpp): a chunk a section (its bones at most 75, the GPU skin's
+	// limit), rigid vertices before soft ones, the chunk's CPU copies of its vertices (the arms are skinned on the CPU
+	// from them: bForceCPUSkinning), the shadow indices a copy of the indices, every triangle double-sided for shadows,
+	// the edges, every bone required, weights quantized to 255 in all; the same LOD at every level the original has.
+	// `rules`: the game's (the CPU copies' UV sets). Throws std::runtime_error for a bone the original doesn't have, a
+	// vertex without a bone, more than 65,535 vertices or more than 75 bones in a section.
+	UnrealLib::Assets::SkeletalMesh MakeSkeletalMesh(const MeshData& mesh, const UnrealLib::Assets::SkeletalMesh& original,
+													 const UnrealLib::AssetRules& rules);
 
 	// The AggGeom property of `mesh`'s RB_BodySetup (names made in `model`; `linker` has the game's Engine package): one
 	// convex element, which PhysX cooks into the hull of its points when a body is made. The points are the model's

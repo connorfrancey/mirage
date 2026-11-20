@@ -16,6 +16,8 @@
 // with UseSimpleLineCollision and UseSimpleBoxCollision off: the player collides with the new triangles. Its
 // RB_BodySetup subobject stays, its properties too, but its shape becomes the model's (models::BodyGeometry; no cooked
 // copy, PhysX cooks it when a body is made), so physics props of it are the new shape.
+// A skeletal mesh is replaced by a skinned model the same way (models::MakeSkeletalMesh): the original's skeleton, so
+// its animations play on the model, and its materials and properties.
 
 #include <UnrealLib/Assets/Texture.hpp>
 
@@ -68,7 +70,7 @@ namespace mirage::textures
 	// A DDS file's surfaces (throws std::runtime_error for anything else).
 	Encoded ParseDds(const std::vector<std::byte>& file);
 
-	// The paths of the exports a mod can replace, Texture2D (and subclasses) and StaticMesh, of a package, read from
+	// The paths of the exports a mod can replace, Texture2D (and subclasses), StaticMesh and SkeletalMesh, of a package, read from
 	// its header only (the chunks that hold the tables, not the whole file), lowercase: "b_c_01.facade.t_x". A copy
 	// keeps its original path; an object of the package itself gets the package's name in front
 	// ("edge_p.lightmaps.lm_1").
