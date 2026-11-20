@@ -6,6 +6,7 @@ authors = ["{{author}}"]
 mirage = "^0.1"
 entry = "{{id}}.dll"
 hot_reload = true          # Rebuilt while the game runs (`mirage mod install`), it is reloaded
+content = ["content"]      # Data the game uses: content/README.md
 
 # Settings, shown in the module's panel and kept by the menu: the code reads them by key, mirage::Get<float>("speed")
 [settings.speed]

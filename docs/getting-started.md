@@ -15,12 +15,23 @@ uv run mirage new my-mod --lang lua
 
 | | What it is | Build |
 |---|---|---|
-| `lua` | `main.lua`: no compiler, saved files reload in the game | none |
-| `cs` | `main.cs`, a C# script: compiled by the game when the mod loads | none (no .NET SDK needed) |
+| `lua` | `src/main.lua`: no compiler, saved files reload in the game | none |
+| `cs` | `src/main.cs`, a C# script: compiled by the game when the mod loads | none (no .NET SDK needed) |
 | `native` | C++ with its own CMake project, against the mod API headers only | `mirage mod build` (MSVC or clang-cl, x86) |
 
-The folder has a `mod.toml` (its id, version, the Mirage versions it is for, its settings) and one module: a switch in
-the menu's Mods column, with a setting from `mod.toml`, one made in code, and a tick that reads the player.
+The folder is a project:
+
+```
+my-mod/
+  mod.toml          its id, version, the Mirage versions it is for, its settings
+  README.md         what it is, and the commands below
+  src/              its code: main.lua (more files with require("name")), .cs files, or the C++ sources
+  content/          data the game uses: textures, meshes, property overrides (content/README.md)
+  .gitignore
+```
+
+Its code makes one module: a switch in the menu's Mods column, with a setting from `mod.toml`, one made in code, and a
+tick that reads the player. A mod made before this layout (main.lua or main.cs at the top of its folder) still loads.
 
 ## 2. Install it
 

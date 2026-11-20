@@ -4,10 +4,11 @@ version = "0.1.0"
 description = "{{description}}"
 authors = ["{{author}}"]
 mirage = "^0.1"
-hot_reload = true          # Save main.lua while the game runs: the mod reloads
-# lua = "main.lua" is the default
+hot_reload = true          # Save a file of src/ while the game runs: the mod reloads
+# Its code: src/main.lua (found by itself; lua = "..." names another). require("name") loads src/name.lua.
+content = ["content"]      # Data the game uses: content/README.md
 
-# Settings, shown in the module's panel and kept by the menu: main.lua reads them with mirage.setting("speed")
+# Settings, shown in the module's panel and kept by the menu: src/main.lua reads them with mirage.setting("speed")
 [settings.speed]
 type = "float"
 name = "Speed"

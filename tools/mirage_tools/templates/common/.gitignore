@@ -1,0 +1,11 @@
+# Build output (native and C# project mods)
+build/
+bin/
+obj/
+# What the game writes into an installed mod's folder
+config.toml
+.mirage/
+# Editors
+.vs/
+.idea/
+*.user

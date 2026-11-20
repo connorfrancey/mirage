@@ -142,6 +142,34 @@ TEST(Manifest, LoadChecksTheFolder)
 	fs::remove_all(root);
 }
 
+// A mod project (`mirage new`): its code in src/, found by itself
+TEST(Manifest, FindsCodeInSrc)
+{
+	namespace fs = std::filesystem;
+	const fs::path root = fs::temp_directory_path() / "mirage_test_manifest_src";
+	fs::remove_all(root);
+	const fs::path dir = root / "hello";
+	fs::create_directories(dir / "src");
+	std::ofstream(dir / "mod.toml") << "id = \"hello\"\nversion = \"1.0.0\"\n";
+	std::ofstream(dir / "src" / "main.lua") << "-- hi\n";
+	Parsed p = Load(dir);
+	ASSERT_TRUE(p.manifest) << (p.errors.empty() ? "" : p.errors[0]);
+	EXPECT_EQ(p.manifest->lua, "src/main.lua");
+
+	fs::remove(dir / "src" / "main.lua");
+	std::ofstream(dir / "src" / "main.cs") << "// hi\n";
+	p = Load(dir);
+	ASSERT_TRUE(p.manifest) << (p.errors.empty() ? "" : p.errors[0]);
+	EXPECT_EQ(p.manifest->dotnet, "src/main.cs");
+	EXPECT_EQ(p.manifest->lua, "");
+
+	std::ofstream(dir / "main.cs") << "// at the top\n";	// An older mod's place wins
+	p = Load(dir);
+	ASSERT_TRUE(p.manifest);
+	EXPECT_EQ(p.manifest->dotnet, "main.cs");
+	fs::remove_all(root);
+}
+
 TEST(Manifest, DeclaredSettings)
 {
 	const Parsed p = Parse(R"(

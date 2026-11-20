@@ -1,7 +1,8 @@
 """Tooling for mod authors (step 3 of the plan's next ten steps): a new mod from a template, and a mod checked, built,
 packaged and installed into the game the same way whatever it is written in.
 
-    mirage new my-mod --lang lua|cs|native      a folder with mod.toml and a working module, ready to install
+    mirage new my-mod --lang lua|cs|native      a mod project: mod.toml, README.md, its code in src/ (a working module),
+                                                content/ for data, .gitignore; ready to install
     mirage mod check [folder]                   mod.toml read and checked the way the runtime will
     mirage mod build [folder]                   native: its CMake project (x86); C# project: dotnet; Lua, C# script,
                                                 content: nothing to build (checked)
@@ -89,14 +90,15 @@ def create(mod_id: str, lang: str, parent: Path, name: str | None = None, descri
         "ident": mod_id.replace("-", "_"),
         "api_dir": (ROOT / "loader" / "include").as_posix(),
     }
-    source = TEMPLATES / lang
-    for f in sorted(source.rglob("*")):
-        if not f.is_file():
-            continue
-        rel = Path(_render(str(f.relative_to(source)), values))
-        out = target / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(_render(f.read_text(encoding="utf-8"), values), encoding="utf-8", newline="\n")
+    # Every mod's files (README.md, .gitignore, content/), then the language's (mod.toml, src/)
+    for source in (TEMPLATES / "common", TEMPLATES / lang):
+        for f in sorted(source.rglob("*")):
+            if not f.is_file():
+                continue
+            rel = Path(_render(str(f.relative_to(source)), values))
+            out = target / rel
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(_render(f.read_text(encoding="utf-8"), values), encoding="utf-8", newline="\n")
     return target
 
 
@@ -132,14 +134,14 @@ def inspect(folder: Path) -> tuple[ModInfo | None, list[str]]:
             problems.append("a native mod needs entry = \"<its>.dll\"")
     elif list(folder.glob("*.csproj")):
         kind = "csproj"
-    elif list(folder.glob("*.cs")):
+    elif list(folder.glob("*.cs")) or list(folder.glob("src/**/*.cs")):
         kind = "cs"
-    elif (folder / m.get("lua", "main.lua")).is_file():
+    elif any((folder / f).is_file() for f in ([m["lua"]] if "lua" in m else ["main.lua", "src/main.lua"])):
         kind = "lua"
     elif any((folder / d).is_dir() for d in ("content", "levels", "maps", "routes")):
         kind = "content"
     else:
-        problems.append("nothing to run: no main.lua, no .cs file, no CMakeLists.txt, no content folder")
+        problems.append("nothing to run: no main.lua (or src/main.lua), no .cs file, no CMakeLists.txt, no content folder")
         kind = "content"
     return ModInfo(folder, mod_id, version, kind, m), problems
 
