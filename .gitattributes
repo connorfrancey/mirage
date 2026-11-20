@@ -5,3 +5,7 @@
 setup.cmd text eol=lf
 # The Mirage SDK: written by mirage_sdkgen (mirage sdk), collapsed in diffs
 sdk/** linguist-generated=true
+# Model files: a converted model (.mmesh) holds a hash of its source's bytes, which line-ending conversion would change
+*.obj -text
+*.mtl -text
+*.gltf -text
