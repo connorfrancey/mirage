@@ -45,7 +45,8 @@ namespace mirage::textures
 
 	// A mod's replacement image: .dds is taken as stored (DXT1/3/5, 32-bit ARGB or 8-bit luminance, its own mips);
 	// .png / .tga / .bmp / .jpg are decoded, given a full mip chain (box filter) and encoded to `target`, the replaced
-	// texture's own format. Sides must be powers of two. Throws std::runtime_error saying what is wrong.
+	// texture's own format. An image whose sides aren't powers of two is resampled to the nearest (a DDS must be one).
+	// Throws std::runtime_error saying what is wrong.
 	Encoded LoadReplacement(const std::filesystem::path& file, PixelFormat target);
 	// An image file's bytes as LoadReplacement reads them (`dds`: taken as stored), encoded to `target`. `flipGreen`: a
 	// normal map in OpenGL's convention (glTF's: green up) turned to the game's (DirectX's: green down); not for a DDS.

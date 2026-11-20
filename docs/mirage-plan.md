@@ -1610,8 +1610,8 @@ floor. A model's own textures: the converter keeps each material's base-color (g
 a file beside the model, in the `.mmesh` (version 2); a section with one and no game material gets a Texture2D (DXT1,
 every mip inline, NeverStream) and a MaterialInstanceConstant of `CH_Materials.M_Generic_Diff_Spec_Norm` (the
 characters' lit generic material, a standalone package the game loads on demand, its shaders cooked; Engine_MI_Shaders'
-masters are used by no map, so theirs may not be) with it as "Diffuse Texture", both in the model's package. Sides
-must be powers of two. In "Mirage models" a crate (tests/mods/model-test/models/crate.obj, its .mtl naming a blue PNG)
+masters are used by no map, so theirs may not be) with it as "Diffuse Texture", both in the model's package. An
+image whose sides aren't powers of two (a model's, or a texture replacement's) is resampled to the nearest. In "Mirage models" a crate (tests/mods/model-test/models/crate.obj, its .mtl naming a blue PNG)
 shows its MaterialInstanceConstant and texture, and turned to face it the frame is blue (the probe reads below the
 middle: the game's white reticle dot is there). A replaced
 mesh's body is the model's shape too: the original's RB_BodySetup subobject keeps its properties but its AggGeom

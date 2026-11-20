@@ -68,6 +68,40 @@ namespace mirage::textures
 
 		bool PowerOfTwo(int v) { return v > 0 && (v & (v - 1)) == 0; }
 
+		// The power of two nearest `v` (in steps of doubling), at most 4096 (the game's largest textures)
+		int NearestPowerOfTwo(int v)
+		{
+			int p = 1;
+			while (p < 4096 && p * 3 < v * 2) p *= 2;		// The next doubling while v is past the halfway (1.5x) mark
+			return p;
+		}
+
+		// `rgba` resampled to `w` x `h` (bilinear, pixel centres matched; enough between sizes less than 2x apart, which
+		// the nearest power of two always is)
+		std::vector<std::uint8_t> Resample(const std::uint8_t* rgba, int sw, int sh, int w, int h)
+		{
+			std::vector<std::uint8_t> out(static_cast<std::size_t>(w) * h * 4);
+			for (int y = 0; y < h; ++y) {
+				const float fy = std::clamp((static_cast<float>(y) + 0.5f) * static_cast<float>(sh) / static_cast<float>(h) - 0.5f, 0.f,
+											static_cast<float>(sh - 1));
+				const int y0 = static_cast<int>(fy), y1 = std::min(y0 + 1, sh - 1);
+				const float ty = fy - static_cast<float>(y0);
+				for (int x = 0; x < w; ++x) {
+					const float fx = std::clamp((static_cast<float>(x) + 0.5f) * static_cast<float>(sw) / static_cast<float>(w) - 0.5f, 0.f,
+												static_cast<float>(sw - 1));
+					const int x0 = static_cast<int>(fx), x1 = std::min(x0 + 1, sw - 1);
+					const float tx = fx - static_cast<float>(x0);
+					const auto at = [&](int px, int py, int ch) { return static_cast<float>(rgba[(static_cast<std::size_t>(py) * sw + px) * 4 + ch]); };
+					for (int ch = 0; ch < 4; ++ch) {
+						const float top = at(x0, y0, ch) + (at(x1, y0, ch) - at(x0, y0, ch)) * tx;
+						const float bottom = at(x0, y1, ch) + (at(x1, y1, ch) - at(x0, y1, ch)) * tx;
+						out[(static_cast<std::size_t>(y) * w + x) * 4 + ch] = static_cast<std::uint8_t>(std::lround(top + (bottom - top) * ty));
+					}
+				}
+			}
+			return out;
+		}
+
 		// One 4x4 block of RGBA from (bx, by), edge pixels repeated past the surface
 		void Block(const std::uint8_t* rgba, int w, int h, int bx, int by, std::uint8_t out[64])
 		{
@@ -335,6 +369,14 @@ namespace mirage::textures
 		if (flipGreen)
 			for (std::size_t i = 0; i < static_cast<std::size_t>(w) * h; ++i) rgba[i * 4 + 1] = static_cast<stbi_uc>(255 - rgba[i * 4 + 1]);
 		try {
+			// The game's textures are powers of two on each side: another size is resampled to the nearest
+			if (!PowerOfTwo(w) || !PowerOfTwo(h)) {
+				const int pw = NearestPowerOfTwo(w), ph = NearestPowerOfTwo(h);
+				const std::vector<std::uint8_t> sized = Resample(rgba, w, h, pw, ph);
+				stbi_image_free(rgba);
+				rgba = nullptr;
+				return EncodeChain(sized.data(), pw, ph, target);
+			}
 			Encoded enc = EncodeChain(rgba, w, h, target);
 			stbi_image_free(rgba);
 			return enc;

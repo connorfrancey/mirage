@@ -136,6 +136,32 @@ TEST(Textures, BuildsAFullMipChain)
 	EXPECT_THROW((void)EncodeChain(img.rgba.data(), 12, 4, PixelFormat::DXT1), std::runtime_error);	// Not a power of two
 }
 
+// An image whose sides aren't powers of two (a 12x5 TGA: red left half, green right half) is resampled to the
+// nearest (8x4), its halves kept
+TEST(Textures, ResamplesOtherSizesToPowersOfTwo)
+{
+	std::vector<std::byte> tga(18, std::byte{0});
+	tga[2] = std::byte{2};
+	tga[12] = std::byte{12};
+	tga[14] = std::byte{5};
+	tga[16] = std::byte{32};
+	tga[17] = std::byte{0x28};		// Top-left origin, 8 alpha bits
+	for (int y = 0; y < 5; ++y)
+		for (int x = 0; x < 12; ++x) {
+			const bool left = x < 6;
+			for (const int v : {0, left ? 0 : 255, left ? 255 : 0, 255}) tga.push_back(static_cast<std::byte>(v));	// B G R A
+		}
+	const Encoded enc = EncodeImage(tga, false, PixelFormat::A8R8G8B8);
+	ASSERT_FALSE(enc.mips.empty());
+	EXPECT_EQ(enc.mips[0].width, 8);
+	EXPECT_EQ(enc.mips[0].height, 4);
+	const Assets::Image top = Decode(enc.mips[0], PixelFormat::A8R8G8B8);
+	EXPECT_EQ(top.rgba[0], 255);					// Left: red
+	EXPECT_EQ(top.rgba[1], 0);
+	EXPECT_EQ(top.rgba[7 * 4 + 1], 255);			// Right: green
+	EXPECT_EQ(top.rgba[7 * 4 + 0], 0);
+}
+
 TEST(Textures, ReadsDds)
 {
 	const Assets::Image img = TestImage(32, 16);

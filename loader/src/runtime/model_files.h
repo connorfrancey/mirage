@@ -58,7 +58,7 @@ namespace mirage::models
 	// `mesh` as package `packageName` (the file's stem) holding the StaticMesh `meshName` (and its sections' textures
 	// and material instances), written to `out`. `linker` has the game's packages (the summary to copy, the materials).
 	// False and `error` if it can't be built (more than 32,767 vertices: the game's 16-bit index buffers also hold the
-	// shadow copies; a texture that isn't an image stb reads, or whose sides aren't powers of two).
+	// shadow copies; a texture that isn't an image stb reads).
 	bool BuildPackage(UnrealLib::Linker& linker, const MeshData& mesh, const std::string& meshName, const std::filesystem::path& out,
 					  std::string* error = nullptr, const std::string& defaultMaterial = kDefaultMaterial);
 }
