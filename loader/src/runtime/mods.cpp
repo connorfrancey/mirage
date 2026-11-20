@@ -10,6 +10,7 @@
 #include "game/game.h"
 #include "runtime/content.h"
 #include "runtime/manifest.h"
+#include "runtime/options_menu.h"
 #include "runtime/mod_lua.h"
 #include "runtime/mod_profile.h"
 #include "runtime/mod_ui.h"
@@ -944,6 +945,7 @@ namespace mirage::mods
 			game_api::MoveRemove, game_api::AnimPlay, game_api::AnimStop, game_api::AnimState, game_api::AnimSets,
 			game_api::ActorSpawn, game_api::SoundPlay, game_api::SoundStop, game_api::SoundPlaying,
 			game_api::PostfxCreate, game_api::PostfxSet, game_api::PostfxEnable, game_api::PostfxError,
+			game_api::MenuSlider, game_api::MenuSliderValue,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -1080,6 +1082,7 @@ namespace mirage::mods
 			world::Unloading(&mod);			// Its 3D drawing too
 			audio::StopAll(mod.id);			// And its sounds
 			postfx::RemoveAll(mod.id);		// And its post-processing
+			options_menu::RemoveAll(mod.id);	// And its options-menu sliders
 			if (mod.content && content::Applied(*mod.content)) content::Restore(*mod.content);
 			if (!mod.manifest.dotnet.empty()) dotnet::UnloadMod(&mod);	// OnUnload, then its assembly context goes
 			mod.lua.reset();

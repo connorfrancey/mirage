@@ -11,6 +11,7 @@
 #include "gui.h"
 #include "runtime/audio.h"
 #include "render/postfx.h"
+#include "runtime/options_menu.h"
 #include "runtime/call.h"
 #include "runtime/changes.h"
 #include "runtime/class_source.h"
@@ -1256,6 +1257,16 @@ namespace mirage::mods
 				buffer[n] = '\0';
 			}
 			return static_cast<uint32_t>(error.size());
+		}
+
+		int32_t MIRAGE_CALL MenuSlider(MirageMod* mod, const char* label, float min, float max, float step, float value)
+		{
+			return mod && label ? options_menu::AddSlider(mod->id, label, min, max, step, value) : 0;
+		}
+
+		int32_t MIRAGE_CALL MenuSliderValue(MirageMod* mod, int32_t id, float* value)
+		{
+			return mod && options_menu::Value(mod->id, id, value) ? 1 : 0;
 		}
 
 		int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor)

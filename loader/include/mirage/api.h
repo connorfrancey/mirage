@@ -1194,6 +1194,15 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* postfx_enable)(MirageMod* mod, int32_t handle, int32_t on);
     /* The compile error ("" none, or not drawn yet). Copies up to capacity, returns the full length. */
     uint32_t(MIRAGE_CALL* postfx_error)(MirageMod* mod, int32_t handle, char* buffer, uint32_t capacity);
+
+    /* ---- The game's options menu (step 31) */
+    /* A slider on the "Mod settings" page of the game's own pause menu (Pause > Options > Mod settings), drawn by the
+     * game's UI. `value` (clamped to [min, max]) is where it starts and what the page's Defaults puts back; `step` is a
+     * nudge of its arrows (0: a tenth of the range). An id (above 0). The page holds the first three sliders of all
+     * mods. Removed when the mod unloads. Any thread. */
+    int32_t(MIRAGE_CALL* menu_slider)(MirageMod* mod, const char* label, float min, float max, float step, float value);
+    /* Its value now (the page's while it is open; Cancel puts it back): 1, or 0 for another mod's id or one that's gone */
+    int32_t(MIRAGE_CALL* menu_slider_value)(MirageMod* mod, int32_t id, float* value);
 } MirageApi;
 
 #define MIRAGE_SOUND_LOOP 0x1u

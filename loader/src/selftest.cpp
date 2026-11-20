@@ -26,6 +26,7 @@
 #include "runtime/file_redirect.h"
 #include "runtime/model_files.h"
 #include "runtime/models.h"
+#include "runtime/options_menu.h"
 #include "runtime/texture_overlays.h"
 #include "core/cache_evict.h"
 #include "core/cache_sched.h"
@@ -7027,6 +7028,174 @@ void TestArms()
     End(s);
 }
 
+bool KeyEvent(const std::string& key, bool down);
+
+// Step 31's milestone (runtime/options_menu.h): a mod's post-process pass with a slider in the game's own options
+// menu. tests/mods/postfx-lua's "Tint strength" slider is on the "Mod settings" page of the pause menu (Escape, then
+// Options: the page is opened by the button the menu got, through the scene's own HandleOptionButton). Moving it on
+// the page tints the frame green; the page's Defaults takes it back to 0 and Cancel undoes a change; set to 1 and the
+// menus closed, the game plays on tinted; opened again, the page shows 1, and Defaults turns the tint off.
+void TestOptionsMenu()
+{
+    Step& s = Begin("Mirage options menu");
+    Probe p(s);
+    const auto strength = [] {
+        mirage::mods::EvalResult r;
+        OnGameThread([&] { r = mirage::mods::Eval("postfx-lua", "return menu_strength()"); });
+        return r.value.empty() ? -1.f : std::strtof(r.value.c_str(), nullptr);
+    };
+    // The centre pixel after the effects of a frame drawn from now, and whether it is the full green tint
+    const auto green = [] {
+        WaitTicks(3);
+        postfx::Probe();
+        std::uint32_t argb = 0;
+        WaitFor(3.0, [&] { return postfx::ProbeResult(&argb); });
+        return ((argb >> 16) & 0xFF) < 12 && ((argb >> 8) & 0xFF) > 243 && (argb & 0xFF) < 12;
+    };
+    // The open pause menus, last opened last (a closed scene keeps its SceneClient: the client's list says what is open)
+    const auto pauses = [] {
+        std::vector<Classes::UObject*> open;
+        for (auto* c : game::ObjectsOf<Classes::UGameUISceneClient>(game::Freshness::Exact))
+            for (std::size_t i = 0; i < c->ActiveScenes.Num(); ++i)
+                if (c->ActiveScenes[i] && c->ActiveScenes[i]->IsA(Classes::UTdUIScene_Pause::StaticClass())) open.push_back(c->ActiveScenes[i]);
+        return open;
+    };
+    // Closed by its scene client, as a scene's own closing animation ends (keys pressed through the player's input don't
+    // reach the menus)
+    const auto close = [](Classes::UObject* scene) {
+        auto* client = scene ? static_cast<Classes::UObject*>(static_cast<Classes::UUIScene*>(scene)->SceneClient) : nullptr;
+        if (!client) return;
+        mirage::call::Params c(client, "CloseScene");
+        c.Set("Scene", scene);
+        mirage::call::Call(client, c);
+    };
+    const auto onPage = [&](const char* function) {
+        OnGameThread([&] {
+            if (auto* page = static_cast<Classes::UObject*>(mirage::options_menu::OpenPage())) {
+                mirage::call::Params c(page, function);
+                mirage::call::Call(page, c);
+            }
+        });
+        WaitTicks(3);
+    };
+    // Escape, Options, Mod settings: the page open, or a problem saying where it stopped
+    const auto openPage = [&]() -> bool {
+        KeyEvent("Escape", true);
+        WaitTicks(2);
+        KeyEvent("Escape", false);
+        Classes::UObject* pause = nullptr;
+        WaitFor(5.0, [&] {
+            OnGameThread([&] {
+                const auto open = pauses();
+                pause = open.empty() ? nullptr : open.back();
+            });
+            return pause != nullptr;
+        });
+        if (!pause) return p.Problem("Escape didn't open the pause menu"), false;
+        WaitTicks(20);
+        OnGameThread([&] {
+            auto* content = game::FindObject<Classes::UObject>("TdHUDContent TdGame.Default__TdHUDContent");
+            if (!content) return;
+            mirage::call::Params get(content, "GetUISceneByName");
+            get.SetName("UISceneName", "TdPauseOptions");
+            Classes::UObject* archetype = nullptr;      // GetRaw: windows.h makes GetObject GetObjectA here
+            if (mirage::call::Call(content, get)) get.GetRaw("ReturnValue", &archetype, sizeof archetype);
+            if (!archetype) return;
+            mirage::call::Params open(pause, "OpenScene");      // What the pause menu's Options button does
+            open.Set("SceneToOpen", archetype);
+            mirage::call::Call(pause, open);
+        });
+        void* options = nullptr;
+        WaitFor(5.0, [&] {
+            OnGameThread([&] { options = mirage::options_menu::OpenOptionsScene(); });
+            return options != nullptr;
+        });
+        if (!options) return p.Problem("the pause menu's Options didn't open"), false;
+        WaitTicks(30);      // Its opening animation
+        OnGameThread([] { game::ConsoleCommand("shot"); });     // The Options list with its Mod settings button
+        OnGameThread([&] { s.notes.push_back("the button: " + mirage::options_menu::DescribeButton()); });
+        bool clicked = false;
+        OnGameThread([&] { clicked = mirage::options_menu::ClickModSettings(); });
+        if (!clicked) return p.Problem("Options has no Mod settings button (or its click wasn't taken)"), false;
+        void* page = nullptr;
+        WaitFor(5.0, [&] {
+            OnGameThread([&] { page = mirage::options_menu::OpenPage(); });
+            return page != nullptr;
+        });
+        if (!page) return p.Problem("the Mod settings page didn't open"), false;
+        WaitTicks(30);      // Its opening animation
+        return true;
+    };
+    const auto closeAll = [&] {
+        OnGameThread([&] { close(static_cast<Classes::UObject*>(mirage::options_menu::OpenPage())); });
+        for (int i = 0; i < 4; ++i) {
+            Classes::UObject* top = nullptr;
+            OnGameThread([&] {
+                const auto open = pauses();
+                top = open.empty() ? nullptr : open.back();
+                close(top);
+            });
+            if (!top) break;
+            WaitFor(3.0, [&] {
+                bool still = false;
+                OnGameThread([&] { for (auto* o : pauses()) still |= o == top; });
+                return !still;
+            });
+        }
+        WaitTicks(10);
+        bool open = false;
+        OnGameThread([&] { open = !pauses().empty() || mirage::options_menu::OpenPage(); });
+        if (open) p.Problem("the menus didn't close");
+    };
+
+    if (strength() != 0.f) p.Problem(fmt::format("postfx-lua's Tint strength starts at {:.2f}, not 0", strength()));
+    if (openPage()) {
+        OnGameThread([] { game::ConsoleCommand("shot"); });     // The page, for a person to look at
+        WaitTicks(3);
+        OnGameThread([&] { mirage::options_menu::SetPageSlider(0, 1.f); });
+        WaitTicks(3);
+        const float full = strength();
+        const bool tinted = green();
+        onPage("ResetSettingsToDefault");
+        const float defaulted = strength();
+        const bool clear = !green();
+        OnGameThread([&] { mirage::options_menu::SetPageSlider(0, 0.6f); });
+        WaitTicks(3);
+        onPage("OnCancelChanges");      // The player's Cancel: the change not kept
+        WaitTicks(10);
+        const float cancelled = strength();
+        s.notes.push_back(fmt::format("Tint strength: {:.2f} moved to 1 ({}), {:.2f} after Defaults ({}), {:.2f} after a Cancel",
+                                      full, tinted ? "green" : "not green", defaulted, clear ? "not green" : "still green", cancelled));
+        if (full != 1.f || !tinted) p.Problem("moving the page's slider to 1 didn't tint the frame");
+        if (defaulted != 0.f || !clear) p.Problem("Defaults didn't take the slider back to 0 (and the tint off)");
+        if (cancelled != 0.f) p.Problem(fmt::format("after Cancel the slider is {:.2f}, not 0", cancelled));
+    }
+    closeAll();
+    // Kept: set to 1, the menus closed, the game plays on tinted; the page shows 1 again, and Defaults turns it off
+    if (openPage()) {
+        OnGameThread([&] { mirage::options_menu::SetPageSlider(0, 1.f); });
+        WaitTicks(3);
+        closeAll();
+        const bool playing = green();
+        float shown = -1.f;
+        if (openPage()) {
+            OnGameThread([&] {
+                if (auto* slider = static_cast<Classes::UUISlider*>(mirage::options_menu::PageSlider(0))) shown = slider->SliderValue.CurrentValue;
+            });
+            onPage("ResetSettingsToDefault");
+            closeAll();
+        }
+        const bool off = !green();
+        s.notes.push_back(fmt::format("set to 1 and closed: {}; the page opened again shows {:.2f}; Defaults: {}", playing ? "green" : "not green",
+                                      shown, off ? "off" : "still green"));
+        if (!playing) p.Problem("the tint didn't stay with the menus closed");
+        if (shown != 1.f) p.Problem(fmt::format("the page opened again shows {:.2f}, not the slider's 1", shown));
+        if (!off) p.Problem("Defaults didn't turn the tint off");
+    }
+    p.Check(1, true);
+    End(s);
+}
+
 // Step 28's navigation, its first question: the editor's path builder (AScout::DefinePaths, through a TdScout's Exec)
 // run in the game on the loaded level. It must run, leave reach specs between the navigation points, and leave the game
 // playing: a garbage collection right after (the old reach specs freed: none may still be reachable from the
@@ -8434,6 +8603,7 @@ const Named* FeatureList()
         {"Mirage models", &TestModels, false},
         {"Mirage mesh replacement", &TestMeshReplacement, false},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage arms", &TestArms, false},
+        {"Mirage options menu", &TestOptionsMenu, false},
         {"Mirage grapple", &TestGrapple, false},
         {"Mirage blink", &TestBlink, false},
         {"Mirage sound", &TestSound, false},

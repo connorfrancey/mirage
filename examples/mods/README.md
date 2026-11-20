@@ -122,6 +122,11 @@ local ahead = (v + mirage.vec.forward * 100):normalized()   -- + - * / and unary
 -- v:len(), v:len2(), v:dist(w), v:dot(w), v:cross(w), v:lerp(w, 0.5), v:copy(), v:unpack()
 -- mirage.vec.zero, .up (the game's Z is up), .forward, .right, mirage.vec.is(x), tostring(v) == "vec(1, 2, 3)"
 
+-- A setting in the game's own menu: a slider on Pause > Options > Mod settings (the game's UI draws it; its Defaults
+-- puts back `value`, its Cancel undoes a change). C: menu_slider / menu_slider_value; C#: MenuSlider / MenuSliderValue
+local strength = mirage.menu_slider { label = "Tint strength", min = 0, max = 1, value = 0.5, step = 0.1 }
+mirage.on("tick", function() local v = mirage.menu_slider_value(strength) end)
+
 local hook = mirage.hook("Engine.Actor.CheckMaxEffectDistance", function(call)
     call.params.CullDistance = 0                 -- before the function: change its parameters...
     -- call:skip()                               -- ...or don't run it

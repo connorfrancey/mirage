@@ -39,6 +39,7 @@
 #include "runtime/world_events.h"
 #include "runtime/anim.h"
 #include "runtime/models.h"
+#include "runtime/options_menu.h"
 #include "runtime/maps.h"
 #include "runtime/routes.h"
 #include "runtime/file_redirect.h"
@@ -183,6 +184,8 @@ static void Run(HMODULE module)
                 mirage::maps::Tick();            // Mods' maps: registered as mods load and unload
                 mirage::anim::Tick();            // Mods' animations: on the player's meshes, again for a new pawn
                 mirage::models::TickSkeletal();  // Skeletal meshes replaced in memory, once their copies are built
+                mirage::options_menu::Install(); // Mods' settings in the pause menu (hooks, once)
+                mirage::options_menu::Tick();    // ... and their page's sliders read
                 mirage::routes::Tick(seconds);   // Time-trial routes: the run in progress
                 modules::Tick();
             });

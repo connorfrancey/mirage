@@ -1,5 +1,7 @@
 # Self-test mod ("Mirage post-processing"): shaders/tint.hlsl blends the frame toward the colour in c1 (its alpha the
 # amount); shaders/broken.hlsl does not compile, on purpose. The self-test drives them through the globals in main.lua.
+# Its "Tint strength" slider on the game's pause menu (Pause > Options > Mod settings) tints the frame green ("Mirage
+# options menu": a mod's post-process pass with a slider in the game's own options menu).
 id = "postfx-lua"
 version = "1.0.0"
 mirage = "^0.1"

@@ -55,6 +55,8 @@ namespace mirage::mods::game_api
 	int32_t MIRAGE_CALL PostfxSet(MirageMod* mod, int32_t handle, int32_t index, const float* value);
 	int32_t MIRAGE_CALL PostfxEnable(MirageMod* mod, int32_t handle, int32_t on);
 	uint32_t MIRAGE_CALL PostfxError(MirageMod* mod, int32_t handle, char* buffer, uint32_t capacity);
+	int32_t MIRAGE_CALL MenuSlider(MirageMod* mod, const char* label, float min, float max, float step, float value);
+	int32_t MIRAGE_CALL MenuSliderValue(MirageMod* mod, int32_t id, float* value);
 	int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor);
 	int32_t MIRAGE_CALL PhysicsCollisionSet(MirageMod* mod, MirageObject* actor, uint32_t flags);
 	int32_t MIRAGE_CALL WorldTrace(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags,

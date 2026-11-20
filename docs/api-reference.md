@@ -51,6 +51,7 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Actors](#actors) (1)
 - [Sound](#sound) (3)
 - [Post-processing](#post-processing) (4)
+- [The game's options menu](#the-games-options-menu) (2)
 - [Types](#types)
 
 ## Basics
@@ -1558,6 +1559,24 @@ uint32_t(MIRAGE_CALL* postfx_error)(MirageMod* mod, int32_t handle, char* buffer
 ```
 
 The compile error ("" none, or not drawn yet). Copies up to capacity, returns the full length.
+
+## The game's options menu
+
+### `menu_slider`
+
+```c
+int32_t(MIRAGE_CALL* menu_slider)(MirageMod* mod, const char* label, float min, float max, float step, float value);
+```
+
+A slider on the "Mod settings" page of the game's own pause menu (Pause > Options > Mod settings), drawn by the game's UI. `value` (clamped to [min, max]) is where it starts and what the page's Defaults puts back; `step` is a nudge of its arrows (0: a tenth of the range). An id (above 0). The page holds the first three sliders of all mods. Removed when the mod unloads. Any thread.
+
+### `menu_slider_value`
+
+```c
+int32_t(MIRAGE_CALL* menu_slider_value)(MirageMod* mod, int32_t id, float* value);
+```
+
+Its value now (the page's while it is open; Cancel puts it back): 1, or 0 for another mod's id or one that's gone
 
 ## Types
 

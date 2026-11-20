@@ -262,6 +262,8 @@ namespace mirage::mods
 		static int PostfxSetFn(lua_State* L);
 		static int PostfxEnableFn(lua_State* L);
 		static int PostfxErrorFn(lua_State* L);
+		static int MenuSliderFn(lua_State* L);
+		static int MenuSliderValueFn(lua_State* L);
 		static int CollisionFn(lua_State* L);
 		static int SetCollisionFn(lua_State* L);
 		static int TraceFn(lua_State* L);
@@ -1634,6 +1636,38 @@ namespace mirage::mods
 		std::string text(self.api_->postfx_error(self.mod_, h, nullptr, 0) + 1, '\0');
 		text.resize(self.api_->postfx_error(self.mod_, h, text.data(), static_cast<uint32_t>(text.size())));
 		lua_pushlstring(L, text.data(), text.size());
+		return 1;
+	}
+
+	// mirage.menu_slider{label = "Strength", min = 0, max = 1, value = 0.5, step = 0.1}: a slider on the "Mod settings"
+	// page of the game's pause menu, its id (nil if it couldn't be made); mirage.menu_slider_value(id): its value now
+	int LuaMod::MenuSliderFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, menu_slider)) return luaL_error(L, "mirage.menu_slider: this runtime has no options menu");
+		luaL_checktype(L, 1, LUA_TTABLE);
+		const auto number = [&](const char* key, float fallback) {
+			lua_getfield(L, 1, key);
+			const float v = lua_isnumber(L, -1) ? static_cast<float>(lua_tonumber(L, -1)) : fallback;
+			lua_pop(L, 1);
+			return v;
+		};
+		lua_getfield(L, 1, "label");
+		const std::string label = luaL_optstring(L, -1, "Setting");
+		lua_pop(L, 1);
+		const float min = number("min", 0.f), max = number("max", 1.f);
+		const int32_t id = self.api_->menu_slider(self.mod_, label.c_str(), min, max, number("step", 0.f), number("value", min));
+		if (id > 0) lua_pushinteger(L, id);
+		else lua_pushnil(L);
+		return 1;
+	}
+	int LuaMod::MenuSliderValueFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, menu_slider_value)) return 0;
+		float v = 0.f;
+		if (!self.api_->menu_slider_value(self.mod_, static_cast<int32_t>(luaL_checkinteger(L, 1)), &v)) return 0;
+		lua_pushnumber(L, v);
 		return 1;
 	}
 
@@ -3039,7 +3073,7 @@ namespace mirage::mods
 		const luaL_Reg fns[] = {{"log", LuaLog<MIRAGE_LOG_INFO>}, {"info", LuaLog<MIRAGE_LOG_INFO>},
 			{"warn", LuaLog<MIRAGE_LOG_WARN>}, {"error", LuaLog<MIRAGE_LOG_ERROR>}, {"module", LuaModule},
 			{"setting", FindSetting}, {"rgba", Rgba},
-			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"sound_play", SoundPlayFn}, {"sound_stop", SoundStopFn}, {"sound_playing", SoundPlayingFn}, {"postfx", PostfxFn}, {"postfx_set", PostfxSetFn}, {"postfx_enable", PostfxEnableFn}, {"postfx_error", PostfxErrorFn}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
+			{"on", On}, {"hook", HookFn}, {"inject", InjectFn}, {"native", NativeFn}, {"pawn", Pawn}, {"controller", Controller}, {"sound_play", SoundPlayFn}, {"sound_stop", SoundStopFn}, {"sound_playing", SoundPlayingFn}, {"postfx", PostfxFn}, {"postfx_set", PostfxSetFn}, {"postfx_enable", PostfxEnableFn}, {"postfx_error", PostfxErrorFn}, {"menu_slider", MenuSliderFn}, {"menu_slider_value", MenuSliderValueFn}, {"world", World}, {"find", Find}, {"load_class", LoadClass}, {"define_class", DefineClass},
 			{"path", PathOf}, {"keep", KeepFn}, {"release", ReleaseFn}, {"layer_actor", LayerActor},
 			{"name", Name}, {"class", ClassName}, {"is_a", IsA}, {"call", CallGame}, {"notify", Notify},
 			{"frame_rate", FrameRate}, {"all", All}, {"menu_open", MenuOpen}, {"input_key", InputKey}, {"share", Share},

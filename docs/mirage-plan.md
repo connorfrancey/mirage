@@ -1588,7 +1588,9 @@ below as self-tests. **Costs (targets):** a full-screen pass under 0.5 ms at 108
   through UnrealLib), swap the player's arms and body (step 7's texture path extended to meshes).
 
 **Status (2026-11-20): static models from mods, with their own textures, mesh replacement and skeletal mesh
-replacement (Faith's arms) work; the post-process pass and the options-menu page not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
+replacement (Faith's arms) work; a mod's slider on a page of the game's own options menu works, and with the
+post-process pass (done earlier, render/postfx.h) it makes the milestone's first half; render hooks for native mods and
+material shaders not started.** A mod's glTF, FBX or OBJ is converted by the CLI (`mirage model <file> --convert`, tools/model with assimp,
 which stays out of Mirage.dll) to `<file>.mmesh` (runtime/mesh_file.h: the game's space, 50 units a meter by default,
 and a hash of the source so a changed model must be converted again). The runtime builds it on a worker into a package
 holding one StaticMesh (runtime/model_files, UnrealLib's new `write_static_mesh` and `build_kdop`; every cooked mesh
@@ -1635,6 +1637,22 @@ level change collected it from under the arms and crashed the game); turned off,
 123.0; on, 63.8 on the pawn, its template and a respawned pawn, the left hand still where the skeleton puts it; off
 again, Faith's. The copy holds the whole package (about 10 MB of textures again), and the self-test warns that the
 largest free block of the address space is shrinking.
+The game's options menu (runtime/options_menu): `menu_slider` / `menu_slider_value` (C ABI, Lua `mirage.menu_slider`,
+C# `Mod.MenuSlider`) put a mod's slider on a "Mod settings" page of the pause menu. The pause menu's Options list
+(TdUIScene_PauseOptions) gets a button: after its PostInitialize a clone of its lowest button, the list stacking from
+the bottom up (each row docked to the top of the one below, the lowest to the panel's bottom), so the clone takes the
+lowest's place and the lowest docks onto it as the row above it does; its own WidgetTag (a panel takes no second child
+with a sibling's tag), its caption bound to plain text, its siblings' click delegate. HandleOptionButton (hooked)
+opens the page: the game's audio page (TdUI_Options.TdAudioSettings) retitled, its three sliders unbound from the
+profile's volumes and given the mods' labels, ranges and values, the rest hidden. Cancel undoes a change (its backup
+taken after the sliders are set), Defaults (hooked: the audio page's would reset the player's volumes) puts back each
+slider's first value, and Accept saves nothing of the profile. Shortcuts: one page, the first three sliders of all
+mods; the description label is hidden (it follows the focused widget's own text); values last for the session. Found
+on the way: a closed scene keeps its SceneClient (open means in the client's ActiveScenes), keys injected through the
+player's input don't reach menus, and a pause menu's Back only starts its closing animation. Self-test "Mirage options
+menu" (the milestone's first half): tests/mods/postfx-lua's "Tint strength" slider, moved on the page, tints the frame
+green; Defaults turns it off and Cancel undoes a change; set to 1 with the menus closed, the game plays on green, and
+the page opened again shows 1.
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.

@@ -309,6 +309,21 @@ namespace Mirage
             return System.Text.Encoding.UTF8.GetString(buffer, (int)n);
         }
 
+        /// <summary>
+        /// A slider on the "Mod settings" page of the game's own pause menu (Pause > Options > Mod settings). It starts at
+        /// <paramref name="value"/> (what the page's Defaults puts back); <paramref name="step"/> is a nudge of its arrows
+        /// (0: a tenth of the range). An id, or 0. Read it with <see cref="MenuSliderValue"/>. Any thread.
+        /// </summary>
+        public int MenuSlider(string label, float min, float max, float value, float step = 0f) =>
+            Bridge.Api->menu_slider(Handle, Utf8.Intern(label), min, max, step, value);
+
+        /// <summary>The slider's value now (the page's while it is open), or null for an id that isn't the mod's.</summary>
+        public float? MenuSliderValue(int id)
+        {
+            float v = 0f;
+            return Bridge.Api->menu_slider_value(Handle, id, &v) != 0 ? v : null;
+        }
+
         /// <summary>A line trace (or a box sweep with <paramref name="extent"/>); null when nothing was hit. Game thread.</summary>
         public TraceHit? Trace(Vec3 start, Vec3 end, bool actors = false, Vec3? extent = null, GameObject ignore = default,
                                bool material = false)

@@ -198,6 +198,8 @@ MIRAGE_AT(postfx_create, 740);
 MIRAGE_AT(postfx_set, 744);
 MIRAGE_AT(postfx_enable, 748);
 MIRAGE_AT(postfx_error, 752);
+MIRAGE_AT(menu_slider, 756);
+MIRAGE_AT(menu_slider_value, 760);
 static_assert(sizeof(MirageMoveDesc) == 40 && offsetof(MirageMoveDesc, fn) == 12 && offsetof(MirageMoveDesc, anim) == MIRAGE_MOVE_DESC_V1_SIZE);
 static_assert(sizeof(MirageAnimState) == 88 && offsetof(MirageAnimState, position) == 76);
 static_assert(sizeof(MirageMoverDesc) == 44 && offsetof(MirageMoverDesc, scale) == 32);
