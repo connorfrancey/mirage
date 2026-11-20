@@ -109,7 +109,7 @@ use its wrapper `mirage.hpp`, C# mods `managed/Mirage`, and the engine's types a
 | `tests/` | Unit tests (GoogleTest), the self-test's test mods, the sources of test maps |
 | `tools/` | The `mirage` CLI (`tools/mirage_tools`), the SDK generator, the C# binding generator, the test host |
 | `cmake/` | Dependencies (`Libraries.cmake`, `Versions.cmake`), features, embedding of the first-party mods |
-| `docs/` | The plan and status (`mirage-plan.md`), C# mods, classes from mods, memory, infrastructure |
+| `docs/` | The plan and status (`mirage-plan.md`), C# mods, classes from mods, models from Blender (`models.md`), memory, infrastructure |
 
 ## Building
 
