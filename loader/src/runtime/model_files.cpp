@@ -339,11 +339,12 @@ namespace mirage::models
 			};
 			// A texture export of `file` (the model's bytes) named `name`; a normal map is stored as the game's are
 			// (DXT1, not sRGB, TC_Normalmap, unpacked from [0, 1] to [-1, 1])
-			const auto addTexture = [&](const std::string& file, const std::string& name, bool normal) {
+			const auto addTexture = [&](const std::string& file, const std::string& name, textures::Pixels pixels) {
+				const bool normal = pixels == textures::Pixels::FlipGreen;
 				Texture t;
 				const auto* bytes = reinterpret_cast<const std::byte*>(file.data());
 				t.encoded = textures::EncodeImage(std::vector<std::byte>(bytes, bytes + file.size()), file.compare(0, 4, "DDS ") == 0,
-												  PixelFormat::DXT1, normal);
+												  PixelFormat::DXT1, pixels);
 				ExportEntry tex;
 				tex.class_index = ImportPath(model, "Engine.Texture2D", "Core", "Class");
 				tex.object_name = model.make_name(name);
@@ -369,7 +370,7 @@ namespace mirage::models
 			};
 			for (std::size_t s = 0; s < data.sections.size(); ++s) {
 				const MeshSection& section = data.sections[s];
-				if ((section.image.empty() && section.normal.empty()) || !MaterialClass(linker, section.material).empty()) continue;
+				if ((section.image.empty() && section.normal.empty() && section.specular.empty() && section.roughness.empty()) || !MaterialClass(linker, section.material).empty()) continue;
 				if (MaterialClass(linker, kTexturedParent).empty())
 					throw std::runtime_error(std::string("the game material textured models use, ") + kTexturedParent + ", wasn't found");
 				const std::string suffix = "_" + std::to_string(s);
@@ -378,8 +379,12 @@ namespace mirage::models
 					values += std::string(values.empty() ? "" : ",") + "(ParameterName=\"" + parameter + "\",ParameterValue=" + texture + ")";
 				};
 				try {
-					if (!section.image.empty()) value(kTexturedParameter, addTexture(section.image, meshName + "_Texture" + suffix, false));
-					if (!section.normal.empty()) value(kNormalParameter, addTexture(section.normal, meshName + "_Normal" + suffix, true));
+					using textures::Pixels;
+					if (!section.image.empty()) value(kTexturedParameter, addTexture(section.image, meshName + "_Texture" + suffix, Pixels::AsStored));
+					if (!section.normal.empty()) value(kNormalParameter, addTexture(section.normal, meshName + "_Normal" + suffix, Pixels::FlipGreen));
+					if (!section.specular.empty()) value(kSpecularParameter, addTexture(section.specular, meshName + "_Specular" + suffix, Pixels::AsStored));
+					else if (!section.roughness.empty())
+						value(kSpecularParameter, addTexture(section.roughness, meshName + "_Specular" + suffix, Pixels::Gloss));
 				} catch (const std::exception& ex) {
 					throw std::runtime_error("material " + std::to_string(s) + " ('" + section.material + "')'s texture: " + ex.what());
 				}

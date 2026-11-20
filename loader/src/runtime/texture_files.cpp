@@ -356,18 +356,22 @@ namespace mirage::textures
 		return NativeData(ctx, {}, encoded, base);
 	}
 
-	Encoded EncodeImage(const std::vector<std::byte>& bytes, bool dds, PixelFormat target, bool flipGreen)
+	Encoded EncodeImage(const std::vector<std::byte>& bytes, bool dds, PixelFormat target, Pixels pixels)
 	{
 		if (dds) {
-			if (flipGreen) throw Fail("a DDS normal map is taken as stored, so its green can't be flipped: give it as a PNG");
+			if (pixels == Pixels::FlipGreen) throw Fail("a DDS normal map is taken as stored, so its green can't be flipped: give it as a PNG");
+			if (pixels == Pixels::Gloss) throw Fail("a DDS roughness map is taken as stored, so it can't be made a specular map: give it as a PNG");
 			return ParseDds(bytes);
 		}
 		int w = 0, h = 0, comp = 0;
 		stbi_uc* rgba = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()), static_cast<int>(bytes.size()),
 											  &w, &h, &comp, 4);
 		if (!rgba) throw Fail(std::string("can't read the image: ") + stbi_failure_reason());
-		if (flipGreen)
-			for (std::size_t i = 0; i < static_cast<std::size_t>(w) * h; ++i) rgba[i * 4 + 1] = static_cast<stbi_uc>(255 - rgba[i * 4 + 1]);
+		for (std::size_t i = 0; pixels != Pixels::AsStored && i < static_cast<std::size_t>(w) * h; ++i) {
+			stbi_uc* px = rgba + i * 4;
+			if (pixels == Pixels::FlipGreen) px[1] = static_cast<stbi_uc>(255 - px[1]);
+			else px[0] = px[1] = px[2] = static_cast<stbi_uc>(255 - px[1]);
+		}
 		try {
 			// The game's textures are powers of two on each side: another size is resampled to the nearest
 			if (!PowerOfTwo(w) || !PowerOfTwo(h)) {

@@ -92,6 +92,9 @@ namespace model
 				section.material = material->GetName().C_Str();
 				section.image = Image(*scene, *material, path, {aiTextureType_BASE_COLOR, aiTextureType_DIFFUSE});
 				section.normal = Image(*scene, *material, path, {aiTextureType_NORMALS});
+				// A specular map (an OBJ's map_Ks, an FBX's); glTF has none, its roughness stands in for one
+				section.specular = Image(*scene, *material, path, {aiTextureType_SPECULAR});
+				if (section.specular.empty()) section.roughness = Image(*scene, *material, path, {aiTextureType_GLTF_METALLIC_ROUGHNESS});
 			}
 			m.sections.push_back(section);
 		}
@@ -100,7 +103,7 @@ namespace model
 			stats->vertices = static_cast<unsigned>(m.vertices.size());
 			stats->triangles = static_cast<unsigned>(m.indices.size() / 3);
 			stats->sections = static_cast<unsigned>(m.sections.size());
-			for (const auto& s : m.sections) stats->textures += !s.image.empty() + !s.normal.empty();
+			for (const auto& s : m.sections) stats->textures += !s.image.empty() + !s.normal.empty() + !s.specular.empty() + !s.roughness.empty();
 		}
 		return mirage::models::WriteMeshFile(out, m, error);
 	}

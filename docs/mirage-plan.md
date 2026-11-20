@@ -1619,8 +1619,9 @@ becomes the model's hull points (no cooked copy); in "Mirage mesh replacement" t
 element of 20 points reaching 68.4 (the bag's can't pass 48.7). Normal maps too (`.mmesh` version 3): glTF's normalTexture (an
 OBJ's `norm`) becomes the instance's "Normal Texture", stored as the game's are (DXT1, SRGB off, TC_Normalmap,
 UnpackMin -1, the world normal-map LOD group) with its green flipped (glTF's convention is green up, the game's green
-down); the crate has one. Next: specular maps (the parent takes "Specular Texture"; glTF has no specular, its
-metallic-roughness would have to be turned into one).
+down); the crate has one. Specular maps too (`.mmesh` version 4): an OBJ's `map_Ks` (an FBX's specular) becomes the
+instance's "Specular Texture" as stored; glTF has none, so its metallic-roughness image stands in, made a grey specular
+map of 1 - roughness (its green; metalness is not used); the crate has one (crate_s.png).
 
 **Milestone:** a mod adds a post-process pass with a slider in the game's own options menu (a `UIScene`), another swaps
 Faith's arms for a mod-shipped mesh; both on and off at runtime, no fps drop below the 62 cap on the test machine.

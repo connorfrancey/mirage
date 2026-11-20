@@ -2,3 +2,4 @@ newmtl Crate
 Kd 1 1 1
 map_Kd crate.png
 norm crate_n.png
+map_Ks crate_s.png

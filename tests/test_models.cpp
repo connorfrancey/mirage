@@ -73,6 +73,7 @@ TEST(Models, MeshFileRoundTrip)
 {
     auto cube = Cube();
     cube.sections[0].image = std::string("\x89PNG\0 not really", 18);
+    cube.sections[0].roughness = "roughness";
     const fs::path file = fs::temp_directory_path() / "mirage_test_cube.mmesh";
     std::string error;
     ASSERT_TRUE(mirage::models::WriteMeshFile(file.string(), cube, &error)) << error;
@@ -83,6 +84,8 @@ TEST(Models, MeshFileRoundTrip)
     ASSERT_EQ(back.sections.size(), 1u);
     EXPECT_EQ(back.sections[0].material, "NoSuchPackage.NoSuchMaterial");
     EXPECT_EQ(back.sections[0].image, cube.sections[0].image);
+    EXPECT_EQ(back.sections[0].specular, "");
+    EXPECT_EQ(back.sections[0].roughness, "roughness");
     EXPECT_EQ(std::memcmp(back.vertices.data(), cube.vertices.data(), 24 * sizeof(mirage::models::MeshVertex)), 0);
     // Cut short: refused
     fs::resize_file(file, fs::file_size(file) - 4);
@@ -202,8 +205,8 @@ TEST(Models, RigidBodyFollowsTheModelsShape)
     fs::remove_all(dir);
 }
 
-// A section the model gives its own texture and normal map (and no game material): the package holds them, DXT1 with
-// every mip inline, and a MaterialInstanceConstant of the game's lit character material showing them
+// A section the model gives its own texture, normal map and glTF roughness map (and no game material): the package holds
+// them, DXT1 with every mip inline, and a MaterialInstanceConstant of the game's lit character material showing them
 TEST(Models, TexturedSectionsGetTheirOwnMaterial)
 {
     const fs::path cooked = Cooked();
@@ -231,6 +234,8 @@ TEST(Models, TexturedSectionsGetTheirOwnMaterial)
     normal[17] = 0x28;
     for (int i = 0; i < 16; ++i) normal += std::string("\xFF\xC8\x80\xFF", 4);     // B G R A
     cube.sections[0].normal = normal;
+    // glTF's metallic-roughness image, the same pixels: roughness (green) 200, so a specular map of 255 - 200
+    cube.sections[0].roughness = normal;
     std::string error;
     {
         Linker linker;
@@ -253,7 +258,7 @@ TEST(Models, TexturedSectionsGetTheirOwnMaterial)
         if (const Package* s = linker.find_package(name)) schema.add_package(*s);
     const MaterialInfo info = read_material(linker, {p, material}, &schema);
     EXPECT_EQ(p->object_path(info.parent), mirage::models::kTexturedParent);
-    ASSERT_EQ(info.parameters.size(), 2u);
+    ASSERT_EQ(info.parameters.size(), 3u);
     EXPECT_EQ(info.parameters[0].name, mirage::models::kTexturedParameter);
     ASSERT_TRUE(info.parameters[0].texture.is_export());
     EXPECT_EQ(p->object_path(info.parameters[0].texture), "Cube_Texture_0");
@@ -286,6 +291,13 @@ TEST(Models, TexturedSectionsGetTheirOwnMaterial)
     EXPECT_NEAR(np.rgba[0], 128, 8);
     EXPECT_NEAR(np.rgba[1], 55, 8);     // 255 - 200
     EXPECT_NEAR(np.rgba[2], 255, 8);
+    // The roughness map made a grey specular map, 1 - roughness
+    EXPECT_EQ(info.parameters[2].name, mirage::models::kSpecularParameter);
+    ASSERT_TRUE(info.parameters[2].texture.is_export());
+    EXPECT_EQ(p->object_path(info.parameters[2].texture), "Cube_Specular_0");
+    const Texture2D sp = read_texture2d(linker, {p, info.parameters[2].texture}, &schema);
+    const Image spp = decode_pixels(load_mip(*p, sp, 0), sp.format, 4, 4);
+    for (int k = 0; k < 3; ++k) EXPECT_NEAR(spp.rgba[k], 55, 8);
     fs::remove_all(dir);
 }
 

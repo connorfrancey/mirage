@@ -6,12 +6,14 @@
 // Already in the game's space: Unreal units, Z up, left-handed (the file's Y and Z swapped, which also makes the front
 // faces clockwise, as Unreal draws them), UVs with V down. Little-endian:
 //
-//   "MMSH" u32 version (3)
+//   "MMSH" u32 version (4)
 //   u32 source hash (HashBytes of the model file it was converted from: a changed model is converted again)
 //   u32 vertices, u32 indices (3 a triangle), u32 sections
 //   per section: u32 first index, u32 triangles, u16 material name length, the name (UTF-8), u32 image size, the image
 //     (the file's diffuse or base-color texture as stored: PNG, JPEG, ...; size 0 for none), u32 normal map size, the
-//     normal map (as stored, OpenGL's convention: green is up; size 0 for none)
+//     normal map (as stored, OpenGL's convention: green is up; size 0 for none), u32 specular map size, the specular
+//     map (as stored; size 0 for none), u32 roughness map size, the roughness map (glTF's metallic-roughness image as
+//     stored, roughness in its green; size 0 for none, and always 0 when the section has a specular map)
 //   per vertex: f32 position[3], f32 normal[3], f32 tangent[4] (w: the binormal's sign, +1 or -1), f32 uv[2]
 //   u32 index[indices]
 
@@ -33,6 +35,8 @@ namespace mirage::models
 		std::string material;		// The file's material name ("" if none)
 		std::string image;			// Its diffuse texture's file bytes (PNG, JPEG, ...; empty if none)
 		std::string normal;			// Its normal map's file bytes (green up, as glTF's; empty if none)
+		std::string specular;		// Its specular map's file bytes (empty if none)
+		std::string roughness;		// Else its glTF metallic-roughness image's (roughness in green; empty if none)
 	};
 	struct MeshData
 	{
@@ -42,7 +46,7 @@ namespace mirage::models
 		std::vector<MeshSection> sections;
 	};
 
-	inline constexpr std::uint32_t kMeshFileVersion = 3;
+	inline constexpr std::uint32_t kMeshFileVersion = 4;
 
 	// FNV-1a
 	inline std::uint32_t HashBytes(const std::string& bytes)
@@ -79,7 +83,7 @@ namespace mirage::models
 			const auto n = static_cast<std::uint16_t>(s.material.size() > 0xFFFF ? 0xFFFF : s.material.size());
 			out.write(reinterpret_cast<const char*>(&n), 2);
 			out.write(s.material.data(), n);
-			for (const std::string* file : {&s.image, &s.normal}) {
+			for (const std::string* file : {&s.image, &s.normal, &s.specular, &s.roughness}) {
 				u32(static_cast<std::uint32_t>(file->size()));
 				out.write(file->data(), static_cast<std::streamsize>(file->size()));
 			}
@@ -125,7 +129,7 @@ namespace mirage::models
 			if (!take(&s.firstIndex, 4) || !take(&s.triangles, 4) || !take(&n, 2)) return fail("cut short");
 			s.material.resize(n);
 			if (n && !take(&s.material[0], n)) return fail("cut short");
-			for (std::string* file : {&s.image, &s.normal}) {
+			for (std::string* file : {&s.image, &s.normal, &s.specular, &s.roughness}) {
 				std::uint32_t size = 0;
 				if (!take(&size, 4) || size > bytes.size() - at) return fail("cut short");
 				file->assign(bytes.data() + at, size);
