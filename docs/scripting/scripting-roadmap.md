@@ -6,18 +6,18 @@ engine features that are unavailable in this build, need an external service, or
 in a generated header establishes that the type was found in the packages. A working example and a runtime check
 establish what a mod can do with it.
 
-This roadmap covers scripting and engine access. [The Mirage plan](mirage-plan.md) tracks the wider loader, editor,
-and distribution work. [Field Lab](../examples/mods/tech-demo/README.md) is the integration example to extend as
+This roadmap covers scripting and engine access. [The Mirage plan](../mirage-plan.md) tracks the wider loader, editor,
+and distribution work. [Field Lab](../../examples/mods/tech-demo/README.md) is the integration example to extend as
 new families of APIs land.
 
 ## Build the coverage inventory
 
 1. Enumerate types, properties, functions, states, and native indices from the game's packages through UnrealLib and
-   [the SDK generator](../tools/sdkgen). Include cooked asset kinds, archetypes, and Kismet and UI sequence nodes.
+   [the SDK generator](../../tools/sdkgen). Include cooked asset kinds, archetypes, and Kismet and UI sequence nodes.
    Inspect the inventory with `uv run mirage sdk-browse --gui` and `uv run mirage assets`. Include driver and
    service packages alongside Core, Engine, and TdGame.
-2. Join that list to [the C ABI](../loader/include/mirage/api.h), [Lua bindings](../loader/src/runtime/lua),
-   [C# bindings](../managed/Mirage), [generated API reference](api-reference.md), and game-test steps. Record
+2. Join that list to [the C ABI](../../loader/include/mirage/api.h), [Lua bindings](../../loader/src/runtime/lua),
+   [C# bindings](../../managed/Mirage), [generated API reference](../api-reference.md), and game-test steps. Record
    the minimum runtime for each verified API.
 3. Track one row per capability. Record the engine type or subsystem, supported build, prerequisites, read and
    write routes, thread, lifetime, cleanup, Lua and C# coverage, and a test or example link. Group aliases and
@@ -38,7 +38,7 @@ The existing routes below are starting points. The last column gives a runnable 
 | World, levels, and streaming | Actor lookup, spawn, level layers, custom maps and streaming events | Cover component construction and attachment, transforms and lifetimes, actor factories, archetypes, world and game rules, and streaming control. Spawn, attach, stream, and remove a kit in an isolated map. Verify cleanup through travel and checkpoint reload. |
 | Pawn, controller, input, and movement | Movement tuning and slots, rebindable actions, simulation and TAS input, Blink and Grappling Hook | Cover possession, interaction, parkour, inventory, weapons, damage and game modes. Add analog controller and rumble support where the build exposes it. Play a short course with keyboard and gamepad and verify which inputs can replay deterministically. |
 | Collision, materials, and physics | Trace, overlap, bodies, impulses, joints, triggers, movers and movement pieces | Cover collision channels and filtering, shape and joint settings, contact events, physical materials, ragdolls and constraints. Verify a triggered rig with contacts, a joint and rollback on unload. |
-| Vehicles | Cooked `Vehicle`, `SVehicle`, wheel and Mirror’s Edge vehicle types are inventory candidates | Probe usable archetypes, assets, and the player-driving state. Build an original test car with entry and exit, steering, braking, handbrake, and camera. Prove the pawn is released on restart, unload, and driver death. See [vehicle milestone 50](mirage-plan.md#50-player-drivable-vehicles-p2). |
+| Vehicles | Cooked `Vehicle`, `SVehicle`, wheel and Mirror’s Edge vehicle types are inventory candidates | Probe archetypes and player driving, then implement cars, trucks and helicopters with door interaction, vehicle systems and a chase camera. See the [vehicle roadmap](scripting-roadmap-veh.md) and [milestone 50](../mirage-plan.md#50-player-drivable-vehicles-p2). |
 | AI, navigation, encounters, and combat | Bots can be placed through level layers. SDK and Kismet provide discovery routes | Cover possession, perception, pathing and nav links, goals, movement, encounters, and damage. Spawn a bot, watch it navigate and react to a stimulus, then clear the encounter without retaining controllers or paths. |
 | Kismet, missions, routes, and checkpoints | Graph read, edits, layers, execution tracing, objectives, and checkpoints | Cover sequence variables, links and events, latent actions, named graph instances, Matinee, and mission/TAS integration. Play a mission that survives a checkpoint restart and records the intended graph activity. |
 | Animation, skeletal meshes, and IK | Playback, custom clips, animation sets, skeletal mesh replacement | Inventory slots, notifies, blend trees, mesh sockets, morphs, IK, root motion, and cloth. Verify a custom character interaction with a socket attachment, animation notify, and return to stock motion. |
@@ -64,7 +64,7 @@ Follow the broader plan’s level editor requirement for each implementation sta
 workflow and verify it with that stage’s example, such as a trigger inspector during physics or a parameter editor
 during rendering. Keep the steps small enough to build and game-test independently.
 
-## Step by step: expose an engine feature through the API
+## How to expose an engine feature through the API
 
 The example is a scoped scalar material override for a mod’s mesh. The same sequence applies to a camera owner,
 spatial sound, a physics constraint, or another engine capability.
@@ -74,7 +74,7 @@ spatial sound, a physics constraint, or another engine capability.
    appearance. Unload should restore its original material and leave other users of that material unaffected.
 2. **Find and probe the game path.** Use the SDK browser to inspect the type and verify its name, signature, flags,
    arguments and any native index. For this example, inspect `MaterialInstanceConstant::SetScalarParameterValue`
-   and the component’s material slot operations in [the generated Engine header](../sdk/include/sdk/Engine.hpp).
+   and the component’s material slot operations in [the generated Engine header](../../sdk/include/sdk/Engine.hpp).
    Check a real cooked asset in the asset catalog. Use a small mod in a test level to confirm that the call
    works, what owns the instance, and whether it needs a render update. Record the observed game build.
 3. **Choose the public route.** Check for an existing API or a supported reflected call that already satisfies the
@@ -82,23 +82,23 @@ spatial sound, a physics constraint, or another engine capability.
    operation. A scoped material override can own a private material instance for the component slot and return
    a handle that can be updated and released.
 4. **Write the contract in the C ABI.** Append fields to `MirageApi` in
-   [api.h](../loader/include/mirage/api.h). Document arguments, units, ownership, valid thread, errors, and
+   [api.h](../../loader/include/mirage/api.h). Document arguments, units, ownership, valid thread, errors, and
    cleanup there. Use ABI-safe types and size-tagged extensible structs when needed. Preserve previous offsets and
    account for older runtime tables with `MIRAGE_API_HAS`.
 5. **Implement through the engine.** Add the typed operation to the appropriate runtime subsystem and wire its
-   C ABI entry in [the API table](../loader/src/runtime/mods.cpp). Resolve handles and validate class, slot,
+   C ABI entry in [the API table](../../loader/src/runtime/mods.cpp). Resolve handles and validate class, slot,
    parameter and finite values before the write. Touch UObjects on the game thread. For functions with a native
-   index use [`mirage::call`](../loader/src/runtime/call.h) so parameter storage and native dispatch match the
+   index use [`mirage::call`](../../loader/src/runtime/call.h) so parameter storage and native dispatch match the
    engine. Reuse the existing lookup, transaction and cleanup services.
 6. **Implement ownership and rollback.** Record the previous state before changing it and release the owned
    resource on explicit release, disable, reload, unload, crash, or relevant level teardown. Test partial failure,
    repeated release, overlapping owners, and stale handles. For the material example, confirm the original slot
    is restored without clearing another mod’s active override.
 7. **Expose the bindings through their normal entry points.** Add the Lua binding in
-   [the appropriate Lua area](../loader/src/runtime/lua) and register it in that area’s `LuaFunctions` list.
-   Regenerate [the managed ABI](../managed/Mirage/Native/Api.g.cs) and add the typed C# wrapper under
-   [managed/Mirage](../managed/Mirage). Add a C++ convenience wrapper in
-   [mirage.hpp](../loader/include/mirage/mirage.hpp) when the operation needs one. Use consistent units,
+   [the appropriate Lua area](../../loader/src/runtime/lua) and register it in that area’s `LuaFunctions` list.
+   Regenerate [the managed ABI](../../managed/Mirage/Native/Api.g.cs) and add the typed C# wrapper under
+   [managed/Mirage](../../managed/Mirage). Add a C++ convenience wrapper in
+   [mirage.hpp](../../loader/include/mirage/mirage.hpp) when the operation needs one. Use consistent units,
    defaults, and errors across the languages.
 
    ```powershell
@@ -106,9 +106,9 @@ spatial sound, a physics constraint, or another engine capability.
    uv run mirage docs api
    ```
 
-8. **Verify the contract and the example.** Update [the ABI tests](../tests/test_abi.cpp) for new entries.
+8. **Verify the contract and the example.** Update [the ABI tests](../../tests/test_abi.cpp) for new entries.
    Test marshalling, missing capabilities and validation offline. Add a named self-test to
-   [selftest.cpp](../loader/src/selftest.cpp) when the engine behavior needs proof. For the material example,
+   [selftest.cpp](../../loader/src/selftest.cpp) when the engine behavior needs proof. For the material example,
    inspect the live instance or rendered output before and after the override, then verify restoration.
    Wait for a state change. Announce before the game test starts.
 
