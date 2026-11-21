@@ -1,0 +1,5 @@
+newmtl Probe
+Kd 0.1 0.55 0.8
+map_Kd Probe.png
+norm Probe_N.png
+map_Ks Probe_S.png

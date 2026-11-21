@@ -105,8 +105,8 @@ def for_self_test(tc: Toolchain) -> tuple[list[Path] | None, str]:
                if d.is_dir() and any((d / sub).is_dir() for sub in ("content", "levels", "maps", "routes", "kismet", "models"))
                and not (d / "main.lua").exists() and not (d / "main.cs").exists()]
     mods = [*native, EXAMPLES / "hello-lua", EXAMPLES / "high-steps", EXAMPLES / "retexture", EXAMPLES / "higher-jumps", EXAMPLES / "bounce-pad", *lua,
-            EXAMPLES / "hello-script", *scripts, *content]
-    return mods, (f"{', '.join(built)}, {len(lua) + 1} Lua mods, {len(scripts) + 1} C# scripts, high-steps and retexture "
+            EXAMPLES / "hello-script", EXAMPLES / "tech-demo", *scripts, *content]
+    return mods, (f"{', '.join(built)}, {len(lua) + 2} Lua mods, {len(scripts) + 1} C# scripts, high-steps and retexture "
                   "(content), bounce-pad (an UnrealScript class)")
 
 

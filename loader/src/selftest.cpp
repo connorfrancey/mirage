@@ -5338,6 +5338,7 @@ void TestModMaps()
 
 double GameSeconds();
 bool HoldKey(const std::string& key, double seconds, const std::function<void()>& each = {});
+bool KeyEvent(const std::string& key, bool down);
 
 // A map made with the game's own 2008 editor (step 13's milestone): tests/mods/map-test's maps/MirageEditorRoom.me1
 // (a room, a light and a player start, built in UnrealEd: tests/maps-src/MirageEditorRoom) is in the level select and
@@ -6073,6 +6074,62 @@ void TestSound()
     if (!still) p.Problem("a looping sound stopped by itself");
     if (!stopped) p.Problem("sound_stop didn't stop it");
     if (handle(escape) > 0) p.Problem("a path out of the mod's folder was played");
+    End(s);
+}
+
+void TestFieldLab()
+{
+    Step& s = Begin("Mirage Field Lab");
+    Probe p(s);
+    Module* module = modules::Find("Field Lab");
+    if (!module) {
+        p.Problem("The Field Lab module is missing");
+        End(s);
+        return;
+    }
+    const auto eval = [](const char* code) {
+        mirage::mods::EvalResult result;
+        OnGameThread([&] { result = mirage::mods::Eval("tech-demo", code); });
+        return result.ok ? result.value : result.error;
+    };
+    WaitPlayerReady(10.0);
+    OnRenderThread([module] { module->SetEnabled(true); });
+    if (!HoldKey("F6", 0.05)) p.Problem("Could not press the deployment key");
+    const bool deployed = WaitFor(45.0, [&] {
+        return eval("return field_lab_status().phase ~= 'building' and field_lab_status().phase ~= 'ready'") == "true";
+    }) && eval("return field_lab_status().model") == "true";
+    if (!deployed) {
+        p.Problem("Deployment failed: " + eval("return field_lab_status().message"));
+    } else {
+        Classes::FVector home{};
+        std::string forward;
+        OnGameThread([&] {
+            forward = KeyFor(game::Controller(), "GBA_MoveForward", "W");
+            if (auto* pawn = game::Pawn()) home = pawn->Location;
+        });
+        if (KeyEvent(forward, true)) {
+            const bool pulsed = WaitFor(3.0, [&] { return eval("return field_lab_status().pulses == 1") == "true"; });
+            KeyEvent(forward, false);
+            if (!pulsed) p.Problem("Entering the scanner did not execute its UnrealScript instrument");
+            if (eval("return field_lab_status().hooks == 1") != "true") p.Problem("The instrument hook did not run");
+            if (eval("return field_lab_status().impulse") != "true") p.Problem("The probe did not receive an impulse");
+            if (eval("return field_lab_status().animation") != "true") p.Problem("The custom animation did not play");
+            if (eval("return field_lab_status().audio") != "true") p.Problem("The mod chime did not play");
+            if (!WaitFor(3.0, [&] { return eval("return field_lab_status().kismet") == "Delay activated"; }))
+                p.Problem("The Kismet action did not activate: " + eval("return field_lab_status().kismet"));
+            if (const auto error = eval("return field_lab_status().shader_error"); !error.empty())
+                p.Problem("The pulse shader failed: " + error);
+            OnGameThread([&] { if (auto* pawn = game::Pawn()) pawn->SetLocation(home); });
+        } else {
+            p.Problem("Could not press the forward key");
+        }
+    }
+    if (!HoldKey("F7", 0.05)) p.Problem("Could not press the cleanup key");
+    if (!WaitFor(3.0, [&] {
+            return eval("return field_lab_status().phase == 'ready' and #mirage.actors{class='MirageFieldInstrument'} == 0") == "true";
+        }))
+        p.Problem("Packing up did not remove the Field Lab");
+    OnRenderThread([module] { module->SetEnabled(false); });
     End(s);
 }
 
@@ -7027,8 +7084,6 @@ void TestArms()
     p.Check(1, true);
     End(s);
 }
-
-bool KeyEvent(const std::string& key, bool down);
 
 // Step 31's milestone (runtime/options_menu.h): a mod's post-process pass with a slider in the game's own options
 // menu. tests/mods/postfx-lua's "Tint strength" slider is on the "Mod settings" page of the pause menu (Escape, then
@@ -8601,6 +8656,7 @@ const Named* FeatureList()
         {"Mirage class states", &TestClassStates, false},
         {"Mirage path building", &TestPathBuilding, false, true},
         {"Mirage models", &TestModels, false},
+        {"Mirage Field Lab", &TestFieldLab, false},
         {"Mirage mesh replacement", &TestMeshReplacement, false},     // Opt-in: fails until every point gets reach specs (step 28)
         {"Mirage arms", &TestArms, false},
         {"Mirage options menu", &TestOptionsMenu, false},

@@ -8,6 +8,7 @@ a greeting, counts the game's ticks, and counts how many times it was switched o
 |--------------|--------|------------------------------------------------------------------------------------|
 | `hello-lua/` | Lua    | Copy the folder into `mods`. No build.                                             |
 | `hello/`     | Native | Build it (below), then copy `<build>/mod/hello` into `mods`.                       |
+| [`tech-demo/`](tech-demo/README.md) | Lua, UnrealScript and content | Copy the folder into `mods` and enable **Field Lab**. |
 
 ## mod.toml
 

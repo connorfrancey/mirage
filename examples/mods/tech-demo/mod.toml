@@ -1,0 +1,35 @@
+id = "tech-demo"
+name = "Mirage Field Lab"
+version = "1.0.0"
+description = "Deploy a field lab and walk through its scanner to exercise the Mirage mod APIs."
+authors = ["Mirage"]
+mirage = "^0.1"
+hot_reload = true
+content = ["content"]
+
+[actions.deploy]
+key = "F6"
+description = "Deploy or move the Field Lab"
+
+[actions.clear]
+key = "F7"
+description = "Pack up the Field Lab"
+
+[settings.launch_speed]
+type = "float"
+name = "Probe launch speed"
+default = 360.0
+min = 160.0
+max = 650.0
+
+[settings.volume]
+type = "float"
+name = "Chime volume"
+default = 0.2
+min = 0.0
+max = 1.0
+
+[settings.hud]
+type = "bool"
+name = "Show field HUD"
+default = true
