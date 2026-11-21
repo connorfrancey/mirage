@@ -7,6 +7,9 @@ function vec.add(a, b) return { x = a.x + b.x, y = a.y + b.y, z = a.z + b.z } en
 function vec.sub(a, b) return { x = a.x - b.x, y = a.y - b.y, z = a.z - b.z } end
 function vec.scale(a, s) return { x = a.x * s, y = a.y * s, z = a.z * s } end
 function vec.dot(a, b) return a.x * b.x + a.y * b.y + a.z * b.z end
+function vec.cross(a, b)
+    return vec.new(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+end
 function vec.len(a) return math.sqrt(vec.dot(a, a)) end
 function vec.dist(a, b) return vec.len(vec.sub(a, b)) end
 function vec.norm(a)

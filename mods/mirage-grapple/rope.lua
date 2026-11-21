@@ -15,15 +15,17 @@ function rope.step(state, pos, vel, input, config)
     if input.reel ~= 0 then
         state.length = math.max(config.min_length, math.min(config.range, state.length - input.reel * config.reel_speed * dt))
     end
-    -- Air control: looking around pushes the swing that way (sideways and forward only: no flying up the rope)
-    if input.steer then
-        local s = vec.new(input.steer.x, input.steer.y, 0)
-        vel = vec.add(vel, vec.scale(s, config.swing * dt))
-    end
     local out, dist = vec.norm(vec.sub(pos, state.anchor))
-    local taut = dist > state.length
-    if taut then
+    local taut = dist >= state.length - 1
+    if input.steer then
+        local steer = vec.norm(vec.new(input.steer.x, input.steer.y, 0))
+        if taut then steer = vec.sub(steer, vec.scale(out, vec.dot(steer, out))) end
+        vel = vec.add(vel, vec.scale(steer, config.swing * dt))
+    end
+    if dist > state.length then
         pos = vec.add(state.anchor, vec.scale(out, state.length))
+    end
+    if taut then
         local away = vec.dot(vel, out)
         if away > 0 then vel = vec.sub(vel, vec.scale(out, away)) end
     end

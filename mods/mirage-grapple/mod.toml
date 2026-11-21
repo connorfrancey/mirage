@@ -2,7 +2,7 @@
 # is written to mirage\mods\mirage-grapple at startup: edit a copy under another id, not this folder. See main.lua.
 id = "mirage-grapple"
 name = "Grappling Hook"
-version = "1.0.0"
+version = "1.1.0"
 description = "Fire a rope at any surface, swing on it or reel yourself in"
 authors = ["Mirage"]
 mirage = "^0.1"
@@ -24,7 +24,7 @@ description = "Lengthen the rope while hooked"
 [settings.mode]
 type = "choice"
 name = "Mode"
-description = "Zip: straight to the point you aimed at. Swing: a pendulum on a fixed rope. Pull: the rope reels you in by itself."
+description = "Zip: straight to the anchor. Swing: swing with fall damage disabled while attached. Pull: the rope reels you in."
 options = ["Zip", "Swing", "Pull"]
 default = "Zip"
 
@@ -81,3 +81,11 @@ default = 250.0
 min = 0.0
 max = 1500.0
 format = "%.0f"
+
+[settings.volume]
+type = "float"
+name = "Grapple sound volume"
+default = 0.32
+min = 0.0
+max = 1.0
+format = "%.2f"

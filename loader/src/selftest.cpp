@@ -5938,6 +5938,11 @@ void TestGrapple()
         End(s);
         return;
     }
+    const std::string fallProbe =
+        "local function blocked() return tonumber(mirage.shared('mirage-grapple', 'fall_damage_blocked')) or 0 end; "
+        "local before = blocked(); mirage.call(mirage.pawn(), 'TakeFallingDamage'); return blocked() > before";
+    const auto swingDamage = eval(fallProbe);
+    if (swingDamage.value != "true") p.Problem("Swing did not intercept fall damage: " + swingDamage.value + swingDamage.error);
     // Swinging: the rope holds and is drawn; the player is lifted off the ground by the yank and swings below the anchor
     float worst = 0.f, highest = start.Z;
     MirageWorldStats stats{};
@@ -5966,6 +5971,10 @@ void TestGrapple()
     // the rope gone: the mod switches the drawing off with it, and no frame counts again.
     eval("grapple_release()");
     if (const auto status = eval("grapple_status()"); status.value != "free") p.Problem("after letting go: " + status.value + status.error);
+    eval("mirage.setting('mode'):set('Swing')");
+    const auto freeDamage = eval(fallProbe);
+    if (freeDamage.value != "false")
+        p.Problem("Fall damage was still intercepted after releasing: " + freeDamage.value + freeDamage.error);
 
     // Zipped (the default mode): straight to a point ahead and above, from wherever the player is now, letting go there
     // by itself; at the zip's speed that takes well under a second, which falling or Pull's reel can't do
