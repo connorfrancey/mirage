@@ -268,6 +268,10 @@ if(MIRAGE_BUILD_SDKGEN)
   add_subdirectory(tools/sdkgen)
 endif()
 
+if(NOT MIRAGE_BARE)
+  add_subdirectory(archive)
+endif()
+
 # -------------------------------------------------------------------------------------------------
 # Benchmarks (Google Benchmark)
 if(MIRAGE_BUILD_BENCHMARKS)

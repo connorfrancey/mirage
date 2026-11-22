@@ -13,7 +13,7 @@ The identity record is a UTF-8 JSON object, at most 65,536 bytes, without a byte
 | Loose folder | `me-mod.json` at the mod root |
 | ZIP | `me-mod.json` at the archive root, or `<folder>/me-mod.json` if every file belongs to that single top-level folder |
 | Standalone file or other container | A sidecar alongside it, named by appending `.me-mod.json` to the entire artifact filename, for example `patch.exe.me-mod.json` |
-| MirageMod (`.miragemod`) | The `mod_identity` object in its embedded JSON manifest, once that format is available |
+| MirageMod (`.miragemod`) | A sidecar next to the package, for example `example.miragemod.me-mod.json` |
 
 A scanner checks immediate child folders and supported package files in each configured mod directory. It reads each package’s index before looking for the manifest. It MUST reject ambiguous records, including duplicate ZIP names and case variants of the identity record in an otherwise valid identity location. Discovery MUST avoid following symlinks or reparse points to read manifests and MUST limit the number of bytes read or decompressed for each record. Installed mod-management tools SHOULD keep a copy of the record alongside their installation receipt so they can identify releases after their files have been copied into shared game directories.
 
