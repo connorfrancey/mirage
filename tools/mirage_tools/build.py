@@ -172,6 +172,11 @@ def run_tool(console: Console, tc: Toolchain, args: list[str], title: str, log: 
              verbose: bool = False, show_warnings: str = "ours") -> RunResult:
     """Runs a build tool under a progress bar (Ninja's [n/total], CPM's packages while configuring), printing new
     diagnostics as they appear (and every line with `verbose`)."""
+    from .tool_logging import command_logger
+
+    diagnostics_log = command_logger()
+    if diagnostics_log:
+        diagnostics_log.debug("Starting {}", Path(args[0]).name)
     log.parent.mkdir(parents=True, exist_ok=True)
     seen: set[Diagnostic] = set()
     ordered: list[Diagnostic] = []
@@ -202,6 +207,9 @@ def run_tool(console: Console, tc: Toolchain, args: list[str], title: str, log: 
             elif show_warnings == "all" or (show_warnings == "ours" and diag.ours):
                 console.print(f"[yellow]warning {diag.code}[/] {escape(diag.location)}: {escape(diag.message)}")
         proc.wait()
+    if diagnostics_log:
+        diagnostics_log.debug("{} exited with {} and reported {} diagnostics", Path(args[0]).name, proc.returncode,
+                              len(ordered))
     return RunResult(proc.returncode, ordered, log)
 
 

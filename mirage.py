@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["click>=8.1", "questionary>=2.1.1", "rich>=13.7", "zstandard>=0.23; python_version < '3.14'"]
+# dependencies = ["click>=8.1", "loguru>=0.8.0", "questionary>=2.1.1", "rich>=13.7", "zstandard>=0.23; python_version < '3.14'"]
 # ///
 """Project manager for Mirage: build, test, clean, install into the game, package.
 

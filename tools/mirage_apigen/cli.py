@@ -12,6 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 import click
+from mirage_tools.tool_logging import LoggedGroup
 
 from . import DEFAULT_CONFIG, DEFAULT_OUTPUT, default_input
 from .artifacts import apply_plan, json_text, output_lock, plan_output, previous_manifest
@@ -59,7 +60,7 @@ def _report(result: Generation, strict: bool, verbose: bool) -> None:
         raise click.ClickException("API validation failed.")
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(cls=LoggedGroup, context_settings={"help_option_names": ["-h", "--help"]})
 def api() -> None:
     """Generate and inspect Mirage's scripting API from SDK layout JSON."""
 

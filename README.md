@@ -150,6 +150,13 @@ The [documentation build guide](docs/documentation/README.md) covers the optiona
 the MkDocs Material site, and documentation coverage checks. The docs-only CMake configuration works
 without the game toolchain.
 
+### Python tool logs
+
+Set `MIRAGE_ENABLE_LOGGING=1` to log Python tool diagnostics to stderr and `build/logs/mirage-tools.log`.
+The file rotates on the next write after midnight or when a write reaches the 10 MB limit. Archives use `.gz`
+compression and a 30-day retention period.
+Command output stays on stdout so it can be piped or parsed.
+
 ## License
 
 MIT (see `LICENSE`).

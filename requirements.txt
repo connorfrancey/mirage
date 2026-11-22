@@ -2,6 +2,7 @@
 #   python -m pip install -r requirements.txt
 # Keep in sync with pyproject.toml [project.dependencies] and the header of mirage.py.
 click>=8.1
+loguru>=0.8.0
 questionary>=2.1.1
 rich>=13.7
 zstandard>=0.23; python_version < "3.14"

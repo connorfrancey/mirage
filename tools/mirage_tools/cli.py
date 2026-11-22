@@ -47,6 +47,7 @@ from . import build as b
 from . import example_mods as em
 from . import features as feat
 from .game import INSTALLER, LAUNCHER, detected_installs, is_elevated, project_version, run_elevated
+from .tool_logging import LoggedGroup
 from .toolchain import ROOT, Toolchain, ToolchainError, cmake_version, find_toolchain
 
 console = Console(highlight=False)
@@ -308,7 +309,7 @@ def _artifact(config: str, name: str) -> Path:
 
 
 # ---- commands ------------------------------------------------------------------------------------------------------
-@click.group(context_settings={"help_option_names": ["-h", "--help"]}, invoke_without_command=True)
+@click.group(cls=LoggedGroup, context_settings={"help_option_names": ["-h", "--help"]}, invoke_without_command=True)
 @click.option("--refresh-env", is_flag=True, help="Capture the MSVC environment again (after a Visual Studio update).")
 @click.option("--dev/--no-dev", "dev", default=None,
               help="Developer mode: builds switch the menu's developer mode on (the Test module: in-game self-tests), "
