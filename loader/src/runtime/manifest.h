@@ -123,6 +123,9 @@ namespace mirage::mods
 	// name)
 	Parsed Load(const std::filesystem::path& dir);
 
+	// Find immediate child folders with a mod.toml, sorted by path. Load validates each manifest separately.
+	std::vector<std::filesystem::path> FindInstalledMods(const std::filesystem::path& root);
+
 	// <mods folder>/disabled.toml: the mods the player switched off in the mod manager, not loaded at the next start
 	//   off = ["hello", "retexture"]
 	std::set<std::string> ReadDisabled(const std::filesystem::path& folder);

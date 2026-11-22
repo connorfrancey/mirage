@@ -350,6 +350,21 @@ namespace mirage::mods
 		return out;
 	}
 
+	std::vector<std::filesystem::path> FindInstalledMods(const std::filesystem::path& root)
+	{
+		namespace fs = std::filesystem;
+		std::vector<fs::path> mods;
+		std::error_code error;
+		for (auto entry = fs::directory_iterator(root, fs::directory_options::skip_permission_denied, error);
+			 !error && entry != fs::directory_iterator(); entry.increment(error)) {
+			std::error_code ignored;
+			if (entry->is_directory(ignored) && fs::exists(entry->path() / "mod.toml", ignored))
+				mods.push_back(entry->path());
+		}
+		std::sort(mods.begin(), mods.end());
+		return mods;
+	}
+
 	Parsed Load(const std::filesystem::path& dir)
 	{
 		const std::filesystem::path file = dir / "mod.toml";

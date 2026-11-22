@@ -90,6 +90,7 @@ read the header itself for the details. See [AI-GUIDE.md](AI-GUIDE.md) first.
 - `loader/src/runtime/mod_lua_ui.h`: mirage.ui for Lua mods (mod_lua_ui.cpp)
 - `loader/src/runtime/mod_profile.h`: The profiler per mod (step 27): the time each mod's code takes, by callback. Every call into a mod passes one of two gates (detail::Enter for hooks, events, natives, triggers and moves; ModModule::Call for a module's callbacks), and both record here how long it ran.
 - `loader/src/runtime/mod_tas.h`: The mod API's TAS engine service (mod_tas.cpp)
+- `loader/src/runtime/mod_watch.h`: Detect changed mod folders on Windows. The loader uses the same file fingerprint to wait for writes to settle.
 - `loader/src/runtime/mod_ui.h`: The mod API's UI layer (MirageUi, loader/include/mirage/api.h): the menu's ImGui through a C table. Render thread.
 - `loader/src/runtime/mod_world.h`: The mod API's 3D drawing in the world and the camera (mod_world.cpp)
 - `loader/src/runtime/model_files.h`: Models from mods (Mirage, step 31): a converted model (runtime/mesh_file.h) built into a package holding one StaticMesh, which the engine then loads like any cooked mesh (runtime/models.h). Engine-free: UnrealLib only, so the unit tests build packages too.

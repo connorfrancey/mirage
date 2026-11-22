@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 
@@ -69,6 +70,25 @@ TEST(Manifest, Defaults)
 	EXPECT_EQ(p.manifest->name, "tiny");
 	EXPECT_EQ(p.manifest->phase, Phase::Engine);
 	EXPECT_TRUE(p.manifest->mirage.Matches(*mirage::semver::Version::Parse("9.9.9")));
+}
+
+TEST(Manifest, DiscoveryFindsOnlyTopLevelModFoldersInOrder)
+{
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const auto root = fs::temp_directory_path() / ("mirage-test-discovery-" + std::to_string(stamp));
+	fs::create_directories(root / "other" / "nested");
+	fs::create_directory(root / "zeta");
+	fs::create_directory(root / "alpha");
+	std::ofstream(root / "other" / "nested" / "mod.toml") << "id = \"nested\"";
+	std::ofstream(root / "zeta" / "mod.toml") << "broken manifest";
+	std::ofstream(root / "alpha" / "mod.toml") << "id = \"alpha\"\nversion = \"1.0.0\"";
+	std::ofstream(root / "loose.toml") << "id = \"loose\"";
+	EXPECT_EQ(FindInstalledMods(root), (std::vector<fs::path>{root / "alpha", root / "zeta"}));
+	EXPECT_TRUE(FindInstalledMods(root / "missing").empty());
+	EXPECT_TRUE(Load(root / "alpha").manifest);
+	EXPECT_FALSE(Load(root / "zeta").manifest);
+	fs::remove_all(root);
 }
 
 TEST(Manifest, ReportsMistakes)
