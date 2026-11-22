@@ -1,0 +1,17 @@
+[api]
+version = "1.0.0"
+editor_fallback = "omit"
+
+[exposure]
+package_allow = ["ALAudio"]
+class_allow = ["ALAudio.ALAudioDevice"]
+
+[members."ALAudio.ALAudioDevice.MinOggVorbisDurationGame"]
+expose = true
+name = "vorbis_game_threshold"
+description = "Reads the minimum in-game Ogg Vorbis duration from a live audio device."
+
+[members."ALAudio.ALAudioDevice.MinOggVorbisDurationEditor"]
+expose = true
+name = "vorbis_editor_threshold"
+description = "Reads the editor Ogg Vorbis duration threshold from a live audio device."

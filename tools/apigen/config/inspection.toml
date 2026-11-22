@@ -1,0 +1,12 @@
+[api]
+editor_fallback = "unknown"
+
+[adapters]
+"Core.Object.Vector" = "table"
+"Core.Object.Rotator" = "table"
+"Core.Object.Color" = "table"
+"Core.Object.LinearColor" = "table"
+
+[types]
+Name = "string"
+Str = "string"

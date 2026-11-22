@@ -1,0 +1,4 @@
+id = "apigen-smoke"
+version = "1.0.0"
+description = "Opt-in in-game smoke test for reviewed MirageAPIGen bindings"
+mirage = "^0.1"
