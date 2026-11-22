@@ -1,6 +1,22 @@
 cmake_minimum_required(VERSION 4.2)
-project(Mirage LANGUAGES C CXX)
+
+option(MIRAGE_DOCS_ONLY "Configure documentation without the game toolchain or dependencies" OFF)
+option(MIRAGE_BUILD_DOCS "Enable Mirage documentation targets" OFF)
+set(_mirage_languages C CXX)
+if(MIRAGE_DOCS_ONLY)
+  set(_mirage_languages NONE)
+endif()
+project(Mirage LANGUAGES ${_mirage_languages})
+
 set(MIRAGE_VERSION "0.1.0-dev")   # Shown by the installer, stamped into the loader
+
+if(MIRAGE_BUILD_DOCS OR MIRAGE_DOCS_ONLY)
+  include(cmake/Doxygen.cmake)
+  mirage_add_documentation(VERSION "${MIRAGE_VERSION}")
+endif()
+if(MIRAGE_DOCS_ONLY)
+  return()
+endif()
 
 # -------------------------------------------------------------------------------------------------
 # Platform Guards (Mirror's Edge is a 32-bit Windows process)

@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_dx
+ * @brief CPU-side geometry for the world debug renderer.
+ */
 #include "math.h"
 
 #include <cstddef>
@@ -34,7 +38,9 @@ namespace rmesh {
         std::uint32_t outlineColor = 0;  // 0 = a lighter version of `color`
     };
 
-    // Appends shapes to a MeshData in the current style. Primitives take a world matrix (row-vector convention).
+    /// @ingroup mirage_dx
+    /// @brief Append styled shapes to caller-owned geometry.
+    /// @note Keep the destination mesh alive while the builder is in use and serialize writes to it.
     class Builder {
     public:
         explicit Builder(MeshData& out) : out_(out) {}

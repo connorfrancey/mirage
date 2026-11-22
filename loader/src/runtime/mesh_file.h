@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_assets
+ * @brief Portable mesh interchange format used by the converter and loader.
+ */
 // A converted model (Mirage, step 31): what `mirage model <file> --convert` (tools/model, assimp) writes next to a
 // mod's glTF, FBX or OBJ file as `<file>.mmesh`, and what the runtime builds a StaticMesh package from
 // (runtime/model_files.h). Header-only and standard C++ only: the tool, a separate build without UnrealLib, includes it.
@@ -119,8 +123,11 @@ namespace mirage::models
 		return static_cast<bool>(out);
 	}
 
-	// False and `error` if it isn't a mesh file of this version, or its counts don't hold (an index past the vertices, a
-	// section past the indices, a size that isn't the file's).
+	/// @brief Parse a converted Mirage mesh file.
+	/// @param path File to read.
+	/// @param[out] m Caller-owned mesh data.
+	/// @param[out] error Optional diagnostic string.
+	/// @return True on success. Invalid versions, counts, and indices fail validation.
 	inline bool ReadMeshFile(const std::string& path, MeshData& m, std::string* error = nullptr)
 	{
 		const auto fail = [&](const std::string& why) {

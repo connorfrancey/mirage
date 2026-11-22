@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_memory
+ * @brief Arena allocation for Mirage-owned scratch and persistent data.
+ */
 // Arenas: bump allocation from chunks, freed all at once.
 //
 //   Temporary memory: a Scratch scope on the calling thread's own arena. Everything allocated in it is gone when the
@@ -34,6 +38,9 @@ namespace mirage::mem
 		std::uint64_t allocations = 0, chunkAllocs = 0, chunkFrees = 0, oversized = 0, failures = 0;
 	};
 
+	/// @ingroup mirage_memory
+	/// @brief Allocate blocks that retire together or rewind to a marker.
+	/// @warning Keep use on the owning thread. Rewind and reset invalidate reclaimed pointers.
 	class Arena
 	{
 	public:
@@ -43,7 +50,11 @@ namespace mirage::mem
 		Arena(const Arena&) = delete;
 		Arena& operator=(const Arena&) = delete;
 
-		void* Allocate(std::size_t bytes, std::size_t align = alignof(std::max_align_t));	// nullptr: no memory
+		/// @brief Allocate bytes in the current arena.
+		/// @param bytes Number of bytes requested.
+		/// @param align Required alignment in bytes.
+		/// @return Borrowed storage, or null when allocation fails.
+		void* Allocate(std::size_t bytes, std::size_t align = alignof(std::max_align_t));
 		template <class T>
 		T* Array(std::size_t n)
 		{
@@ -85,6 +96,9 @@ namespace mirage::mem
 	template <class T>
 	class ScratchAllocator;
 
+	/// @ingroup mirage_memory
+	/// @brief Scope that rewinds the calling thread's scratch arena on destruction.
+	/// @warning Pointers must stay within the scope. The arena only holds trivially destructible data.
 	class Scratch
 	{
 	public:

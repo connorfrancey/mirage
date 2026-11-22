@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_dx
+ * @brief Vector, matrix, and camera math for renderer geometry.
+ */
 #include <cmath>
 
 // Tiny math layer for the debug renderer. Row-vector convention (v' = v * M), the same as Direct3D and
@@ -6,6 +10,7 @@
 namespace rmath {
     constexpr float kPi = 3.14159265358979f;
 
+    /// @brief Three-dimensional vector in the coordinate space of its caller.
     struct Vec3 {
         float x = 0.f, y = 0.f, z = 0.f;
     };
@@ -17,18 +22,20 @@ namespace rmath {
     inline Vec3 Cross(Vec3 a, Vec3 b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
     inline float Length(Vec3 a) { return std::sqrt(Dot(a, a)); }
 
+    /// @return Unit vector, or a zero vector when the input is too short to normalize.
     inline Vec3 Normalize(Vec3 a) {
         const float l = Length(a);
         return l > 1e-8f ? a * (1.f / l) : Vec3{};
     }
 
+    /// @brief Four-by-four transform using the Direct3D and UE3 row-vector convention.
     struct Mat4 {
         float m[4][4];
     };
 
     inline Mat4 Identity() { return {{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}}; }
 
-    // a first, then b
+    /// @return Matrix that applies the transform `a`, followed by `b`.
     inline Mat4 Mul(const Mat4 &a, const Mat4 &b) {
         Mat4 r{};
         for (int i = 0; i < 4; ++i)
@@ -62,7 +69,7 @@ namespace rmath {
     }
 
     // ---- camera ------------------------------------------------------------------------------------------------
-    // Unreal conventions: X forward, Y right, Z up; rotations in 1/65536 of a turn; FOV is the horizontal angle.
+    /// @brief UE3 camera snapshot with rotation in 1/65536 of a turn and horizontal field of view.
     struct Camera {
         Vec3 pos;
         int pitch = 0, yaw = 0, roll = 0;
@@ -70,7 +77,7 @@ namespace rmath {
         bool valid = false;
     };
 
-    // FRotationMatrix: the rows are the camera's forward / right / up axes in world space.
+    /// @return A rotation whose rows are the camera's forward, right and up axes.
     inline Mat4 RotationMatrix(int pitch, int yaw, int roll) {
         const float k = 2.f * kPi / 65536.f;
         const float p = static_cast<float>(pitch & 0xFFFF) * k, y = static_cast<float>(yaw & 0xFFFF) * k,
@@ -91,7 +98,7 @@ namespace rmath {
         return m;
     }
 
-    // World -> D3D view space (x right, y up, z forward), like the engine's view matrix.
+    /// @return World-to-view transform with x right, y up and z forward in view space.
     inline Mat4 ViewMatrix(const Camera &c) {
         const Mat4 toCamera = Transpose(RotationMatrix(c.pitch, c.yaw, c.roll)); // orthonormal: inverse = transpose
         const Mat4 swizzle = {{{0, 0, 1, 0}, {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}}};

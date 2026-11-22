@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_scripting
+ * @brief Sandbox and execution budgets for Lua mod states.
+ */
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -20,23 +24,33 @@ namespace mirage::lua
 		std::string error;		// Lua's message, or why it was stopped
 	};
 
+	/// @ingroup mirage_scripting
+	/// @brief Own an isolated Lua state, its memory budget, and its instruction budget.
+	/// @note Serialize access to an instance externally. The mod runtime holds its Lua lock across callbacks.
 	class State
 	{
 	public:
-		// `memoryLimit`: bytes the state may allocate. `instructionBudget`: VM instructions per Run (0: unlimited).
+		/// @brief Create a Lua VM with the Mirage sandbox.
+		/// @param memoryLimit Maximum Lua allocator usage in bytes.
+		/// @param instructionBudget VM instructions per call. A value of zero disables the instruction budget.
 		explicit State(std::size_t memoryLimit = 64u << 20, std::uint64_t instructionBudget = 50'000'000);
 		~State();
 		State(const State&) = delete;
 		State& operator=(const State&) = delete;
 
 		bool Valid() const { return L_ != nullptr; }
+		/// @return Borrowed Lua VM pointer, valid while this state is alive. May be null.
 		lua_State* Get() const { return L_; }
 
-		// Compiles and runs `code` (named `chunk` in messages). Errors, the memory limit and the budget come back in
-		// Result, never as exceptions.
+		/// @brief Compile and execute a Lua chunk under the current budgets.
+		/// @param code Lua source text.
+		/// @param chunk Name used in Lua diagnostics.
+		/// @return The first result as text, or a failed Result with a Lua error message.
 		Result Run(std::string_view code, std::string_view chunk = "chunk");
-		// Calls the function under `nargs` arguments on the stack, with a fresh instruction budget. Ok: its `nresults`
-		// results are left on the stack. Not ok: nothing is left, the message is in Result::error.
+		/// @brief Call the function below its arguments on the VM stack.
+		/// @param nargs Number of arguments on the stack.
+		/// @param nresults Number of results requested from Lua.
+		/// @return Success leaves results on the stack. Failure removes the error and records it in Result.
 		Result Call(int nargs, int nresults);
 
 		std::size_t MemoryUsed() const { return used_; }

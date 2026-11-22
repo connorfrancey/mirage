@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_memory
+ * @brief Buddy, small-object, and stack allocators for Mirage-owned memory.
+ */
 // More allocators for the menu's own memory (none of them is ever used for the game's):
 //
 //   BuddyAllocator   power-of-two blocks from one region reserved outside the heap: split on demand, merged with
@@ -37,6 +41,8 @@ namespace mirage::mem
 		Fragmentation free;								// Of the free blocks (external fragmentation)
 	};
 
+	/// @ingroup mirage_memory
+	/// @brief Own the reserved region used for buddy allocation.
 	class BuddyAllocator
 	{
 	public:
@@ -73,6 +79,7 @@ namespace mirage::mem
 	};
 
 	// ---- Small objects -------------------------------------------------------------------------------------------------
+	/// @brief Pool small allocations by size class to reduce heap traffic.
 	class SmallAllocator
 	{
 	public:
@@ -101,6 +108,7 @@ namespace mirage::mem
 
 	// N bytes inline, more from the heap; the contents are kept on Resize
 	template <std::size_t N>
+	/// @brief Owning byte buffer backed by the small allocation service.
 	class SmallBuffer
 	{
 	public:
@@ -133,6 +141,7 @@ namespace mirage::mem
 	};
 
 	// ---- Stack ---------------------------------------------------------------------------------------------------------
+	/// @brief Single-thread stack allocator that can rewind to a saved marker.
 	class StackAllocator
 	{
 	public:

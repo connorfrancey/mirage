@@ -1,0 +1,45 @@
+site_name: !ENV [MIRAGE_DOCS_SITE_NAME, Mirage Documentation]
+site_description: Documentation for the Mirage mod loader and development toolkit for Mirror's Edge.
+repo_url: https://github.com/connorfrancey/mirage
+repo_name: connorfrancey/mirage
+docs_dir: !ENV [MIRAGE_DOCS_CONTENT, build/docs/documentation/content]
+site_dir: !ENV [MIRAGE_DOCS_SITE, build/docs/documentation/site]
+theme:
+  name: material
+  font: false
+  icon:
+    logo: material/cube-outline
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: cyan
+  features:
+    - navigation.sections
+    - content.code.copy
+plugins:
+  - search
+markdown_extensions:
+  - pymdownx.highlight
+  - pymdownx.superfences
+validation:
+  links:
+    anchors: warn
+    absolute_links: relative_to_docs
+    unrecognized_links: warn
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Architecture:
+      - Runtime infrastructure: infrastructure.md
+      - Memory management: memory.md
+  - C++ API:
+      - Native mod APIs: documentation/cpp.md
+      - C ABI function table: api-reference.md
+  - Lua API: documentation/lua.md
+  - SDK: documentation/sdk.md
+  - Tutorials:
+      - Mod authoring for coding agents: mod-authoring-ai.md
+      - New UnrealScript classes: mod-classes.md
+      - Exporting models: models.md
+      - C# mods: csharp-mods.md
+  - Contributing: documentation/README.md

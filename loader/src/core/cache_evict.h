@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_core
+ * @brief Cache budget coordinator and resource eviction interface.
+ */
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -18,23 +22,30 @@
 // to compare caches and keep the total near the budget.
 namespace cache
 {
+	/// @ingroup mirage_core
+	/// @brief Interface implemented by caches that can release their entries on request.
 	class Evictable
 	{
 	public:
 		virtual ~Evictable() = default;
 		virtual std::size_t Bytes() const = 0;					// About how much it holds now
-		// Gives back about `bytes`, least valuable entries first (least recently used, soonest to expire, ...);
-		// returns what it freed. May free all it has.
+		/// @brief Release the least valuable cache entries first.
+		/// @param bytes Approximate number of bytes to release.
+		/// @return Estimated bytes released. An implementation may trim the entire cache.
 		virtual std::size_t Trim(std::size_t bytes) = 0;
 		virtual std::size_t Expire() { return 0; }				// Drops what went stale (TTL caches); entries dropped
 		virtual std::uint64_t Hits() const { return 0; }		// Hits so far (its statistics): how much it is worth
 	};
 
+	/// @ingroup mirage_core
+	/// @brief Coordinate a shared cache budget without taking ownership of cache instances.
+	/// @note Enforce runs on the game thread. Add, Remove and Snapshot can be called from any thread.
 	class Evictor
 	{
 	public:
 		explicit Evictor(std::size_t budgetBytes = 16u << 20);
 
+		/// @brief Register a borrowed cache. Remove it before the instance is destroyed.
 		void Add(Evictable& cache, std::string name);
 		void Remove(Evictable& cache);
 
@@ -47,7 +58,8 @@ namespace cache
 			std::size_t expired = 0;				// Entries dropped as stale
 			int trimmed = 0;						// Caches that gave memory back
 		};
-		// Expires stale entries everywhere, then, over the budget, trims the least valuable caches down to 90% of it
+		/// @brief Expire stale entries and trim over-budget caches on the game thread.
+		/// @return Summary of the eviction pass.
 		Pass Enforce();
 
 		struct View
@@ -62,7 +74,7 @@ namespace cache
 		std::size_t Total() const;				// As of the last pass
 		Pass Last() const;
 
-		// A cache that registers itself for its lifetime
+		/// @brief Base for a cache that registers itself for its lifetime.
 		class Member : public Evictable
 		{
 		public:

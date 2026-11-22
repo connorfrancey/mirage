@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_core
+ * @brief File resources with shared ownership and scheduler-managed eviction.
+ */
 // The resource cache: files the menu and mods read (images, fonts, layouts, data files) loaded once and shared.
 //
 //   auto r = res::Cache().Get(path);                   // shared_ptr<const res::Resource>, nullptr if unreadable
@@ -8,7 +12,7 @@
 //   - live: anything someone still holds is found again (cache::Weak), whatever the budget did
 //   - kept: recently used resources are held by the cache itself, least recently used first to go, under the eviction
 //     manager's budget (core/cache_evict.h): memory pressure takes them, never a resource that is in use
-//   - by content: two paths with the same bytes share one copy (XXH3 of the contents)
+//   - by content: two paths with the same bytes share one copy (rapidhash of the contents)
 // A file that changed on disk (size or write time; checked at most every `checkEvery` seconds per file) is read again.
 // Any thread (one lock; files are read outside it).
 #include "core/cache.h"
@@ -33,7 +37,7 @@ namespace res
 	{
 		std::filesystem::path path;
 		std::vector<std::uint8_t> bytes;
-		std::uint64_t hash = 0;							// XXH3 of the bytes
+		std::uint64_t hash = 0;							// rapidhash of the bytes
 		std::uintmax_t fileSize = 0;
 		std::filesystem::file_time_type writeTime{};
 		std::string_view Text() const { return {reinterpret_cast<const char*>(bytes.data()), bytes.size()}; }
@@ -46,12 +50,18 @@ namespace res
 		std::uint64_t hits = 0, misses = 0, reloads = 0, shared = 0, failures = 0;
 	};
 
+	/// @ingroup mirage_core
+	/// @brief Reuse immutable resource snapshots across file reads.
+	/// @note Eviction drops the cache's reference. Existing owners retain their snapshots.
 	class ResourceCache : public cache::Evictor::Member
 	{
 	public:
 		explicit ResourceCache(std::string name = "Resources", double checkEvery = 1.0);
 
-		Ref Get(const std::filesystem::path& path);					// Reads it now if needed (on the calling thread)
+		/// @brief Find the resource or read it on the calling thread.
+		/// @param path File to read.
+		/// @return Shared immutable bytes or an empty reference on failure.
+		Ref Get(const std::filesystem::path& path);
 		tasks::Task<Ref> Load(const std::filesystem::path& path, tasks::Priority priority = tasks::Priority::Normal);
 		void Invalidate(const std::filesystem::path& path);			// Read again next time
 		void Clear();												// Drops what it keeps (live ones stay with their owners)

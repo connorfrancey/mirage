@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_dx
+ * @brief Render immutable world debug snapshots with Direct3D 9.
+ */
 #include "math.h"
 #include "mesh.h"
 
@@ -34,6 +38,8 @@ namespace debugrender {
         float staticOpacity = 0.25f;    // Faces of the static geometry layer (SetStatic)
     };
 
+    /// @ingroup mirage_dx
+    /// @brief Geometry and labels published as a shared immutable snapshot.
     struct Scene {
         rmesh::MeshData mesh;
         std::vector<rmesh::Label> labels;
@@ -59,7 +65,10 @@ namespace debugrender {
     void SetStyle(const Style& style);
     void SetCamera(const rmath::Camera& camera);
     void SetEngineNear(float nearPlane);            // 0 = unknown
-    void SetScene(std::shared_ptr<const Scene> scene);  // nullptr clears
+    /// @brief Publish or clear the current geometry snapshot.
+    /// @param scene Shared scene pointer. Pass null to clear the current scene.
+    /// @note May be called from any thread. The renderer shares ownership of the supplied scene.
+    void SetScene(std::shared_ptr<const Scene> scene);
     // Small geometry that moves (pawn cylinders), replaced every tick and drawn with the scene. Empty clears.
     void SetDynamic(rmesh::MeshData mesh);
     // World geometry (static meshes), built off the game thread and replaced now and then. Drawn with the scene, its
@@ -72,7 +81,10 @@ namespace debugrender {
     void OnStretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* src, IDirect3DSurface9* dst);  // Before the real call
     // IDirect3DDevice9::SetVertexShaderConstantF, before the real call: `count` float4 registers from `start`.
     void OnVertexShaderConstants(unsigned start, const float* data, unsigned count);
-    void BeginFrame(IDirect3DDevice9* dev);         // EndScene, before Render
+    /// @brief Capture the device state for this frame before Render.
+    /// @param dev Borrowed Direct3D device for the current frame.
+    /// @warning Render thread only.
+    void BeginFrame(IDirect3DDevice9* dev);
     void Render(IDirect3DDevice9* dev);             // EndScene: overlay path
     void EndFrame();                                // After the frame was presented
     bool WorldToScreen(rmath::Vec3 world, float& x, float& y);  // With the last BeginFrame's matrices

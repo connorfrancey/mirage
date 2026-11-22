@@ -1,0 +1,69 @@
+/**
+ * @mainpage Mirage C++ Reference
+ *
+ * Mirage loads mods into the 32-bit PC build of Mirror's Edge. New native
+ * mods begin with @ref mirage_c_api or @ref mirage_cpp_api.
+ * Loader contributors can browse the subsystem interfaces below.
+ *
+ * @warning Engine objects belong to the game thread. Renderer device
+ * callbacks and ImGui operate on the render thread. Reacquire borrowed game
+ * objects after a tick or a level transition.
+ *
+ * @see mirage_core
+ * @see mirage_assets
+ * @see mirage_dx
+ * @see mirage_scripting
+ * @see mirage_memory
+ * @see mirage_hooking
+ */
+
+/**
+ * @defgroup mirage_c_api Native C ABI
+ * @brief Stable function table and data types shared by the loader and native mods.
+ *
+ * MirageApi stays valid through the mod's unload callback. Its size tags make
+ * it possible to negotiate features with an older loader. The loader owns
+ * opaque handles. Release resources using the matching API operation where
+ * the operation supplies one.
+ */
+
+/**
+ * @defgroup mirage_cpp_api C++ mod helpers
+ * @brief Header-only native mod interfaces for the ABI, SDK and ImGui.
+ *
+ * The mod owns its C++ objects. The loader calls into the mod through the C
+ * ABI. Inspect the frame and thread requirements on the individual helpers.
+ */
+
+/**
+ * @defgroup mirage_core MirageCore
+ * @brief Event delivery, worker tasks, and reusable cache interfaces used by Mirage.
+ */
+
+/**
+ * @defgroup mirage_assets MirageAssets
+ * @brief Engine-free model, texture, and package preparation interfaces.
+ *
+ * Keep each mutable UnrealLib linker and model on an owning thread or
+ * synchronize access at the call site.
+ */
+
+/**
+ * @defgroup mirage_dx MirageDX
+ * @brief Direct3D 9 debug rendering and CPU geometry construction.
+ */
+
+/**
+ * @defgroup mirage_scripting Scripting and reflection
+ * @brief Lua VM ownership, reflected UE3 access and invocation.
+ */
+
+/**
+ * @defgroup mirage_memory Memory management
+ * @brief Mirage-owned allocations, budget monitoring, and cache pressure.
+ */
+
+/**
+ * @defgroup mirage_hooking Hooking
+ * @brief Registration and lifecycle operations over MirageHook.
+ */

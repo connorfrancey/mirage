@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_assets
+ * @brief Convert mesh data into UnrealLib assets and cooked packages.
+ */
 // Models from mods (Mirage, step 31): a converted model (runtime/mesh_file.h) built into a package holding one
 // StaticMesh, which the engine then loads like any cooked mesh (runtime/models.h). Engine-free: UnrealLib only, so the
 // unit tests build packages too.
@@ -49,6 +53,12 @@ namespace mirage::models
 	// `mesh` laid out the way the game's meshes are (above), its collision tree built; `material` gives each section's.
 	// The properties, BodySetup and the rest are left at their defaults for the caller (a new package, or a replaced
 	// mesh keeping the original's). Throws std::runtime_error for no triangles or more than 32,767 vertices.
+	/// @brief Build the mesh streams and collision tree used by a cooked static mesh.
+	/// @param mesh Converted model data.
+	/// @param name Name of the mesh export.
+	/// @param material Callback returning the package material index for each section.
+	/// @return Owned UnrealLib mesh with default export properties.
+	/// @throws std::runtime_error When the input contains no triangles or exceeds 32,767 vertices.
 	UnrealLib::Assets::StaticMesh MakeStaticMesh(const MeshData& mesh, const std::string& name, const MaterialFor& material);
 
 	// `mesh`, a skinned model, as the replacement of the game's skeletal mesh `original`: the original's skeleton (the
@@ -60,6 +70,7 @@ namespace mirage::models
 	// the edges, every bone required, weights quantized to 255 in all; the same LOD at every level the original has.
 	// `rules`: the game's (the CPU copies' UV sets). Throws std::runtime_error for a bone the original doesn't have, a
 	// vertex without a bone, more than 65,535 vertices or more than 75 bones in a section.
+	/// @brief Build a replacement using the original mesh's skeleton, materials and properties.
 	UnrealLib::Assets::SkeletalMesh MakeSkeletalMesh(const MeshData& mesh, const UnrealLib::Assets::SkeletalMesh& original,
 													 const UnrealLib::AssetRules& rules);
 

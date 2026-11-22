@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_core
+ * @brief Typed event subscriptions and dispatch.
+ */
 // The menu's event bus: typed events, published by one part of the menu and handled by others that don't know about
 // each other (the memory manager, the hang detector, level loads, mods' reloads, ...).
 //
@@ -61,7 +65,8 @@ namespace events
 		void Queue(Where where, std::function<void()> fn);
 	}
 
-	// Unsubscribes when destroyed (or Reset). Movable.
+	/// @ingroup mirage_core
+	/// @brief Owning token that unsubscribes on destruction or Reset.
 	class Subscription
 	{
 	public:
@@ -97,9 +102,16 @@ namespace events
 		std::vector<std::string> owners;
 	};
 
+	/// @ingroup mirage_core
+	/// @brief Dispatch typed events to their subscribers.
 	class EventBus
 	{
 	public:
+		/// @brief Register a handler and return the token that controls its lifetime.
+		/// @tparam E Event type.
+		/// @param fn Callback invoked with a borrowed event.
+		/// @param options Dispatch thread, priority, and diagnostic owner.
+		/// @return Subscription which removes the handler on destruction.
 		template <class E>
 		Subscription Subscribe(std::function<void(const E&)> fn, Options options = {})
 		{

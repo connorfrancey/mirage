@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_memory
+ * @brief Memory budget monitoring, pressure callbacks, and diagnostics.
+ */
 // The memory manager: one place that watches the process's memory and the menu's own, reasons about it
 // (runtime/mem/analysis.h) and, when it must, gives memory back: the menu's caches, pools and arenas, and the mods
 // (MIRAGE_EVENT_MEMORY_PRESSURE). It never touches the game's memory or its allocators.
@@ -52,6 +56,12 @@ namespace mirage::mem
 	// eviction job trims over its next passes, never all in one frame), Critical drops it to the floor and trims now.
 	// Called when the pressure level changes (`rising`), and again every 5 s while it is High or Critical. Returns the
 	// bytes it gave back, if it knows. Game thread. Higher priority runs first.
+	/// @brief Register a callback that can return replaceable memory on the game thread.
+	/// @param name Diagnostic name.
+	/// @param priority Higher priorities run first.
+	/// @param fn Stored callback reporting bytes released. Its captures must outlive the registration.
+	/// @return Registration ID for RemovePressureHandler.
+	/// @see RemovePressureHandler
 	int AddPressureHandler(std::string name, int priority, std::function<std::size_t(Level level, bool rising)> fn);
 	void RemovePressureHandler(int id);
 

@@ -141,6 +141,15 @@ encoder, UnrealScript compiler); `-D CPM_UnrealLib_SOURCE=<a local checkout>` bu
   the crash reporter. Movement is driven by key presses through the engine's input. Checks wait on state, never on
   time alone, and the game closes by itself with every step's result.
 
+## Documentation
+
+The [mod authoring guide for coding agents](docs/mod-authoring-ai.md) walks through a Lua HUD, a content override,
+and a multi-file scripted mod.
+
+The [documentation build guide](docs/documentation/README.md) covers the optional Doxygen reference,
+the MkDocs Material site, and documentation coverage checks. The docs-only CMake configuration works
+without the game toolchain.
+
 ## License
 
 MIT (see `LICENSE`).

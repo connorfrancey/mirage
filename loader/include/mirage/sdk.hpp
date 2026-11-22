@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_cpp_api
+ * @brief Bridge from the native mod interface to the generated UE3 SDK.
+ */
 // The generated SDK (sdk/, `mirage sdk`) in a native mod: game objects as C++ types, read and written directly.
 //
 //     #include <mirage/sdk.hpp>          // links mirage::sdk
@@ -15,6 +19,9 @@
 
 namespace mirage::sdk
 {
+	/// @brief Initialize the mod's SDK globals from the loader if needed.
+	/// @return True when both engine global tables are available.
+	/// @note Game thread only.
 	inline bool Ready()
 	{
 		if (Classes::UObject::GObjects && Classes::FName::GNames) return true;
@@ -26,14 +33,22 @@ namespace mirage::sdk
 		return names && objects;
 	}
 
+	/// @brief Interpret a borrowed mod object handle as an SDK object.
+	/// @tparam T SDK type the caller has verified for this object.
+	/// @param o Borrowed engine object handle.
+	/// @return SDK pointer, or null when the handle or SDK globals are unavailable.
+	/// @warning No runtime type check is performed. Use only on the game thread.
 	template <class T = Classes::UObject>
 	T* As(MirageObject* o) { return Ready() ? reinterpret_cast<T*>(o) : nullptr; }
 
+	/// @return The current player pawn, or null. Borrowed for this game tick.
 	inline Classes::ATdPlayerPawn* Pawn() { return As<Classes::ATdPlayerPawn>(Api().player_pawn()); }
+	/// @return The current controller, or null. Borrowed for this game tick.
 	inline Classes::ATdPlayerController* Controller() { return As<Classes::ATdPlayerController>(Api().player_controller()); }
+	/// @return The current world info, or null. Borrowed for this game tick.
 	inline Classes::AWorldInfo* World() { return As<Classes::AWorldInfo>(Api().world_info()); }
 
-	// The level the player is in: the persistent level's package ("Edge_p"), "" in none
+	/// @return The persistent level's package name, or an empty string. Game thread only.
 	inline std::string MapName()
 	{
 		Classes::UObject* o = World();

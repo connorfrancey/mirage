@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_core
+ * @brief Worker queue and continuations for game, render, and worker threads.
+ */
 // Background tasks: work that must not run on the game or render thread (reading and hashing files, building data,
 // compressing) on a small pool of low-priority workers, with results handed back where they are needed.
 //
@@ -73,6 +77,8 @@ namespace tasks
 		void Finish(State& s, Status status, std::string error = {});
 	}
 
+	/// @ingroup mirage_core
+	/// @brief Shared handle to a worker result and its completion state.
 	template <class T>
 	class Task
 	{
@@ -100,7 +106,7 @@ namespace tasks
 			else state_->done.wait_for(l, std::chrono::duration<double>(seconds), finished);
 			return finished();
 		}
-		// The result once Done (else nullptr)
+		/// @return A borrowed pointer to the completed result, or null. Keep a task handle alive while using it.
 		const T* Result() const { return Ok() && result_ && result_->has_value() ? &**result_ : nullptr; }
 
 		// Runs `fn(result)` where asked once it is Done (not when it failed or was cancelled; then `otherwise(error)`)
@@ -130,7 +136,10 @@ namespace tasks
 		std::shared_ptr<std::optional<T>> result_;
 	};
 
-	// Runs `fn` (returns a value; void is returned as bool true) on a worker
+	/// @brief Submit work to a worker thread.
+	/// @param fn Job moved into the queue. Worker code must avoid direct engine object access.
+	/// @param options Scheduling settings.
+	/// @return Task handle. A void job has a boolean result on success.
 	template <class F>
 	auto Run(F&& fn, Options options = {})
 	{

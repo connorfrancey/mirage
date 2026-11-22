@@ -1,0 +1,50 @@
+name: Documentation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  documentation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/documentation/requirements.txt
+      - uses: lukka/get-cmake@latest
+      - name: Install documentation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+          python -m pip install -r tools/documentation/requirements.txt
+      - name: Configure documentation
+        env:
+          DOC_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: cmake -S . -B build/docs -G Ninja -D MIRAGE_DOCS_ONLY=ON -D MIRAGE_DOCS_WEBSITE=ON -D "MIRAGE_DOCS_VERSION=$DOC_VERSION"
+      - name: Build and validate
+        run: cmake --build build/docs --target docs-site
+      - name: Upload documentation
+        uses: actions/upload-artifact@v4
+        with:
+          name: mirage-docs-${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          path: |
+            build/docs/documentation/site
+            build/docs/documentation/doxygen/xml
+            build/docs/documentation/coverage.json
+          if-no-files-found: error

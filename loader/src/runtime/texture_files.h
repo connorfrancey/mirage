@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_assets
+ * @brief Offline texture conversion and cooked package overlays.
+ */
 // Texture replacement, the file side (Mirage, step 7): what a mod's image becomes in the game's package format. Pure:
 // no engine, no Windows; unit-tested (tests/test_textures.cpp).
 //
@@ -49,6 +53,11 @@ namespace mirage::textures
 	// .png / .tga / .bmp / .jpg are decoded, given a full mip chain (box filter) and encoded to `target`, the replaced
 	// texture's own format. An image whose sides aren't powers of two is resampled to the nearest (a DDS must be one).
 	// Throws std::runtime_error saying what is wrong.
+	/// @brief Prepare a mod image for texture replacement.
+	/// @param file Image file. DDS keeps its stored format and mip levels.
+	/// @param target Format used to encode decoded source images.
+	/// @return Owned encoded mip chain.
+	/// @throws std::runtime_error When the image cannot be read or encoded.
 	Encoded LoadReplacement(const std::filesystem::path& file, PixelFormat target);
 	// What EncodeImage does to an image's pixels first (not to a DDS, which is taken as stored)
 	enum class Pixels
@@ -97,6 +106,12 @@ namespace mirage::textures
 	// format from the image; meshes: the model, see above). Throws std::runtime_error if the package itself can't be read or written.
 	// `compress`: LZO like the original (slow: seconds per map), else uncompressed (the engine reads both; the game's
 	// own storage packages are uncompressed).
+	/// @brief Build an in-memory package overlay with matching exports replaced.
+	/// @param package Cooked package to read. The file remains untouched.
+	/// @param replacements Requested textures or meshes.
+	/// @param compress Write LZO-compressed package data when true.
+	/// @return Owned package bytes and diagnostics for replacements that failed.
+	/// @throws std::runtime_error When the package cannot be read or serialized.
 	Overlay BuildOverlay(const std::filesystem::path& package, const std::vector<Replacement>& replacements,
 						 bool compress = false);
 }

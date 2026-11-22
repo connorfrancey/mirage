@@ -1,4 +1,9 @@
 #pragma once
+/** @file
+ * @ingroup mirage_cpp_api
+ * @brief Header-only helpers for developing native Mirage mods.
+ * @see MirageApi
+ */
 // Mirage mod API for C++: a header-only wrapper over mirage/api.h, in the style of the menu's own modules.
 //
 //     #include <mirage/mirage.hpp>
@@ -42,10 +47,16 @@ namespace mirage
 		}
 	}
 
+	/// @brief Borrow the loader's function table for the lifetime of this mod.
+	/// @warning Call only after the runtime has loaded the mod.
 	inline const MirageApi& Api() { return *detail::Api(); }
+	/// @brief Borrow the mod handle initialized by the loader.
 	inline MirageMod* Mod() { return detail::Mod(); }
 
 	// ---- Logging ---------------------------------------------------------------------------------------------------
+	/// @brief Write a UTF-8 message to the Mirage log.
+	/// @param level Severity recorded with the message.
+	/// @param text Text copied by the loader during the call.
 	inline void Log(MirageLogLevel level, const std::string& text) { Api().log(Mod(), level, text.c_str()); }
 	inline void Info(const std::string& text) { Log(MIRAGE_LOG_INFO, text); }
 	inline void Warn(const std::string& text) { Log(MIRAGE_LOG_WARN, text); }
@@ -53,10 +64,14 @@ namespace mirage
 
 	inline std::string Id() { return Api().mod_id(Mod()); }
 
-	// The UI layer (MirageUi): on the render thread, in OnRender (windows) and OnPanel
+	/// @brief Borrow the loader's UI functions during a render-thread callback.
+	/// @see MirageUi
 	inline const MirageUi& Ui() { return *Api().ui(); }
 
-	// A file in the mod's folder ("layouts/Movement.json"): its bytes, or false when there is none
+	/// @brief Read a file relative to the mod directory.
+	/// @param path Relative path inside the mod directory.
+	/// @param[out] out Byte buffer written by the call.
+	/// @return True on success. Discard the buffer when the runtime reports failure.
 	inline bool ReadFile(const std::string& path, std::string& out)
 	{
 		const int32_t n = Api().file_read(Mod(), path.c_str(), nullptr, 0);
@@ -166,6 +181,10 @@ namespace mirage
 	}
 
 	// ---- Modules ---------------------------------------------------------------------------------------------------
+	/// @ingroup mirage_cpp_api
+	/// @brief Base class for a native mod's switchable feature or action.
+	/// @note The instance belongs to the mod. OnTick runs on the game thread.
+	/// OnRender and OnPanel run on the render thread. OnDisable also runs during unload.
 	class Module
 	{
 	public:
@@ -194,12 +213,18 @@ namespace mirage
 		Module(const Module&) = delete;
 		Module& operator=(const Module&) = delete;
 
+		/// @brief Handle a module being enabled on the thread that switched it.
 		virtual void OnEnable() {}
+		/// @brief Undo module changes on disable or unload.
 		virtual void OnDisable() {}
+		/// @brief Run enabled game work on the engine's tick thread.
 		virtual void OnTick() {}
+		/// @brief Draw the enabled module's UI on the render thread.
 		virtual void OnRender() {}
+		/// @brief Run an action module after activation by its button or key.
 		virtual void OnTrigger() {}
-		virtual void OnPanel() {}		// Render thread: widgets (mirage::Ui()) in the settings panel, below the settings
+		/// @brief Draw render-thread widgets below the module's settings while the panel is open.
+		virtual void OnPanel() {}
 
 		bool Enabled() const { return handle_ && Api().module_enabled(handle_) != 0; }
 		void SetEnabled(bool on) { if (handle_) Api().module_set_enabled(handle_, on ? 1 : 0); }
@@ -211,6 +236,7 @@ namespace mirage
 	};
 
 	// ---- Settings --------------------------------------------------------------------------------------------------
+	/// @brief Base for a mod-owned setting wrapper backed by a loader-owned handle.
 	class Setting
 	{
 	public:
@@ -221,6 +247,7 @@ namespace mirage
 		MirageSetting* handle_ = nullptr;
 	};
 
+	/// @brief Boolean setting displayed as a checkbox.
 	class Checkbox : public Setting
 	{
 	public:
@@ -233,6 +260,7 @@ namespace mirage
 		void Set(bool v) { if (handle_) Api().setting_set_int(handle_, v ? 1 : 0); }
 	};
 
+	/// @brief Floating-point slider setting.
 	class Slider : public Setting
 	{
 	public:
@@ -247,6 +275,7 @@ namespace mirage
 		void Set(float v) { if (handle_) Api().setting_set_float(handle_, v); }
 	};
 
+	/// @brief Integer slider setting.
 	class SliderInt : public Setting
 	{
 	public:
@@ -259,6 +288,7 @@ namespace mirage
 		void Set(int v) { if (handle_) Api().setting_set_int(handle_, v); }
 	};
 
+	/// @brief UTF-8 text setting.
 	class Text : public Setting
 	{
 	public:
@@ -278,6 +308,7 @@ namespace mirage
 		void Set(const std::string& v) { if (handle_) Api().setting_set_text(handle_, v.c_str()); }
 	};
 
+	/// @brief Configurable key whose held state the mod can query.
 	class KeyHold : public Setting
 	{
 	public:
@@ -324,6 +355,11 @@ namespace mirage
 	// A game object: an Actor, a Controller, ... Not owned: look it up again rather than keep it across ticks.
 	//     mirage::Object pawn = mirage::Object::Pawn();
 	//     if (pawn) pawn.Set("Location.Z", pawn.Get<float>("Location.Z") + 100.f);
+	/// @ingroup mirage_cpp_api
+	/// @brief Non-owning wrapper for a reflected engine object.
+	/// @warning Use on the game thread. Reacquire the object after a level load
+	/// or on the next tick. Use the ABI handle functions to track object identity.
+	/// @see MirageHandle
 	class Object
 	{
 	public:
@@ -389,6 +425,9 @@ namespace mirage
 	}
 
 	// A call of a game function, in a hook: its object, its parameters ("NewLocation.Z", "ReturnValue")
+	/// @ingroup mirage_cpp_api
+	/// @brief View of reflected function parameters and results.
+	/// @note A hook's call is borrowed and available for the duration of its callback.
 	class Call
 	{
 	public:
@@ -416,6 +455,7 @@ namespace mirage
 	};
 
 	// ---- Events and hooks (step 6). Removed when the mod unloads; Remove() takes one off earlier. --------------------
+	/// @brief Registration wrapper for a callback that can remove itself.
 	class Hooked
 	{
 	public:

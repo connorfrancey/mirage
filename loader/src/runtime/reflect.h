@@ -1,4 +1,8 @@
 #pragma once
+/** @file
+ * @ingroup mirage_scripting
+ * @brief Game-thread property lookup over objects, structures and call buffers.
+ */
 // Game objects by name (Mirage, step 6): a property of an object, a member of a struct in it, a parameter of a call,
 // found through the engine's own UProperty objects and a dotted path ("Location.Z", "Velocity", "Controller").
 //
@@ -48,7 +52,9 @@ namespace mirage::reflect
 	// Every property of `type` and what it extends (cached per type, like Find), in no particular order. Game thread.
 	std::vector<const Member*> List(Classes::UStruct* type);
 
-	// Where a dotted path leads: the member it ends at and its address
+	/// @ingroup mirage_scripting
+	/// @brief Borrowed reflected member and resolved address.
+	/// @warning Valid only while the underlying storage and reflection cache entry are alive.
 	struct Value
 	{
 		const Member* member = nullptr;
@@ -60,6 +66,12 @@ namespace mirage::reflect
 	// path may index an array, 0-based: "StreamingLevels[2].PackageName" (a dynamic array, checked against its count),
 	// "Foo[3]" (a static one). An array without an index is the array itself (ArrayCount); a static one stays its
 	// first element for everything else, as before.
+	/// @brief Resolve a property path against live storage and type metadata.
+	/// @param type Declaring layout or a derived class.
+	/// @param base Storage for an instance of the supplied layout.
+	/// @param path Dotted path with optional zero-based array subscripts.
+	/// @return Borrowed value on success or a value with an error message.
+	/// @note Game thread only.
 	Value Resolve(Classes::UStruct* type, void* base, std::string_view path);
 
 	// Reading and writing a value of the kind the member has. Get on another kind gives 0 / "" / nullptr; Set on

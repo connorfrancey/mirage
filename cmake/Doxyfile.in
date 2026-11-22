@@ -1,0 +1,70 @@
+# Mirage public mod headers and selected loader interfaces.
+PROJECT_NAME           = "Mirage"
+PROJECT_NUMBER         = "@_doc_version@"
+PROJECT_BRIEF          = "Mirror's Edge mod loader and development toolkit"
+OUTPUT_DIRECTORY       = "@_doc_doxygen@"
+OUTPUT_LANGUAGE        = English
+TIMESTAMP              = NO
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = "@_doc_root@"
+STRIP_FROM_INC_PATH    = "@_doc_root@/loader/include" "@_doc_root@/loader/src"
+MARKDOWN_SUPPORT       = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
+# Extract a complete inventory for docs-check. Doxygen still reports malformed references.
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = NO
+EXTRACT_LOCAL_CLASSES  = NO
+INTERNAL_DOCS          = NO
+EXCLUDE_SYMBOLS        = "mirage::detail" "mirage::detail::*" "tasks::detail" "tasks::detail::*" \
+                         "events::detail" "events::detail::*"
+QUIET                  = YES
+WARNINGS               = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS
+
+INPUT                  = docs/doxygen \
+                         loader/include/mirage \
+                         loader/src/core/events.h loader/src/core/tasks.h loader/src/core/hooking.h \
+                         loader/src/core/resource_cache.h loader/src/core/cache_evict.h \
+                         loader/src/render/debug_renderer.h loader/src/render/math.h loader/src/render/mesh.h \
+                         loader/src/runtime/model_files.h loader/src/runtime/mesh_file.h loader/src/runtime/texture_files.h \
+                         loader/src/runtime/lua_vm.h loader/src/runtime/call.h loader/src/runtime/reflect.h \
+                         loader/src/runtime/mem/arena.h loader/src/runtime/mem/manager.h loader/src/runtime/mem/allocators.h \
+                         @_doc_sdk@
+FILE_PATTERNS          = *.h *.hpp *.dox
+RECURSIVE              = YES
+FILTER_PATTERNS        = "*/api.h=@_doc_filter@"
+FILTER_SOURCE_FILES    = NO
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = "MIRAGE_CALL=" "MIRAGE_EXPORT=" "__cdecl="
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           = loader/include loader/src
+
+GENERATE_HTML          = @_MIRAGE_DOCS_HTML@
+HTML_OUTPUT            = html
+GENERATE_XML           = @_MIRAGE_DOCS_XML@
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+GENERATE_LATEX         = NO
+SOURCE_BROWSER         = YES
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+SHOW_INCLUDE_FILES     = YES
+SEARCHENGINE           = YES
+
+HAVE_DOT               = @_doc_have_dot@
+DOT_PATH               = "@_doc_dot_dir@"
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+GRAPHICAL_HIERARCHY    = YES
+DOT_IMAGE_FORMAT       = svg
+DOT_NUM_THREADS        = 2
+DOT_GRAPH_MAX_NODES    = 40
+MAX_DOT_GRAPH_DEPTH    = 3
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO

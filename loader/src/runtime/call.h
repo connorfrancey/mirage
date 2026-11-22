@@ -1,4 +1,9 @@
 #pragma once
+/** @file
+ * @ingroup mirage_scripting
+ * @brief Verified reflected invocation and parameter buffers for UE3.
+ * @note Game thread only.
+ */
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -33,6 +38,9 @@ namespace mirage::call
 	// The native index of `fn` (0: none, ProcessEvent runs it). -1 when the UFunction layout didn't check out.
 	int NativeIndex(Classes::UFunction* fn);
 
+	/// @ingroup mirage_scripting
+	/// @brief Own a buffer laid out for a reflected function's input and output properties.
+	/// @note The underlying UFunction is borrowed from the engine.
 	class Params
 	{
 	public:
@@ -73,8 +81,11 @@ namespace mirage::call
 		mutable std::string error_;
 	};
 
-	// Runs the function on `object` with `params` (their values go in, out parameters and the return value come back in
-	// them). False with `error` when it could not be called.
+	/// @brief Invoke the reflected function on the game thread.
+	/// @param object Borrowed engine object to receive the call.
+	/// @param[in,out] params Parameter buffer receiving the out values and return value.
+	/// @param[out] error Optional reason for a rejected invocation.
+	/// @return True when the engine call ran.
 	bool Call(Classes::UObject* object, Params& params, std::string* error = nullptr);
 
 	// The UFunction layout is what this code expects (native indexes where they belong). Logged once. Game thread.
