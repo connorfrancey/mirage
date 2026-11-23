@@ -1763,6 +1763,11 @@ self-test; a breakpoint in its OnTick hits from VS Code; a second start with onl
 **Milestone:** someone who has never seen the code builds, tests and runs a gameplay mod (a trigger and a tuned move)
 with only the docs and the CLI.
 
+**Status (2026-11-22): in progress.** The CLI scaffolds Lua, C#, native and content-only mods. The content
+starter includes a step-height override and instructions for textures, meshes and sounds. Offline checks
+validate named entry files and content directories before build, packaging or installation. The gameplay
+walkthrough and determinism lint remain open.
+
 ### 36. A hundred mods: start-up, memory and budgets (P2)
 
 *Was step 23.*

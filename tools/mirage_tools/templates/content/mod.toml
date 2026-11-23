@@ -1,0 +1,7 @@
+id = "{{id}}"
+name = "{{name}}"
+version = "0.1.0"
+description = "{{description}}"
+authors = ["{{author}}"]
+mirage = "^0.1"
+content = ["content"]

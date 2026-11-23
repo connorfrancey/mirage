@@ -1,9 +1,8 @@
 """Tooling for mod authors (step 3 of the plan's next ten steps): a new mod from a template, and a mod checked, built,
 packaged and installed into the game the same way whatever it is written in.
 
-    mirage new my-mod --lang lua|cs|native      a mod project: mod.toml, README.md, its code in src/ (a working module),
-                                                content/ for data, .gitignore; ready to install
-    mirage mod check [folder]                   mod.toml read and checked the way the runtime will
+    mirage new my-mod --lang lua|cs|native|content   a mod project with a working example
+    mirage mod check [folder]                   offline checks for mod.toml and the project layout
     mirage mod build [folder]                   native: its CMake project (x86); C# project: dotnet; Lua, C# script,
                                                 content: nothing to build (checked)
     mirage mod package [folder]                 the built mod zipped: dist/mods/<id>-<version>.zip
@@ -15,6 +14,7 @@ packaged and installed into the game the same way whatever it is written in.
 """
 from __future__ import annotations
 
+import json
 import re
 import shutil
 import subprocess
@@ -22,7 +22,7 @@ import sys
 import tomllib
 import zipfile
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import click
 from rich.console import Console
@@ -33,8 +33,10 @@ from .toolchain import ROOT
 TEMPLATES = Path(__file__).parent / "templates"
 LANGS = {"lua": "Lua: no build, saved files reload in the game",
          "cs": "C# script: compiled in the game, no SDK needed",
-         "native": "C++: its own CMake project, built for x86 against the mod API headers"}
+         "native": "C++: its own CMake project, built for x86 against the mod API headers",
+         "content": "Content: property overrides and asset replacements, no code"}
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+MANIFEST_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{1,63}")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
 SETTING_TYPES = {"bool", "int", "float", "string", "choice", "key", "color"}
 OUT = ROOT / "build" / "mods"
@@ -47,7 +49,7 @@ class ModInfo:
     folder: Path
     id: str
     version: str
-    kind: str           # "native", "csproj", "cs", "lua", "content"
+    kind: str           # "native", "native-binary", "csproj", "cs", "lua", "content"
     manifest: dict
 
 
@@ -74,8 +76,8 @@ def _author() -> str:
 def create(mod_id: str, lang: str, parent: Path, name: str | None = None, description: str | None = None,
            author: str | None = None) -> Path:
     """The mod's folder <parent>/<mod_id> from templates/<lang>. Raises ValueError for a bad id or an existing folder."""
-    if not ID_RE.match(mod_id):
-        raise ValueError(f"\"{mod_id}\": an id is lowercase letters and digits, words joined by '-' (\"my-mod\")")
+    if not 2 <= len(mod_id) <= 64 or not ID_RE.fullmatch(mod_id):
+        raise ValueError(f"\"{mod_id}\": use 2–64 lowercase letters and digits, words joined by '-' (\"my-mod\")")
     if lang not in LANGS:
         raise ValueError(f"no template for \"{lang}\" ({', '.join(LANGS)})")
     target = parent / mod_id
@@ -90,7 +92,8 @@ def create(mod_id: str, lang: str, parent: Path, name: str | None = None, descri
         "ident": mod_id.replace("-", "_"),
         "api_dir": (ROOT / "loader" / "include").as_posix(),
     }
-    # Every mod's files (README.md, .gitignore, content/), then the language's (mod.toml, src/)
+    manifest_values = {key: json.dumps(value, ensure_ascii=False)[1:-1] for key, value in values.items()}
+    # Shared instructions and the selected template's own files.
     for source in (TEMPLATES / "common", TEMPLATES / lang):
         for f in sorted(source.rglob("*")):
             if not f.is_file():
@@ -98,50 +101,95 @@ def create(mod_id: str, lang: str, parent: Path, name: str | None = None, descri
             rel = Path(_render(str(f.relative_to(source)), values))
             out = target / rel
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(_render(f.read_text(encoding="utf-8"), values), encoding="utf-8", newline="\n")
+            replacements = manifest_values if f.suffix == ".toml" else values
+            out.write_text(_render(f.read_text(encoding="utf-8"), replacements), encoding="utf-8", newline="\n")
     return target
 
 
+def _relative_path(value: str) -> Path | None:
+    # Mirage loads Windows paths even when a project is prepared on Linux.
+    path = PureWindowsPath(value)
+    if path.anchor or ".." in path.parts or "\0" in value:
+        return None
+    return Path(*path.parts)
+
+
 def inspect(folder: Path) -> tuple[ModInfo | None, list[str]]:
-    """mod.toml read and checked the way the runtime reads it: (the mod, problems). Problems make the runtime refuse it."""
+    """Check the manifest and authoring layout before building or installing a mod."""
     problems: list[str] = []
     manifest_file = folder / "mod.toml"
     if not manifest_file.is_file():
         return None, [f"{folder} has no mod.toml"]
     try:
         m = tomllib.loads(manifest_file.read_text(encoding="utf-8"))
-    except tomllib.TOMLDecodeError as e:
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as e:
         return None, [f"mod.toml: {e}"]
     mod_id = m.get("id", "")
-    if not isinstance(mod_id, str) or not ID_RE.match(mod_id):
-        problems.append(f"id \"{mod_id}\": lowercase letters and digits, words joined by '-'")
+    if not isinstance(mod_id, str) or not MANIFEST_ID_RE.fullmatch(mod_id):
+        problems.append("id must be 2–64 lowercase letters, digits, '-' or '_', starting with a letter or digit")
     version = m.get("version", "")
-    if not isinstance(version, str) or not SEMVER_RE.match(version):
+    if not isinstance(version, str) or not SEMVER_RE.fullmatch(version):
         problems.append(f"version \"{version}\" isn't a semantic version (\"1.0.0\")")
-    if "mirage" not in m:
-        problems.append("no mirage = \"^0.1\": which runtime versions it is for")
-    for key, s in (m.get("settings") or {}).items():
+    if not isinstance(m.get("mirage"), str) or not m["mirage"].strip():
+        problems.append('mirage must be a compatibility range such as "^0.1"')
+    settings = m.get("settings", {})
+    if not isinstance(settings, dict):
+        problems.append("settings must be a table of [settings.<key>] entries")
+        settings = {}
+    for key, s in settings.items():
         t = s.get("type") if isinstance(s, dict) else None
-        if t not in SETTING_TYPES:
+        if not isinstance(t, str) or t not in SETTING_TYPES:
             problems.append(f"settings.{key}: type \"{t}\" ({', '.join(sorted(SETTING_TYPES))})")
         if t == "choice" and not s.get("options"):
             problems.append(f"settings.{key}: a choice needs options = [...]")
 
-    if (folder / "CMakeLists.txt").is_file():
+    native_project = (folder / "CMakeLists.txt").is_file()
+    managed_project = any(folder.glob("*.csproj"))
+    entries: dict[str, Path] = {}
+    for key, suffixes in (("entry", {".dll"}), ("lua", {".lua"}), ("dotnet", {".cs", ".dll"})):
+        value = m.get(key, "")
+        if value == "":
+            continue
+        path = _relative_path(value) if isinstance(value, str) else None
+        if path is None or path.suffix.lower() not in suffixes:
+            problems.append(f"{key} must name a {' or '.join(sorted(suffixes))} file inside the mod folder")
+            continue
+        entries[key] = path
+        built_output = (key == "entry" and native_project
+                        or key == "dotnet" and managed_project and path.suffix.lower() == ".dll")
+        if not built_output and not (folder / path).is_file():
+            problems.append(f"{key}: {value} is missing")
+    if "entry" in entries and "dotnet" in entries and str(entries["entry"]).casefold() == str(entries["dotnet"]).casefold():
+        problems.append("entry and dotnet must name different files")
+
+    content = m.get("content", [])
+    if not isinstance(content, list) or not all(isinstance(item, str) for item in content):
+        problems.append("content must be a list of folder paths")
+        content = []
+    for item in content:
+        path = _relative_path(item) if item else None
+        if path is None:
+            problems.append(f"content: {item!r} must name a folder inside the mod folder")
+        elif not (folder / path).is_dir():
+            problems.append(f"content: folder {item!r} is missing")
+
+    if native_project:
         kind = "native"
-        entry = m.get("entry")
-        if not entry:
+        if "entry" not in entries and not m.get("entry"):
             problems.append("a native mod needs entry = \"<its>.dll\"")
-    elif list(folder.glob("*.csproj")):
+    elif managed_project:
         kind = "csproj"
-    elif list(folder.glob("*.cs")) or list(folder.glob("src/**/*.cs")):
-        kind = "cs"
-    elif any((folder / f).is_file() for f in ([m["lua"]] if "lua" in m else ["main.lua", "src/main.lua"])):
+    elif "entry" in entries:
+        kind = "native-binary"
+    elif "lua" in entries or any((folder / f).is_file() for f in ("main.lua", "src/main.lua")):
         kind = "lua"
-    elif any((folder / d).is_dir() for d in ("content", "levels", "maps", "routes")):
+    elif "dotnet" in entries or any((folder / f).is_file() for f in ("main.cs", "src/main.cs")):
+        kind = "cs"
+    elif content or any((folder / d).is_dir() for d in ("levels", "maps", "routes", "kismet", "models")):
         kind = "content"
     else:
-        problems.append("nothing to run: no main.lua (or src/main.lua), no .cs file, no CMakeLists.txt, no content folder")
+        if not problems:
+            problems.append('nothing to run: add an entry point, a project or content = ["content"]')
         kind = "content"
     return ModInfo(folder, mod_id, version, kind, m), problems
 
@@ -200,7 +248,7 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
     def resolve(ctx: click.Context, folder: Path) -> ModInfo:
         info, problems = inspect(folder.resolve())
         for p in problems:
-            console.print(f"[red]{p}[/]")
+            console.print(p, style="red", markup=False)
         if info is None or problems:
             ctx.exit(1)
         return info
@@ -225,7 +273,7 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
     @click.option("--description", help="One line on what it does.")
     @click.pass_context
     def new(ctx: click.Context, mod_id: str, lang: str, parent: Path, name: str | None, description: str | None) -> None:
-        """A new mod from a template: mod.toml and one working module. Then: mirage mod install <folder>."""
+        """Create a mod from a template with a working example."""
         try:
             folder = create(mod_id, lang, parent.resolve(), name, description)
         except ValueError as e:
@@ -245,7 +293,7 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
     @folder_arg
     @click.pass_context
     def check(ctx: click.Context, folder: Path) -> None:
-        """mod.toml read and checked the way the runtime will (id, version, settings, what it runs)."""
+        """Check the manifest and referenced project files without launching the game."""
         info = resolve(ctx, folder)
         console.print(f"[green]{info.id} {info.version}[/]: {info.kind}, mod.toml is fine")
 
@@ -295,7 +343,7 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
         info = resolve(ctx, folder)
         game_dir = game_dir or find_game_dir()
         if game_dir is None or not (game_dir / "mirage").is_dir():
-            console.print("[red]No Mirage install found[/] (Binaries\mirage): install Mirage first, or pass --dir.")
+            console.print("[red]No Mirage install found[/] (Binaries/mirage): install Mirage first, or pass --dir.")
             ctx.exit(1)
         install(built_or_exit(ctx, info), info.id, game_dir)
         console.print(f"Testing {info.id} in the game (it starts and closes by itself)...")

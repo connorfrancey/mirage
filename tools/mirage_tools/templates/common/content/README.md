@@ -13,4 +13,6 @@ Data the game uses, no code (mod.toml's `content = ["content"]`). An empty folde
   or DDS used as stored).
 - `meshes/<Package.Group.Name>.glb`: a replacement mesh (glTF, FBX or OBJ), converted first with
   `uv run mirage model <file> --convert` (docs/models.md).
+- `sounds/<full SoundNodeWave path>.ogg` replaces a game's sound wave with mono or stereo Ogg Vorbis.
+  Packages already opened keep their current version until the game restarts.
 - `animations/<Name>.json`: animations for the player's meshes.

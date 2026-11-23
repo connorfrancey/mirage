@@ -63,6 +63,9 @@ After installing with `uv run mirage mod install hello-hud`, open the menu with 
 
 ## Content mod · raise the player’s step height
 
+Generate a working starter with `uv run mirage new high-steps --lang content`. It includes the same property
+override and a guide to adding replacement assets. A content-only mod has no source code or compilation step.
+
 **Goal.** Let Faith step over slightly taller edges through a reversible property override. The runtime manages application and undo.
 
 ```text
@@ -264,7 +267,7 @@ For a mod that also spawns objects, installs hooks, registers callbacks, or modi
 
 | Check | What it covers |
 | --- | --- |
-| `mirage mod check <folder>` | Manifest shape, compatibility field, settings types, and the presence of an entry point or content folder. |
+| `mirage mod check <folder>` | Checks the manifest, entry file types, relative paths, and declared content directories before building or installing. |
 | `mirage mod build <folder>` | Buildable artifacts for compiled projects. Lua and content mods pass through as files. |
 | `mirage mod package <folder>` | The archive layout a player installs. Inspect it for the manifest, assets, and relative module files. |
 | `mirage mod test <folder>` | The mod’s registered tests in the actual game. The command installs the mod and starts the game. |

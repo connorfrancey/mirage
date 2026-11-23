@@ -1,0 +1,4 @@
+# Allow the player to walk up taller steps. Disable the mod to restore the original value.
+["TdGame.Default__TdPlayerPawn"]
+MaxStepHeight = 105.0
+instances = true
