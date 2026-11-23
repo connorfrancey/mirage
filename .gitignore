@@ -3,6 +3,9 @@ cmake-build-*/
 build/
 /dist/
 
+# Local AI release checkpoints
+/.ai/
+
 # Python tooling (uv)
 .venv/
 __pycache__/
