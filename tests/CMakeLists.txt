@@ -34,6 +34,7 @@ add_executable(mirage_tests
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/heap.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/sampler.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/process.cpp
+        ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/profiler.cpp
         ${CMAKE_SOURCE_DIR}/loader/src/runtime/mem/allocators.cpp
         test_caches_more.cpp
         test_infra.cpp

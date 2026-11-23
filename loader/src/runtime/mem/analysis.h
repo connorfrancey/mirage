@@ -2,6 +2,7 @@
 // The memory manager's reasoning, without the game or Windows (unit tested in tests/test_memory.cpp): trends, anomaly
 // detection, address-space fragmentation, the pressure level, the adaptive cache budget and the per-level predictor.
 // Every rule here leans conservative: it needs several samples to act, acts in small steps, and calms down slowly.
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -103,6 +104,8 @@ namespace mirage::mem
 	// the bytes run out), from the sizes of its free regions
 	struct Fragmentation
 	{
+		static constexpr std::array<std::uint64_t, 4> bucketLimits{64ull << 10, 1ull << 20, 16ull << 20, 128ull << 20};
+		std::array<std::size_t, bucketLimits.size() + 1> distribution{};
 		std::uint64_t totalFree = 0;
 		std::uint64_t largestFree = 0;
 		std::size_t freeRegions = 0;
@@ -115,6 +118,9 @@ namespace mirage::mem
 			if (bytes > largestFree) largestFree = bytes;
 			++freeRegions;
 			if (bytes < (1u << 20)) ++smallRegions;
+			std::size_t bucket = 0;
+			while (bucket < bucketLimits.size() && bytes >= bucketLimits[bucket]) ++bucket;
+			++distribution[bucket];
 		}
 	};
 

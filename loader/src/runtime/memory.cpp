@@ -29,6 +29,8 @@ namespace
 			const auto size = _msize(p);
 			mirage::mem::OnAllocated(p, size, ns);
 			if (t_tallies) t_tally += static_cast<std::int64_t>(size);
+		} else {
+			mirage::mem::OnAllocationFailure(n);
 		}
 		return p;
 	}

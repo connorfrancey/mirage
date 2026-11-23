@@ -28,6 +28,22 @@ are never touched, hooked, walked or locked.
   acts. A step with nothing to do is ~0.08 ms in debug; an action (every cache enforced, pools trimmed, mods told) up
   to ~10 ms in debug, at most once per level change and every 5 s while High or Critical.
 
+## Memory Profiler
+
+Open the Mirage menu and enable **Debug → Memory Profiler**. Set the capture interval from 1 to 60 seconds. Closing the window or turning off the module discards the capture session. Hiding the Mirage menu leaves capture running.
+
+| View | What to check |
+|------|---------------|
+| Overview | Compare free virtual address space and the largest free block. The aligned span excludes any unusable prefix before the next Windows allocation boundary. Reserved VA occupies addresses. Committed VA includes committed private, mapped, and image pages. Windows reports private bytes separately from the resident working set, which measures physical pages in memory. |
+| Address Space Map | Scroll over the map to zoom around the pointer, drag to pan, and click to select an address. Filter by state, backing type, and minimum size. Yellow marks free spans under 1 MiB. Bright shades mark occupied regions of at least 16 MiB. Zoom in to see regions smaller than a screen bin. The tooltip queries the captured region at the pointer's exact address. |
+| Memory Timeline | Follow committed VA, reserved VA, free VA, and the largest free block over the most recent 240 complete captures. Plots use independent scales and equal spacing per sample. The overview's VA peaks cover the current capture session. |
+| Region Inspector | Search by address, state, backing type, protection, or module, and click a column header to sort. Addresses refer to the last displayed capture and region ends are exclusive. |
+| Diagnostics | Review the pressure level, free-region size distribution, and recent manager findings. Fragmentation is `1 − largest free block / total free space`. The aligned span, requested alignment, and Windows commit headroom all affect whether a reservation or commit can succeed. Growth findings warrant investigation and can also reflect level loads or caching. |
+
+The window is read-only. `VirtualQuery` metadata is collected during the memory manager's existing low-priority walk, so capture cannot run faster than the manager's cadence. The process can change while Windows queries run. Incomplete walks, missing process counters, and stale captures are flagged. The capture retains up to 32,768 regions (1 MiB of region records on x86). Walk totals cover all queried regions even when the map and inspector reach that cap. The inspector indexes one capture at a time on an existing worker and clips rendering to visible rows. Disabling the window releases capture and history storage. The pressure manager continues on its own cadence.
+
+Module attribution covers loaded image mappings and separately reported Lua heaps. Private allocations made by native mods or the game generally have no identifiable owner. The failure count covers failed requests through Mirage's counted `operator new` path. UE3, direct Windows API calls, aligned allocation, and external allocators have separate failure paths.
+
 ## Pressure
 
 | Level | Reached when (any of) | Response |

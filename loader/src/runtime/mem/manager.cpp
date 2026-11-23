@@ -6,6 +6,7 @@
 #include "paths.h"
 #include "runtime/mem/arena.h"
 #include "runtime/mem/pool.h"
+#include "runtime/mem/profiler.h"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -22,6 +23,7 @@
 #include <fstream>
 #include <map>
 #include <mutex>
+#include <new>
 #include <thread>
 
 namespace mirage::mem
@@ -377,9 +379,23 @@ namespace mirage::mem
 				}
 				const double t0 = NowNs();
 				try {
-					while (!s.walker.Step(1e9)) {}		// A whole walk: a few ms, here where it costs the game nothing
+					auto capture = Profiler().BeginSample(Seconds());
+					while (!s.walker.Step(1e9, capture ? &capture->regions : nullptr)) {}
 					const double now = Seconds();
 					Sample(s, cfg, now);
+					if (capture) {
+						const auto session = capture->session;
+						try {
+							capture->address = s.walker.Result();
+							{
+								std::lock_guard lock(s.lock);
+								Profiler().CopyDiagnostics(*capture, s.status);
+							}
+							Profiler().Publish(std::move(capture));
+						} catch (const std::bad_alloc&) {
+							Profiler().SkipSample(session);
+						}
+					}
 					if (now >= s.nextProfile && sampler::CurrentMode() != sampler::Mode::Off) {
 						s.nextProfile = now + 10.0;
 						Profile(s, cfg, now);

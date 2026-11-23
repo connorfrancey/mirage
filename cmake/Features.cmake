@@ -151,6 +151,7 @@ mirage_feature(input             tas GAME STAGE 12 FILES tas/engine.cpp tas/inpu
 # Debug
 mirage_feature(crash_reporter    debug GAME STAGE 5  FILES features/debug/crash_reporter.cpp)
 mirage_feature(self_test         debug      STAGE 4  FILES features/debug/self_test.cpp)   # Shown in developer mode only
+mirage_feature(memory_profiler   debug GAME STAGE 6  FILES features/debug/memory_profiler.cpp)
 
 # Levels
 

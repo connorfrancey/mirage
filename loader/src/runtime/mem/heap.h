@@ -38,6 +38,8 @@ namespace mirage::mem
 	struct HeapCounters
 	{
 		std::int64_t live = 0;
+		std::uint64_t failures = 0;
+		std::size_t lastFailedBytes = 0;
 		std::uint64_t allocations = 0, frees = 0;
 		std::uint64_t bytesAllocated = 0, bytesFreed = 0;
 		std::uint64_t sizeClass[kSizeClasses] = {};		// Allocations by size class, so far
@@ -80,6 +82,7 @@ namespace mirage::mem
 	int DrainLarge(LargeAllocation* out, int capacity);
 
 	// ---- operator new / delete (runtime/memory.cpp) -----------------------------------------------------------------------
+	void OnAllocationFailure(std::size_t bytes) noexcept;
 	bool TimeThisCall();							// This thread's turn to time a call
 	void OnAllocated(void* p, std::size_t bytes, double ns) noexcept;	// ns < 0: not timed
 	void OnFreeing(void* p, std::size_t bytes, double ns) noexcept;

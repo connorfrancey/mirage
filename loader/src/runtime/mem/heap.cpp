@@ -22,6 +22,8 @@ namespace mirage::mem
 
 		std::atomic<std::int64_t> g_live{0}, g_peak{0};
 		std::atomic<std::uint64_t> g_allocs{0}, g_frees{0}, g_bytesIn{0}, g_bytesOut{0};
+		std::atomic<std::uint64_t> g_failures{0};
+		std::atomic<std::size_t> g_lastFailedBytes{0};
 		std::atomic<std::uint64_t> g_sizeClass[kSizeClasses] = {};
 
 		struct TimingCounters
@@ -121,6 +123,8 @@ namespace mirage::mem
 	HeapCounters ReadHeap()
 	{
 		HeapCounters h;
+		h.failures = g_failures.load(std::memory_order_acquire);
+		h.lastFailedBytes = g_lastFailedBytes.load(std::memory_order_relaxed);
 		h.live = g_live.load(std::memory_order_relaxed);
 		h.peakLive = g_peak.load(std::memory_order_relaxed);
 		h.allocations = g_allocs.load(std::memory_order_relaxed);
@@ -180,6 +184,12 @@ namespace mirage::mem
 	}
 
 	bool TimeThisCall() { return (++t_timing & (kTimingEvery - 1)) == 0; }
+
+	void OnAllocationFailure(std::size_t bytes) noexcept
+	{
+		g_lastFailedBytes.store(bytes, std::memory_order_relaxed);
+		g_failures.fetch_add(1, std::memory_order_release);
+	}
 
 	void OnAllocated(void* p, std::size_t bytes, double ns) noexcept
 	{

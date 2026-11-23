@@ -5,6 +5,7 @@
 #include "runtime/mem/heap.h"
 #include "runtime/mem/pool.h"
 #include "runtime/mem/process.h"
+#include "runtime/mem/profiler.h"
 #include "runtime/mem/sampler.h"
 
 #include <gtest/gtest.h>
@@ -12,6 +13,8 @@
 #include <Windows.h>
 
 #include <cstdint>
+#include <memory>
+#include <numeric>
 #include <set>
 #include <vector>
 
@@ -455,4 +458,111 @@ TEST(MemoryProcess, ReadsAndWalksTheAddressSpace)
     EXPECT_GT(a.free.largestFree, 0u);
     EXPECT_GT(a.image, 0u);                 // This executable at least
     EXPECT_LE(a.free.largestFree, a.free.totalFree);
+    EXPECT_LE(a.largestAlignedFree, a.free.largestFree);
+    EXPECT_EQ(a.committed + a.reserved + a.free.totalFree, a.end - a.begin);
+    EXPECT_EQ(std::accumulate(a.free.distribution.begin(), a.free.distribution.end(), std::size_t{}), a.free.freeRegions);
+}
+
+TEST(MemoryProcess, ClassifiesReservedAndCommittedPages)
+{
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    const auto page = info.dwPageSize;
+    const auto release = [](void* base) { VirtualFree(base, 0, MEM_RELEASE); };
+    const std::unique_ptr<void, decltype(release)> reservation(VirtualAlloc(nullptr, 3 * page, MEM_RESERVE, PAGE_READWRITE), release);
+    ASSERT_NE(reservation.get(), nullptr);
+    auto* const middle = static_cast<char*>(reservation.get()) + page;
+    ASSERT_EQ(VirtualAlloc(middle, page, MEM_COMMIT, PAGE_READONLY), middle);
+
+    std::vector<ProcessRegion> regions;
+    regions.reserve(kMaxProfileRegions);
+    AddressSpaceWalker walk;
+    while (!walk.Step(0.05, &regions)) {}
+    ASSERT_TRUE(walk.HasResult());
+    const auto base = reinterpret_cast<std::uintptr_t>(reservation.get());
+    const auto* reserved = FindProcessRegion(regions, base);
+    const auto* committed = FindProcessRegion(regions, base + page);
+    ASSERT_NE(reserved, nullptr);
+    ASSERT_NE(committed, nullptr);
+    EXPECT_EQ(reserved->state, MEM_RESERVE);
+    EXPECT_EQ(reserved->end, base + page);
+    EXPECT_EQ(committed->state, MEM_COMMIT);
+    EXPECT_EQ(committed->type, MEM_PRIVATE);
+    EXPECT_EQ(committed->protection, PAGE_READONLY);
+    EXPECT_EQ(committed->allocationBase, base);
+    EXPECT_EQ(committed->Size(), page);
+    EXPECT_EQ(FindProcessRegion(regions, walk.Result().end), nullptr);
+
+    std::vector<ProcessRegion> limited;
+    limited.reserve(2);
+    while (!walk.Step(0.05, &limited)) {}
+    EXPECT_TRUE(walk.HasResult());
+    EXPECT_EQ(limited.size(), limited.capacity());
+    EXPECT_GT(walk.Result().regions, limited.size());
+}
+
+TEST(MemoryProfiler, PublishesImageAttributionAndDiscardsPriorSession)
+{
+    MemoryProfiler profiler;
+    EXPECT_FALSE(profiler.BeginSample(0.));
+    profiler.SetInterval(2);
+    auto first = profiler.BeginSample(0.);
+    ASSERT_TRUE(first);
+    AddressSpaceWalker walk;
+    while (!walk.Step(0.05, &first->regions)) {}
+    ASSERT_TRUE(walk.HasResult());
+    first->address = walk.Result();
+    profiler.Publish(std::move(first));
+    const auto sample = profiler.Latest();
+    ASSERT_TRUE(sample);
+    const auto exeBase = reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr));
+    const auto* exeRegion = FindProcessRegion(sample->regions, exeBase);
+    ASSERT_NE(exeRegion, nullptr);
+    ASSERT_EQ(sample->regionImages.size(), sample->regions.size());
+    const auto owner = sample->regionImages[exeRegion - sample->regions.data()];
+    ASSERT_NE(owner, 0u);
+    EXPECT_EQ(sample->images[owner - 1].base, exeBase);
+    EXPECT_GE(sample->images[owner - 1].committed, exeRegion->Size());
+    ASSERT_EQ(sample->historyCount, 1u);
+    EXPECT_EQ(sample->Point(0).largestFree, sample->address.free.largestFree);
+    EXPECT_FALSE(profiler.BeginSample(1.));
+    auto stale = profiler.BeginSample(2.);
+    ASSERT_TRUE(stale);
+    profiler.SetInterval(0);
+    profiler.SetInterval(2);
+    profiler.Publish(std::move(stale));
+    EXPECT_FALSE(profiler.Latest());
+}
+
+TEST(MemoryProfiler, CountsMirageAllocatorFailures)
+{
+    const auto before = ReadHeap().failures;
+    OnAllocationFailure(12345);
+    const auto counters = ReadHeap();
+    EXPECT_EQ(counters.failures, before + 1);
+    EXPECT_EQ(counters.lastFailedBytes, 12345u);
+}
+
+TEST(MemoryProfiler, TracksPeaksAndSustainedPrivateGrowth)
+{
+    MemoryProfiler profiler;
+    profiler.SetInterval(3);
+    for (int i = 0; i < 7; ++i) {
+        auto capture = profiler.BeginSample(i * 3.0);
+        ASSERT_TRUE(capture);
+        capture->address.complete = i != 6;
+        capture->address.committed = (100ull + i) << 20;
+        capture->address.reserved = (100ull - i) << 20;
+        capture->process.countersOk = true;
+        capture->process.privateBytes = (100ull + 4 * i) << 20;
+        profiler.Publish(std::move(capture));
+    }
+    const auto sample = profiler.Latest();
+    ASSERT_TRUE(sample);
+    EXPECT_EQ(sample->historyCount, 6u);
+    EXPECT_EQ(sample->Point(0).seconds, 0.0);
+    EXPECT_EQ(sample->Point(5).seconds, 15.0);
+    EXPECT_EQ(sample->peakCommitted, 105ull << 20);
+    EXPECT_EQ(sample->peakReserved, 100ull << 20);
+    EXPECT_NEAR(sample->privateGrowthBytesPerSecond, (4ull << 20) / 3.0, 1.0);
 }
