@@ -1,0 +1,492 @@
+id = "mirage-menu"
+name = "Mirror's Edge Menu"
+version = "1.0.0"
+description = "The original trainer, save states, visual options, HUD editor, and key binding tools"
+authors = ["Mirror's Edge Menu"]
+mirage = "^0.1"
+entry = "mirage-menu.dll"
+hot_reload = false
+
+[settings.game_speed]
+type = "float"
+name = "Multiplier"
+module = "Game Speed"
+description = "The world's speed"
+default = 1.0
+min = 0.1
+max = 3.0
+format = "%.2fx"
+
+[settings.kill_range]
+type = "float"
+name = "Range (m)"
+module = "Kill Bots"
+description = "0: the whole level"
+default = 0.0
+min = 0.0
+max = 200.0
+format = "%.0f"
+
+[settings.no_clip_speed]
+type = "float"
+name = "Speed"
+module = "No Clip"
+description = "Units per second. Hold the boost key for more"
+default = 900.0
+min = 100.0
+max = 10000.0
+format = "%.0f"
+
+[settings.no_clip_boost]
+type = "float"
+name = "Boost"
+module = "No Clip"
+default = 3.0
+min = 1.0
+max = 10.0
+format = "%.1fx"
+
+[settings.no_clip_responsiveness]
+type = "float"
+name = "Responsiveness"
+module = "No Clip"
+description = "How fast you reach full speed and stop. Higher = snappier, lower = floatier"
+default = 10.0
+min = 1.0
+max = 40.0
+format = "%.0f"
+
+[settings.no_clip_follow_view]
+type = "bool"
+name = "Move along view"
+module = "No Clip"
+description = "Forward goes where you look, up and down included. Off: forward stays level"
+default = true
+
+[settings.no_clip_invulnerable]
+type = "bool"
+name = "Invulnerable"
+module = "No Clip"
+description = "Keeps health full and prevents fall damage while active (and after you land)"
+default = true
+
+[settings.no_clip_block_actions]
+type = "bool"
+name = "Block jump/actions"
+module = "No Clip"
+description = "Ignore the game's own jump/crouch/etc. while flying (the up/down keys are often those)"
+default = true
+
+[settings.no_clip_up_key]
+type = "key"
+name = "Up key"
+module = "No Clip"
+default = 32
+
+[settings.no_clip_down_key]
+type = "key"
+name = "Down key"
+module = "No Clip"
+default = 162
+
+[settings.no_clip_boost_key]
+type = "key"
+name = "Boost key"
+module = "No Clip"
+default = 160
+
+[settings.flight_speed]
+type = "float"
+name = "Speed"
+module = "Flight"
+description = "Units per second. Hold the boost key for more"
+default = 900.0
+min = 100.0
+max = 10000.0
+format = "%.0f"
+
+[settings.flight_boost]
+type = "float"
+name = "Boost"
+module = "Flight"
+default = 3.0
+min = 1.0
+max = 10.0
+format = "%.1fx"
+
+[settings.flight_responsiveness]
+type = "float"
+name = "Responsiveness"
+module = "Flight"
+description = "How fast you reach full speed and stop. Higher = snappier, lower = floatier"
+default = 10.0
+min = 1.0
+max = 40.0
+format = "%.0f"
+
+[settings.flight_follow_view]
+type = "bool"
+name = "Move along view"
+module = "Flight"
+description = "Forward goes where you look, up and down included. Off: forward stays level"
+default = true
+
+[settings.flight_invulnerable]
+type = "bool"
+name = "Invulnerable"
+module = "Flight"
+description = "Keeps health full and prevents fall damage while active (and after you land)"
+default = true
+
+[settings.flight_block_actions]
+type = "bool"
+name = "Block jump/actions"
+module = "Flight"
+description = "Ignore the game's own jump/crouch/etc. while flying (the up/down keys are often those)"
+default = true
+
+[settings.flight_up_key]
+type = "key"
+name = "Up key"
+module = "Flight"
+default = 32
+
+[settings.flight_down_key]
+type = "key"
+name = "Down key"
+module = "Flight"
+default = 162
+
+[settings.flight_boost_key]
+type = "key"
+name = "Boost key"
+module = "Flight"
+default = 160
+
+[settings.beamer_sidestep]
+type = "bool"
+name = "Sidestep beamer"
+module = "Beamer"
+description = "Jump sideways off the wall instead of turning around"
+default = false
+
+[settings.beamer_auto]
+type = "bool"
+name = "Auto sidestep"
+module = "Beamer"
+description = "Hold the strafe key for you. Off: hold left or right yourself while the beamer is armed"
+default = false
+
+[settings.beamer_direction]
+type = "choice"
+name = "Direction"
+module = "Beamer"
+options = ["Left", "Right"]
+default = "Left"
+
+[settings.beamer_left_key]
+type = "key"
+name = "Left key"
+module = "Beamer"
+description = "Your strafe left key (pressed by Auto sidestep)"
+default = 65
+
+[settings.beamer_right_key]
+type = "key"
+name = "Right key"
+module = "Beamer"
+description = "Your strafe right key (pressed by Auto sidestep)"
+default = 68
+
+[settings.akg_kick_key]
+type = "key"
+name = "Kick key"
+module = "Auto Kickglitch"
+description = "Held while wallrunning: kicks off the wall for you too (none: you kick)"
+default = 0
+
+[settings.akg_buffer]
+type = "bool"
+name = "Kick buffer"
+module = "Auto Kickglitch"
+description = "Kick pressed in the air, just before the wall: instead of an air kick it waits, and kicks off the wall on the first frame you are on it. Not with a gun (that shoots)"
+default = true
+
+[settings.akg_window]
+type = "int"
+name = "Buffer window"
+module = "Auto Kickglitch"
+description = "How long a held kick waits for a wall (game time)"
+default = 200
+min = 50
+max = 600
+format = "%d ms"
+
+[settings.akg_on_miss]
+type = "choice"
+name = "No wall in time"
+module = "Auto Kickglitch"
+description = "When the window runs out in the air. Kick anyway: the air kick, late. Drop it: no kick. Landing or grabbing a ledge first always drops it"
+options = ["Kick anyway", "Drop it"]
+default = "Kick anyway"
+
+[settings.kg_helper_flash]
+type = "bool"
+name = "Flash on landing"
+module = "Kickglitch Helper"
+description = "Outline the window on the frame you land"
+default = true
+
+[settings.kg_helper_perfect]
+type = "int"
+name = "Perfect frame"
+module = "Kickglitch Helper"
+description = "How many frames after landing the perfect jump starts. Arm the Kickglitch tool and do one kick to measure it"
+default = 1
+min = 0
+max = 5
+
+[settings.kg_helper_opacity]
+type = "float"
+name = "Opacity"
+module = "Kickglitch Helper"
+default = 0.6
+min = 0.0
+max = 1.0
+format = "%.2f"
+
+[settings.tool_overlay_color]
+type = "color"
+name = "Text color"
+module = "Tool Overlay"
+default = "#FFFFFF"
+
+[settings.speedo_position]
+type = "bool"
+name = "Position"
+module = "Speedometer"
+default = true
+
+[settings.speedo_speed]
+type = "bool"
+name = "Speed"
+module = "Speedometer"
+default = true
+
+[settings.speedo_angles]
+type = "bool"
+name = "Pitch / yaw"
+module = "Speedometer"
+default = true
+
+[settings.speedo_checkpoint]
+type = "bool"
+name = "Checkpoint timer"
+module = "Speedometer"
+description = "Set a checkpoint, then load a state: times how long you take to get back to it"
+default = true
+
+[settings.speedo_state]
+type = "bool"
+name = "State / health / reaction time"
+module = "Speedometer"
+default = false
+
+[settings.speedo_jump]
+type = "bool"
+name = "Jump height"
+module = "Speedometer"
+default = false
+
+[settings.speedo_unit]
+type = "choice"
+name = "Speed unit"
+module = "Speedometer"
+options = ["u/s", "km/h", "m/s"]
+default = "u/s"
+
+[settings.speedo_radius]
+type = "float"
+name = "Stop radius"
+module = "Speedometer"
+description = "The timer stops this close to the checkpoint"
+default = 50.0
+min = 1.0
+max = 500.0
+format = "%.0f"
+
+[settings.speedo_checkpoint_key]
+type = "key"
+name = "Set checkpoint key"
+module = "Speedometer"
+description = "Sets the checkpoint where you are (menu closed)"
+default = 51
+
+[settings.speedo_title_bar]
+type = "bool"
+name = "Title bar"
+module = "Speedometer"
+default = false
+
+[settings.speedo_opacity]
+type = "float"
+name = "Opacity"
+module = "Speedometer"
+default = 0.6
+min = 0.0
+max = 1.0
+format = "%.2f"
+
+[settings.speedo_value_column]
+type = "float"
+name = "Value column"
+module = "Speedometer"
+default = 90.0
+min = 40.0
+max = 200.0
+format = "%.0f"
+
+[settings.speedo_label_color]
+type = "color"
+name = "Label color"
+module = "Speedometer"
+default = "#BFBFC7"
+
+[settings.speedo_value_color]
+type = "color"
+name = "Value color"
+module = "Speedometer"
+default = "#FFFFFF"
+
+[settings.fov]
+type = "float"
+name = "Degrees"
+module = "FOV"
+default = 90.0
+min = 60.0
+max = 130.0
+format = "%.0f"
+
+[settings.crosshair_style]
+type = "choice"
+name = "Style"
+module = "Crosshair"
+options = ["Cross", "Dot", "Circle"]
+default = "Cross"
+
+[settings.crosshair_size]
+type = "int"
+name = "Size"
+module = "Crosshair"
+default = 8
+min = 2
+max = 40
+
+[settings.crosshair_gap]
+type = "float"
+name = "Gap"
+module = "Crosshair"
+description = "Cross only"
+default = 3.0
+min = 0.0
+max = 20.0
+format = "%.0f"
+
+[settings.crosshair_thickness]
+type = "float"
+name = "Thickness"
+module = "Crosshair"
+description = "Cross and circle"
+default = 2.0
+min = 1.0
+max = 6.0
+format = "%.1f"
+
+[settings.crosshair_color]
+type = "color"
+name = "Color"
+module = "Crosshair"
+default = "#E6332E"
+
+[settings.fps_corner]
+type = "choice"
+name = "Corner"
+module = "Show FPS"
+options = ["Top left", "Top right", "Bottom left", "Bottom right"]
+default = "Top left"
+
+[settings.fps_color]
+type = "color"
+name = "Text color"
+module = "Show FPS"
+default = "#FFFFFF"
+
+[settings.fps_frametime]
+type = "bool"
+name = "Frametime"
+module = "Show FPS"
+default = false
+
+[settings.watermark_opacity]
+type = "float"
+name = "Opacity"
+module = "Watermark"
+default = 0.6
+min = 0.1
+max = 1.0
+format = "%.2f"
+
+[settings.frame_rate_cap]
+type = "float"
+name = "Cap"
+module = "Frame Rate Limit"
+description = "The most frames a second the game draws (62: the game's own; other values play differently)"
+default = 62.0
+min = 20.0
+max = 300.0
+format = "%.0f fps"
+
+[settings.frame_rate_uncapped]
+type = "bool"
+name = "Uncapped"
+module = "Frame Rate Limit"
+description = "As many frames as the PC can draw"
+default = false
+
+[settings.profile]
+type = "string"
+name = "Profile"
+module = "Info Lines"
+default = "default"
+
+[settings.scale]
+type = "float"
+name = "Scale"
+module = "Info Lines"
+description = "Every section's size (on top of its own scale)"
+default = 1.0
+min = 0.5
+max = 3.0
+format = "%.2fx"
+
+[settings.editor_lines]
+type = "int"
+name = "Editor height"
+module = "Info Lines"
+default = 16
+min = 6
+max = 40
+format = "%d lines"
+
+[settings.hide_in_menu]
+type = "bool"
+name = "Hide while the menu is open"
+module = "Info Lines"
+default = false
+
+[settings.show_errors]
+type = "bool"
+name = "Show problems on screen"
+module = "Info Lines"
+description = "A red note at the top while the profile has errors (handy when editing it outside)"
+default = true

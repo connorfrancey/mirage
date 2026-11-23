@@ -458,7 +458,7 @@ Expectation ExpectationFor(Module& m)
                      return Expect(w && std::fabs(w->TimeDilation - 1.f) < 0.01f, "TimeDilation not back to 1"); }};
     }
     if (name == "Info Lines") {
-        // A native first-party mod (mods/memenu-info-lines): what it drew comes from what it shares (status.*), a line
+        // A native first-party mod (mods/mirage-menu): what it drew comes from what it shares (status.*), a line
         // is evaluated by asking it (mirage/info_lines.eval -> eval.*). The built-in example (a profile without a file),
         // never the player's own: it must parse and evaluate without a problem, draw lines with a player in the level,
         // and its values must be the game's (x through fmt).
@@ -469,12 +469,12 @@ Expectation ExpectationFor(Module& m)
         static constexpr const char* kLine = "{x:.0f}|{statename}|{map}";
         const auto text = [](const char* key) {
             char v[512]{};
-            mirage::mods::game_api::ShareGet("memenu-info-lines", key, v, sizeof v);
+            mirage::mods::game_api::ShareGet("mirage-menu", key, v, sizeof v);
             return std::string(v);
         };
         // The setting is read on the render thread: changed there too.
         return {[&m] {
-                    editorFramesBefore = SharedInt("memenu-info-lines", "status.editor_frames");
+                    editorFramesBefore = SharedInt("mirage-menu", "status.editor_frames");
                     mirage::mods::Share("info_lines.open_for_test", "1");
                     mirage::mods::Share("info_lines.eval", kLine);
                     hooks::RunOnRenderThread([&m] {
@@ -488,10 +488,10 @@ Expectation ExpectationFor(Module& m)
                 },
                 [text] { return WithPlayer([text](ATdPlayerPawn* p, ATdPlayerController*) -> std::string {
                     WaitFor(2.0, [text] { return text("status.profile") == kTestProfile && text("eval.of") == kLine; });
-                    if (SharedInt("memenu-info-lines", "status.frames") == 0) return "it never drew";
+                    if (SharedInt("mirage-menu", "status.frames") == 0) return "it never drew";
                     if (text("status.profile") != kTestProfile) return "it shows profile '" + text("status.profile") + "', not the test's";
-                    if (SharedInt("memenu-info-lines", "status.errors") != 0) return "the example has problems: " + text("status.first_error");
-                    if (SharedInt("memenu-info-lines", "status.lines") == 0) return "the example drew no lines with a player in the level";
+                    if (SharedInt("mirage-menu", "status.errors") != 0) return "the example has problems: " + text("status.first_error");
+                    if (SharedInt("mirage-menu", "status.lines") == 0) return "the example drew no lines with a player in the level";
                     if (!text("eval.error").empty()) return "evaluating values: " + text("eval.error");
                     const std::string t = text("eval.text");
                     const std::size_t bar = t.find('|');
@@ -507,7 +507,7 @@ Expectation ExpectationFor(Module& m)
                     });
                     mirage::mods::Share("info_lines.open_for_test", "");
                     mirage::mods::Share("info_lines.eval", "");
-                    if (SharedInt("memenu-info-lines", "status.editor_frames") == editorFramesBefore)
+                    if (SharedInt("mirage-menu", "status.editor_frames") == editorFramesBefore)
                         return std::string("its editor was never drawn");
                     return std::string();
                 }};
@@ -544,7 +544,7 @@ Expectation ExpectationFor(Module& m)
                 {}};
     }
 #endif
-    // Save State, Load State, Save States, Refill Reaction Time: mods/memenu-savestate (native); what it shares, and the
+    // Save State, Load State, Save States, Refill Reaction Time: mods/mirage-menu (native); what it shares, and the
     // commands the menu hands it (mirage/save_states.*)
     if (name == "Save State")
         return {[] {
@@ -552,7 +552,7 @@ Expectation ExpectationFor(Module& m)
                     mirage::mods::Share("save_states.command", std::to_string(++n) + " clear");
                     if (auto* p = game::Pawn()) g_savedAt = p->Location;
                 },
-                [] { return Expect(SharedInt("memenu-savestate", "has_save") == 1, "no state was saved"); }, {}};
+                [] { return Expect(SharedInt("mirage-menu", "has_save") == 1, "no state was saved"); }, {}};
     if (name == "Load State")
         return {[] { if (auto* p = game::Pawn()) { p->Location.X += 2000.f; p->Velocity = Classes::FVector{}; } },   // Move away
                 [] { return WithPlayer([](ATdPlayerPawn* p, ATdPlayerController* c) {
@@ -576,16 +576,16 @@ Expectation ExpectationFor(Module& m)
         // disk and puts its state back after moving away: the stored format must bring the player back, walking.
         static std::filesystem::path folder;
         return {[] {
-                    folder = paths::Dir() / "mods" / "memenu-savestate" / "selftest-savestates";
+                    folder = paths::Dir() / "mods" / "mirage-menu" / "selftest-savestates";
                     std::error_code ec;
                     std::filesystem::remove_all(folder, ec);
                     mirage::mods::Share("save_states.folder", "selftest-savestates");
                     if (auto* p = game::Pawn()) g_savedAt = p->Location;
                 },
                 [] { return WithPlayer([](ATdPlayerPawn* p, ATdPlayerController* c) -> std::string {
-                    if (SharedInt("memenu-savestate", "states") != 1) return "running it did not add one state";
+                    if (SharedInt("mirage-menu", "states") != 1) return "running it did not add one state";
                     char map[64]{};
-                    mirage::mods::game_api::ShareGet("memenu-savestate", "map", map, sizeof map);
+                    mirage::mods::game_api::ShareGet("mirage-menu", "map", map, sizeof map);
                     const auto file = folder / (std::string(map) + ".json");
                     std::ifstream in(file);
                     if (!in) return "no file was written";
@@ -933,7 +933,7 @@ void WaitGrounded()
     WaitTicks(5);
 }
 
-// What Auto Kickglitch's kick buffer did (mods/memenu-trainer shares it: kick_buffer.*)
+// What Auto Kickglitch's kick buffer did (mods/mirage-menu shares it: kick_buffer.*)
 struct KickBufferStats {
     int held = 0, onWall = 0, late = 0, dropped = 0;
     bool hooked = false;
@@ -942,7 +942,7 @@ KickBufferStats KickBuffer()
 {
     const auto get = [](const char* key) {
         char v[32]{};
-        mirage::mods::game_api::ShareGet("memenu-trainer", key, v, sizeof v);
+        mirage::mods::game_api::ShareGet("mirage-menu", key, v, sizeof v);
         return std::atoi(v);
     };
     return {get("kick_buffer.held"), get("kick_buffer.on_wall"), get("kick_buffer.late"), get("kick_buffer.dropped"),
