@@ -1,0 +1,9 @@
+# Process memory and caches
+
+Mirage shares the game's 32-bit process. Free virtual address space, largest contiguous free block, and system commit can each limit allocations. On this target a large total free count can coexist with allocation failure. The installer and crash analyzer have Large Address Aware code paths. Changing the installed executable requires authorization. [Process sampling](../loader/src/runtime/mem/process.h), [installer](../installer/src/install.cpp)
+
+- The monitor samples Windows process and address-space statistics. `mem::manager` applies pressure policies through game-thread maintenance, releases Mirage-owned memory, and notifies mods. `analysis.h` contains policy math and fragmentation signals. [Manager](../loader/src/runtime/mem/manager.h), [policy](../loader/src/runtime/mem/analysis.h)
+- Runtime allocator tools include tagged heap counters and sampled allocation stacks, fixed-size pools, thread-local scratch arenas, and bounded allocator variants. Keep scratch data within its lifetime and never retain it in an async callback. [Heap](../loader/src/runtime/mem/heap.h), [sampler](../loader/src/runtime/mem/sampler.h), [arena](../loader/src/runtime/mem/arena.h), [pools](../loader/src/runtime/mem/pool.h)
+- Use existing cache scopes and eviction policies. Invalidate entries when level, tick, identity, or ownership assumptions change. The pressure manager monitors the process and trims Mirage-owned resources. Engine allocator ownership remains with UE3. [Cache scopes](../loader/src/core/cache.h), [eviction](../loader/src/core/cache_evict.h)
+
+The [memory guide](../docs/memory.md) owns thresholds, trim policies, diagnostic commands, and API examples. See [performance](performance.md) for measuring pressure and timing.
