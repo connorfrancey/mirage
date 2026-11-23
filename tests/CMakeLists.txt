@@ -81,7 +81,8 @@ target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
 target_link_libraries(mirage_tests PRIVATE GTest::gtest_main zstd_compress imgui imgui_color_text_edit spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense rapidhash::rapidhash FastFloat::fast_float)
 if(MSVC)
-  target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
+  # Keep frame pointers in optimized builds so sampler tests walk stacks like the loader does.
+  target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8 $<$<NOT:$<CONFIG:Debug>>:/Oy->)
 endif()
 
 # glaze and ImReflect, used as Mirage uses them
