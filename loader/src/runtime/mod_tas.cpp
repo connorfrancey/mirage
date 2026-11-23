@@ -6,7 +6,7 @@
 #include "tas/tas.h"
 #endif
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 
 #include <algorithm>
 #include <cstring>
@@ -27,43 +27,43 @@ namespace mirage::mods::tasapi
 		}
 
 #if MIRAGE_FEATURE_TAS
-		using nlohmann::json;
+		using jc::json;
 
 		tas::Options OptionsFrom(const json& j)
 		{
 			tas::Options o;
-			o.recordHz = j.value("recordHz", o.recordHz);
-			o.realtimeCap = j.value("realtimeCap", o.realtimeCap);
-			o.speed = j.value("speed", o.speed);
-			o.onDesync = static_cast<tas::OnDesync>(j.value("onDesync", static_cast<int>(o.onDesync)));
-			o.correctMax = j.value("correctMax", o.correctMax);
-			o.matchRecording = j.value("matchRecording", o.matchRecording);
-			o.gameplayMods = j.value("gameplayMods", o.gameplayMods);
-			o.blockStreaming = j.value("blockStreaming", o.blockStreaming);
-			o.seekWithoutRendering = j.value("seekWithoutRendering", o.seekWithoutRendering);
-			o.atEnd = static_cast<tas::AtEnd>(j.value("atEnd", static_cast<int>(o.atEnd)));
-			o.onDeath = static_cast<tas::OnDeath>(j.value("onDeath", static_cast<int>(o.onDeath)));
-			o.rewindSeconds = j.value("rewindSeconds", o.rewindSeconds);
-			o.keyPause = j.value("keyPause", 0);
-			o.keyAdvance = j.value("keyAdvance", 0);
-			o.keyTakeOver = j.value("keyTakeOver", 0);
-			o.keyStop = j.value("keyStop", 0);
-			o.keyRewind = j.value("keyRewind", 0);
-			o.keyRestart = j.value("keyRestart", 0);
-			o.keyRecord = j.value("keyRecord", 0);
-			o.keyPlay = j.value("keyPlay", 0);
-			o.keyBookmark = j.value("keyBookmark", 0);
-			o.keyFrameBack = j.value("keyFrameBack", 0);
-			o.keyPrevBookmark = j.value("keyPrevBookmark", 0);
-			o.keyNextBookmark = j.value("keyNextBookmark", 0);
-			o.autoSplits = j.value("autoSplits", o.autoSplits);
-			o.snapshots = j.value("snapshots", o.snapshots);
-			o.keyframeInterval = j.value("keyframeInterval", o.keyframeInterval);
-			o.snapshotBudgetMB = j.value("snapshotBudgetMB", o.snapshotBudgetMB);
-			o.recordStart = static_cast<tas::StartKind>(j.value("recordStart", static_cast<int>(o.recordStart)));
-			o.recordCommand = j.value("recordCommand", std::string());
-			o.recordMap = j.value("recordMap", std::string());
-			o.recordCheckpoint = j.value("recordCheckpoint", std::string());
+			o.recordHz = jc::value(j, "recordHz", o.recordHz);
+			o.realtimeCap = jc::value(j, "realtimeCap", o.realtimeCap);
+			o.speed = jc::value(j, "speed", o.speed);
+			o.onDesync = static_cast<tas::OnDesync>(jc::value(j, "onDesync", static_cast<int>(o.onDesync)));
+			o.correctMax = jc::value(j, "correctMax", o.correctMax);
+			o.matchRecording = jc::value(j, "matchRecording", o.matchRecording);
+			o.gameplayMods = jc::value(j, "gameplayMods", o.gameplayMods);
+			o.blockStreaming = jc::value(j, "blockStreaming", o.blockStreaming);
+			o.seekWithoutRendering = jc::value(j, "seekWithoutRendering", o.seekWithoutRendering);
+			o.atEnd = static_cast<tas::AtEnd>(jc::value(j, "atEnd", static_cast<int>(o.atEnd)));
+			o.onDeath = static_cast<tas::OnDeath>(jc::value(j, "onDeath", static_cast<int>(o.onDeath)));
+			o.rewindSeconds = jc::value(j, "rewindSeconds", o.rewindSeconds);
+			o.keyPause = jc::value(j, "keyPause", 0);
+			o.keyAdvance = jc::value(j, "keyAdvance", 0);
+			o.keyTakeOver = jc::value(j, "keyTakeOver", 0);
+			o.keyStop = jc::value(j, "keyStop", 0);
+			o.keyRewind = jc::value(j, "keyRewind", 0);
+			o.keyRestart = jc::value(j, "keyRestart", 0);
+			o.keyRecord = jc::value(j, "keyRecord", 0);
+			o.keyPlay = jc::value(j, "keyPlay", 0);
+			o.keyBookmark = jc::value(j, "keyBookmark", 0);
+			o.keyFrameBack = jc::value(j, "keyFrameBack", 0);
+			o.keyPrevBookmark = jc::value(j, "keyPrevBookmark", 0);
+			o.keyNextBookmark = jc::value(j, "keyNextBookmark", 0);
+			o.autoSplits = jc::value(j, "autoSplits", o.autoSplits);
+			o.snapshots = jc::value(j, "snapshots", o.snapshots);
+			o.keyframeInterval = jc::value(j, "keyframeInterval", o.keyframeInterval);
+			o.snapshotBudgetMB = jc::value(j, "snapshotBudgetMB", o.snapshotBudgetMB);
+			o.recordStart = static_cast<tas::StartKind>(jc::value(j, "recordStart", static_cast<int>(o.recordStart)));
+			o.recordCommand = jc::value(j, "recordCommand", std::string());
+			o.recordMap = jc::value(j, "recordMap", std::string());
+			o.recordCheckpoint = jc::value(j, "recordCheckpoint", std::string());
 			return o;
 		}
 
@@ -76,7 +76,7 @@ namespace mirage::mods::tasapi
 					{"snapshots", s.snapshots}, {"snapshotsOff", s.snapshotsOff}, {"keyframes", s.keyframes},
 					{"snapshotBytes", s.snapshotBytes}, {"captureMs", s.captureMs}, {"restoreMs", s.restoreMs},
 					{"snapshotBeginMs", s.snapshotBeginMs}, {"snapped", s.snapped}, {"snappedPages", s.snappedPages},
-					{"player", {s.player.x, s.player.y, s.player.z, s.player.vx, s.player.vy, s.player.vz, s.player.state,
+					{"player", json{s.player.x, s.player.y, s.player.z, s.player.vx, s.player.vy, s.player.vz, s.player.state,
 								s.player.present}}};
 		}
 #endif
@@ -94,7 +94,7 @@ namespace mirage::mods::tasapi
 	uint32_t MIRAGE_CALL Status(char* buffer, uint32_t capacity)
 	{
 #if MIRAGE_FEATURE_TAS
-		return CopyOut(ToJson(tas::GetStatus()).dump(), buffer, capacity);
+		return CopyOut(jc::dump(ToJson(tas::GetStatus())), buffer, capacity);
 #else
 		return CopyOut("{}", buffer, capacity);
 #endif
@@ -104,7 +104,7 @@ namespace mirage::mods::tasapi
 	{
 #if MIRAGE_FEATURE_TAS
 		if (!text) return;
-		const auto j = nlohmann::json::parse(text, nullptr, false);
+		const jc::json j = jc::parse(text);
 		if (j.is_object()) tas::SetOptions(OptionsFrom(j));
 #else
 		(void)text;
@@ -211,10 +211,10 @@ namespace mirage::mods::tasapi
 	uint32_t MIRAGE_CALL Preflight(char* buffer, uint32_t capacity)
 	{
 #if MIRAGE_FEATURE_TAS
-		nlohmann::json list = nlohmann::json::array();
+		jc::json list = jc::new_array();
 		for (const tas::Issue& i : tas::Preflight())
-			list.push_back({{"level", static_cast<int>(i.level)}, {"text", i.text}, {"fixed", i.fixed}});
-		return CopyOut(list.dump(), buffer, capacity);
+			jc::push(list, {{"level", static_cast<int>(i.level)}, {"text", i.text}, {"fixed", i.fixed}});
+		return CopyOut(jc::dump(list), buffer, capacity);
 #else
 		return CopyOut("[]", buffer, capacity);
 #endif

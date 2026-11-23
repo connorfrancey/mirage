@@ -58,7 +58,7 @@ namespace mirage::mods::watch
 				return path == L"disabled.toml" || path == L"crashes.toml" || path == L"starting.toml";
 			const auto rest = path.substr(slash + 1);
 			const auto top = rest.substr(0, rest.find(L'\\'));
-			return rest == L"config.toml" || top == L".mirage" || top == L"obj" || top == L"bin";
+			return rest == L"config.toml" || top == L".mirage";
 		}
 
 		void ReadChanges(const Watch& watch, std::size_t bytes)
@@ -153,10 +153,24 @@ namespace mirage::mods::watch
 		return result;
 	}
 
-	std::uintmax_t Fingerprint(const fs::path& folder)
+	std::uintmax_t Fingerprint(const fs::path& folder, const fs::path& actions, const fs::path& settings, bool codeOnly)
 	{
 		std::uintmax_t hash = 1469598103934665603ull;
-		const auto mix = [&](std::uintmax_t value) { hash = (hash ^ value) * 1099511628211ull; };
+		const auto stamp = [&hash](const fs::path& path) {
+			std::error_code ec;
+			const auto written = fs::last_write_time(path, ec);
+			if (ec) return;
+			const auto size = fs::file_size(path, ec);
+			if (ec) return;
+			const auto name = std::hash<std::wstring>{}(path.native());
+			hash ^= ((name ^ static_cast<std::uintmax_t>(written.time_since_epoch().count())) *
+				1099511628211ull ^ size) * 1099511628211ull;
+		};
+		const auto explicitFile = [&, a = (folder / actions).lexically_normal(), s = (folder / settings).lexically_normal()]
+			(const fs::path& path) {
+			return (!actions.empty() && _wcsicmp(path.c_str(), a.c_str()) == 0) ||
+				(!settings.empty() && _wcsicmp(path.c_str(), s.c_str()) == 0);
+		};
 		std::error_code ec;
 		for (auto entry = fs::recursive_directory_iterator(folder, ec); !ec && entry != fs::recursive_directory_iterator();
 			 entry.increment(ec)) {
@@ -166,19 +180,15 @@ namespace mirage::mods::watch
 				// Layers, routes and Kismet already reload their own root folders.
 				if (name == ".mirage" || (path.parent_path() == folder && (name == "levels" || name == "routes" || name == "kismet")))
 					entry.disable_recursion_pending();
-			} else if (name != "config.toml" && entry->is_regular_file(ec)) {
-				const auto written = entry->last_write_time(ec);
-				if (!ec) {
-					const auto size = entry->file_size(ec);
-					if (!ec) {
-						mix(std::hash<std::wstring>{}(path.native()));
-						mix(static_cast<std::uintmax_t>(written.time_since_epoch().count()));
-						mix(size);
-					}
-				}
+			} else if (path != folder / "config.toml" && !explicitFile(path) && entry->is_regular_file(ec)) {
+				stamp(path);
 			}
 			// An editor can replace a file between enumeration and a metadata query.
 			ec.clear();
+		}
+		if (!codeOnly) {
+			if (!actions.empty()) stamp(folder / actions);
+			if (!settings.empty() && _wcsicmp(actions.c_str(), settings.c_str()) != 0) stamp(folder / settings);
 		}
 		return hash;
 	}

@@ -575,7 +575,7 @@ paths); every one of today's self-test checks passes with the features loaded as
 - **Arrays:** paths index arrays, 0-based ("StreamingLevels[2].PackageName", static "Foo[3]"); an array without an
   index reads as `MIRAGE_VALUE_ARRAY` with its count. Lua: arrays are proxies, 1-based, with `#`.
 - **Native first-party mods:** a mod in `mods/<id>/` with a `CMakeLists.txt` calls `mirage_native_mod()`
-  (`cmake/FirstPartyMods.cmake`): its own DLL target with only `loader/include/` (and allowed header-only libraries: nlohmann/json)
+  (`cmake/FirstPartyMods.cmake`): its own DLL target with only `loader/include/` (and allowed header-only libraries: glaze)
   on its include path, static CRT, embedded in the menu's DLL as RCDATA and written out by `runtime/firstparty` with the
   mod's other files. `mods/memenu-input-overlay` is the first (C++). API appended for it: the game's input as the engine
   gets it (`input_key_state`, `input_mouse`, `input_kps`, `input_now`, `input_reset_counts`), `tas_session`, files in

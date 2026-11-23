@@ -13,6 +13,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <string>
 
 namespace
@@ -27,7 +28,8 @@ namespace
 				  "  --reference <dir>    where the decompiled script and Lua stubs go\n"
 				  "  --no-reference       don't write them\n"
 				  "  --old-sdk <dir>      the old (mmultiplayer) SDK, for the report of what it has wrong\n"
-				  "  --report <file>      where that report goes\n");
+				  "  --report <file>      where that report goes\n"
+				  "  --metadata-only <file>  export the merged layout JSON for MirageAPIGen\n");
 	}
 
 	std::filesystem::path DefaultConfig()
@@ -52,6 +54,7 @@ int main(int argc, char** argv)
 	if (config.empty()) config = DefaultConfig();
 
 	sdkgen::Options o;
+	std::filesystem::path metadata;
 	std::string error;
 	if (!sdkgen::LoadConfig(config, o, error)) {
 		std::fprintf(stderr, "error: %s\n", error.c_str());
@@ -86,6 +89,8 @@ int main(int argc, char** argv)
 			ok = set(o.oldSdk);
 		} else if (a == "--report") {
 			ok = set(o.report);
+		} else if (a == "--metadata-only") {
+			ok = set(metadata);
 		} else {
 			ok = false;
 		}
@@ -113,6 +118,20 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	for (const auto& w : model.warnings) std::fprintf(stderr, "warning: %s\n", w.c_str());
+
+	if (!metadata.empty()) {
+		mirage::layout::EnumValues enums;
+		for (const auto& [path, e] : model.enums) enums.emplace(path, e.values);
+		std::ofstream out(metadata, std::ios::binary | std::ios::trunc);
+		out << mirage::layout::ToJson(model.layouts, enums);
+		out.close();
+		if (!out) {
+			std::fprintf(stderr, "error: cannot write %s\n", metadata.string().c_str());
+			return 1;
+		}
+		std::printf("metadata  %s\n", metadata.string().c_str());
+		return 0;
+	}
 
 	sdkgen::Stats stats;
 	if (!sdkgen::EmitCpp(model, o, stats, error)) {

@@ -37,7 +37,7 @@ class ModAuthoringTests(unittest.TestCase):
             self.assertEqual(info.manifest["name"], 'Faith’s "High Steps"')
             self.assertFalse((mod / "src").exists())
 
-            with patch.object(modtools, "OUT", root / "build"), patch.object(modtools, "DIST", root / "dist"):
+            with patch.object(modtools, "DIST", root / "dist"):
                 for command in ("check", "build", "package"):
                     result = runner.invoke(cli, ["mod", command, str(mod)])
                     self.assertEqual(result.exit_code, 0, result.output)
@@ -93,3 +93,29 @@ class ModAuthoringTests(unittest.TestCase):
             result = CliRunner().invoke(cli, ["mod", "check", temp])
             self.assertEqual(result.exit_code, 1, result.output)
             self.assertIn("settings.speed", result.output)
+
+    def test_external_declarations_and_bin_entry_survive_packaging(self):
+        with TemporaryDirectory() as temp:
+            root = Path(temp)
+            mod = root / "cryptigo.field-lab"
+            (mod / "config").mkdir(parents=True)
+            (mod / "bin").mkdir()
+            (mod / "bin/lab.dll").write_bytes(b"fixture")
+            (mod / "config/settings.toml").write_text("hud = true\n", encoding="utf-8")
+            (mod / "config/actions.toml").write_text('deploy = "F6"\n', encoding="utf-8")
+            (mod / "mod.toml").write_text(
+                'id = "cryptigo.field-lab"\nversion = "1.0.0"\nmirage = ">=0.1.0"\n'
+                'actions = "config/actions.toml"\nsettings = "config/settings.toml"\n'
+                '[entrypoints]\nnative = "bin/lab.dll"\n',
+                encoding="utf-8",
+            )
+            with patch.object(modtools, "DIST", root / "dist"):
+                result = CliRunner().invoke(cli, ["mod", "package", str(mod)])
+            self.assertEqual(result.exit_code, 0, result.output)
+            with zipfile.ZipFile(root / "dist/cryptigo.field-lab-1.0.0.zip") as archive:
+                self.assertEqual(set(archive.namelist()), {
+                    "cryptigo.field-lab/mod.toml",
+                    "cryptigo.field-lab/config/actions.toml",
+                    "cryptigo.field-lab/config/settings.toml",
+                    "cryptigo.field-lab/bin/lab.dll",
+                })

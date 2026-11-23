@@ -261,11 +261,11 @@ TEST(Manifest, ReportsSettingMistakes)
 		const char* message;
 	};
 	const Case cases[] = {
-		{"[settings.a1]\ndefault = 1", "type must be"},
+		{"[settings.a1]\ndefault = [1]", "type must be"},
 		{"[settings.a1]\ntype = \"colour\"\ndefault = 1", "not 'colour'"},
 		{"[settings.a1]\ntype = \"bool\"", "default is required"},
 		{"[settings.a1]\ntype = \"bool\"\ndefault = 1", "true or false"},
-		{"[settings.a1]\ntype = \"int\"\ndefault = 1", "needs min and max"},
+		{"[settings.a1]\ndefault = 1\nrange = [0, 3]\nstep = 0.5", ".step must be positive"},
 		{"[settings.a1]\ntype = \"int\"\ndefault = 1\nmin = 0", "go together"},
 		{"[settings.a1]\ntype = \"int\"\ndefault = 1\nmin = 5\nmax = 2", "below max"},
 		{"[settings.a1]\ntype = \"int\"\ndefault = 20\nmin = 0\nmax = 10", "outside min..max"},
@@ -288,6 +288,70 @@ TEST(Manifest, ReportsSettingMistakes)
 	ASSERT_TRUE(warn.manifest);
 	EXPECT_TRUE(HasMessage(warn.warnings, "unknown key 'colour'"));
 	EXPECT_TRUE(HasMessage(warn.warnings, "min and max are for int and float"));
+}
+
+TEST(Manifest, ReadsExternalDeclarationsAndRejectsUnsafePaths)
+{
+	namespace fs = std::filesystem;
+	const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+	const auto root = fs::temp_directory_path() / ("mirage-split-manifest-" + std::to_string(stamp));
+	const auto mod = root / "cryptigo.field-lab";
+	fs::create_directories(mod / "config");
+	fs::create_directory(mod / "scripts");
+	std::ofstream(mod / "scripts/main.lua") << "-- fixture";
+	const std::string head =
+		"id = \"cryptigo.field-lab\"\nversion = \"1.0.0\"\nsettings = \"config/settings.toml\"\n";
+	const auto write = [&](std::string_view actionsPath) {
+		std::ofstream(mod / "mod.toml") << head << "actions = \"" << actionsPath <<
+			"\"\n[entrypoints]\nlua = \"scripts/main.lua\"\n";
+	};
+	write("config/actions.toml");
+	std::ofstream(mod / "config/actions.toml") <<
+		"deploy = \"F6\"\n[scanner]\nkey = \"Ctrl+F6\"\nlabel = \"Toggle Scanner\"\n";
+	std::ofstream(mod / "config/settings.toml") <<
+		"hud = true\ncount = 2\n[volume]\ndefault = 0.5\nrange = [0.0, 1.0]\nstep = 0.05\n"
+		"[scanner_mode]\ndefault = \"normal\"\noptions = [\"normal\", \"advanced\"]\n"
+		"[scanner_key]\ntype = \"keybind\"\ndefault = \"Ctrl+F7\"\n";
+
+	const auto parsed = Load(mod);
+	EXPECT_TRUE(parsed.manifest) << (parsed.errors.empty() ? "" : parsed.errors.front());
+	if (parsed.manifest) {
+		const auto& m = *parsed.manifest;
+		EXPECT_EQ(m.lua, "scripts/main.lua");
+		EXPECT_EQ(m.actionsFile, fs::path("config/actions.toml"));
+		if (m.actions.size() == 2) {
+			EXPECT_EQ(m.actions[1].label, "Toggle Scanner");
+			EXPECT_EQ(m.actions[1].chord.engineKey, "f6");
+			EXPECT_EQ(m.actions[1].chord.modifiers, keys::kCtrl);
+		} else ADD_FAILURE() << "expected two actions";
+		if (m.settings.size() == 5) {
+			EXPECT_TRUE(m.settings[0].boolDefault);
+			EXPECT_FALSE(m.settings[1].hasRange);
+			EXPECT_DOUBLE_EQ(m.settings[2].step, 0.05);
+			EXPECT_EQ(m.settings[3].type, SettingDecl::Type::Choice);
+			const auto binding = keys::ParseChord("Ctrl+F7");
+			EXPECT_EQ(m.settings[4].intDefault, binding->vk | binding->modifiers);
+		} else ADD_FAILURE() << "expected five settings";
+	}
+	write("config/missing.toml");
+	EXPECT_TRUE(HasMessage(Load(mod).errors, "missing.toml"));
+	write("../outside.toml");
+	EXPECT_TRUE(HasMessage(Load(mod).errors, "inside the mod folder"));
+	write("C:/outside.toml");
+	EXPECT_FALSE(Load(mod).manifest);
+	fs::remove_all(root);
+}
+
+TEST(Manifest, RejectsBadCompactDeclarations)
+{
+	const std::string head = "id = \"sample\"\nversion = \"1.0.0\"\n";
+	EXPECT_FALSE(Parse(head + "[actions]\ndeploy = \"Ctrl+Unknown\"").manifest);
+	EXPECT_FALSE(Parse(head + "[actions]\n\"x.y\" = \"F6\"").manifest);
+	EXPECT_FALSE(Parse(head + "[actions]\ndeploy = \"Ctrl+ctrl+F6\"").manifest);
+	EXPECT_FALSE(Parse(head + "[settings.mode]\ndefault = \"a\"\noptions = [\"a\", \"a\"]").manifest);
+	EXPECT_FALSE(Parse(head + "[settings.speed]\ndefault = nan\nrange = [0, 1]").manifest);
+	EXPECT_FALSE(Parse(head + "[settings.key]\ntype = \"keybind\"\ndefault = \"Ctrl+Unknown\"").manifest);
+	EXPECT_FALSE(Parse(head + "lua = \"main.lua\"\n[entrypoints]\nlua = \"scripts/main.lua\"").manifest);
 }
 
 // The mod manager's off list: written and read back; an empty folder has none; garbage reads as none

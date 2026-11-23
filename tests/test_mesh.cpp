@@ -2,6 +2,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 using namespace rmesh;
 
 TEST(Mesh, PackColorPacksArgbAndClamps)
@@ -67,4 +69,26 @@ TEST(Mesh, LinesKeepTheirColor)
     ASSERT_EQ(data.lines.size(), 2u);
     EXPECT_FLOAT_EQ(data.lines[1].x, 1.f);
     EXPECT_EQ(data.lines[0].color, 0xFF123456u);
+}
+
+TEST(Mesh, TubeFollowsItsPoints)
+{
+    rmesh::MeshData out;
+    rmesh::Builder b(out);
+    b.SetStyle({0xFF808080u, true, false, 0});
+    b.Tube({{0.f, 0.f, 100.f}, {500.f, 0.f, 50.f}, {1000.f, 0.f, 100.f}}, 4.f, 6);
+    ASSERT_EQ(out.tris.size(), 2u * 6u * 6u);       // Two triangles per side between each pair of points
+    EXPECT_TRUE(out.lines.empty());
+    float lowest = 1e9f, minX = 1e9f, maxX = -1e9f;
+    for (const auto& v : out.tris) {
+        lowest = std::min(lowest, v.z);
+        minX = std::min(minX, v.x);
+        maxX = std::max(maxX, v.x);
+        EXPECT_EQ(v.color >> 24, 0xFFu);            // Alpha kept by the shading
+    }
+    EXPECT_NEAR(lowest, 50.f - 4.f, 1.f);           // The lowest point, minus about the radius
+    EXPECT_NEAR(minX, 0.f, 4.5f);                   // From the first point to the last
+    EXPECT_NEAR(maxX, 1000.f, 4.5f);
+    b.Tube({{0.f, 0.f, 0.f}}, 4.f);                 // One point: nothing
+    EXPECT_EQ(out.tris.size(), 2u * 6u * 6u);
 }

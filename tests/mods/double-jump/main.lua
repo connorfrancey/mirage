@@ -1,7 +1,3 @@
--- Self-test mod (step 8, Scenario B): a double jump. With its module on, the mod's move "DoubleJump" is registered (it
--- runs as the game's TdMove_Falling: the game handles its landing, grabs and wall runs); pressing the action's key in
--- the air (jumping or falling) starts it once per jump, with 650 u/s up. Off: mirage.revert() takes the move out and the
--- game's movement is exactly as it was. What happened is shared for the self-test.
 local m = mirage.module { name = "Double Jump (test)", tab = "Mods", description = "Self-test: a double jump (step 8)" }
 
 local MOVE_WALKING, MOVE_FALLING, MOVE_JUMP, MOVE_LANDING = 1, 2, 11, 20
@@ -17,7 +13,7 @@ mirage.on("tick", function()
     if m:enabled() and not move then
         move = mirage.move {
             name = "DoubleJump", as = "TdMove_Falling",
-            -- Its animation (step 9): the springboard's take-off, blended in and out on the full-body slot
+            -- Its animation: the springboard's take-off, blended in and out on the full-body slot
             anim = "SpringBoardLeftLeg", anim_slot = "fullbody", blend_in = 0.1, blend_out = 0.25,
             on_start = function()
                 local p = mirage.pawn()

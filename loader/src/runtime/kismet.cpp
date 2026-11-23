@@ -7,12 +7,30 @@
 #include "runtime/symbols.h"
 #include "sdk/SDK.hpp"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+
+// The JSON names where they differ from the members: an op's class is "class", a variable link's paths "linked", and
+// the kind is written as its name. Write only: mods read this, nothing reads it back.
+template <>
+struct glz::meta<mirage::kismet::VariableLink>
+{
+	using T = mirage::kismet::VariableLink;
+	static constexpr auto value = object("desc", &T::desc, "linked", &T::variables);
+};
+template <>
+struct glz::meta<mirage::kismet::Op>
+{
+	using T = mirage::kismet::Op;
+	static constexpr auto value = object("path", &T::path, "name", &T::name, "class", &T::cls,
+		"kind", [](const T& op) { return std::string_view(mirage::kismet::KindName(op.kind)); },
+		"title", &T::title, "comment", &T::comment, "active", &T::active, "activations", &T::activations, "x", &T::x,
+		"y", &T::y, "inputs", &T::inputs, "outputs", &T::outputs, "variables", &T::variables, "originator", &T::originator);
+};
 
 namespace mirage::kismet
 {
@@ -161,30 +179,7 @@ namespace mirage::kismet
 
 	std::string LevelOf(const Classes::USequenceObject* o) { return LevelOf(static_cast<const Classes::UObject*>(o)); }
 
-	std::string ToJson(const std::vector<Sequence>& sequences)
-	{
-		nlohmann::json all = nlohmann::json::array();
-		for (const Sequence& s : sequences) {
-			nlohmann::json ops = nlohmann::json::array();
-			for (const Op& op : s.ops) {
-				nlohmann::json outputs = nlohmann::json::array();
-				for (const Output& o : op.outputs) {
-					nlohmann::json links = nlohmann::json::array();
-					for (const Link& l : o.links) links.push_back({{"op", l.op}, {"input", l.input}});
-					outputs.push_back({{"desc", o.desc}, {"links", links}});
-				}
-				nlohmann::json vars = nlohmann::json::array();
-				for (const VariableLink& v : op.variables) vars.push_back({{"desc", v.desc}, {"linked", v.variables}});
-				ops.push_back({{"path", op.path}, {"name", op.name}, {"class", op.cls}, {"kind", KindName(op.kind)},
-							   {"title", op.title}, {"comment", op.comment}, {"active", op.active},
-							   {"activations", op.activations}, {"x", op.x}, {"y", op.y}, {"inputs", op.inputs}, {"outputs", outputs},
-							   {"variables", vars}, {"originator", op.originator}});
-			}
-			all.push_back({{"path", s.path}, {"name", s.name}, {"level", s.level}, {"parent", s.parent},
-						   {"enabled", s.enabled}, {"ops", ops}});
-		}
-		return all.dump();
-	}
+	std::string ToJson(const std::vector<Sequence>& sequences) { return jc::dump(sequences); }
 
 	// ---- Editing -------------------------------------------------------------------------------------------------------
 	namespace

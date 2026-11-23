@@ -1203,6 +1203,23 @@ typedef struct MirageApi {
     int32_t(MIRAGE_CALL* menu_slider)(MirageMod* mod, const char* label, float min, float max, float step, float value);
     /* Its value now (the page's while it is open; Cancel puts it back): 1, or 0 for another mod's id or one that's gone */
     int32_t(MIRAGE_CALL* menu_slider_value)(MirageMod* mod, int32_t id, float* value);
+
+    /* ---- The mod's own 3D lines (step 31) */
+    /* Lines in the world (a line list: 2 vertices each) that are this mod's: drawn together with every other mod's and
+     * the moving layer (world_draw_set's MIRAGE_WORLD_MOVING), so mods don't replace each other's. The next call replaces
+     * them; NULL or 0 removes them. The 3D drawing is on while any mod has lines. Gone when the mod unloads. Any thread. */
+    void(MIRAGE_CALL* world_draw_lines)(MirageMod* mod, const MirageWorldVertex* lines, uint32_t count);
+
+    /* ---- The mod's models as meshes (step 31) */
+    /* A model file of the mod ("models/x.glb", converted with `mirage model --convert`) as a game StaticMesh, for an
+     * actor's mesh (SetStaticMesh). Built the first time in the background: NULL with *pending = 1 until it is ready (ask
+     * again on a later tick), NULL with *pending = 0 when it can't be (the log says why, once). Game thread. */
+    MirageObject*(MIRAGE_CALL* model_mesh)(MirageMod* mod, const char* file, int32_t* pending);
+
+    /* The engine class by short name: PortalTeleporter, PortalMarker, PortalVolume, SceneCapturePortalActor,
+     * SceneCapturePortalComponent, SceneCaptureReflectActor, SceneCaptureReflectComponent, SceneCaptureActor,
+     * or SceneCaptureComponent. Returns NULL if the name is unknown or the class is unavailable. Game thread. */
+    MirageObject*(MIRAGE_CALL* portal_class)(const char* name);
 } MirageApi;
 
 #define MIRAGE_SOUND_LOOP 0x1u

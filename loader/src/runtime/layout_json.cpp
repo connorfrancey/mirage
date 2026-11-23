@@ -3,10 +3,32 @@
 
 #include "runtime/layout.h"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
+
+#include <optional>
 
 namespace mirage::layout
 {
+	namespace detail	// The file's shape; members left empty (std::nullopt) are not written
+	{
+		struct FileProperty
+		{
+			std::string name, kind;
+			std::uint32_t offset = 0, size = 0;
+			std::optional<std::uint32_t> dim, mask;
+			std::uint64_t flags = 0;
+			std::optional<std::string> type, inner, innerType;
+		};
+		struct FileStruct
+		{
+			std::string path, kind, super;
+			std::uint32_t size = 0;
+			std::optional<std::uint32_t> functionFlags;
+			std::vector<FileProperty> properties;
+			std::optional<std::vector<std::string>> values;
+		};
+	}
+
 	namespace
 	{
 		Kind KindFromName(const std::string& name)
@@ -27,70 +49,63 @@ namespace mirage::layout
 		return packages;
 	}
 
-	std::string ToJson(const Layouts& layouts)
+	std::string ToJson(const Layouts& layouts, const EnumValues& enums)
 	{
-		nlohmann::ordered_json root = nlohmann::ordered_json::array();
+		std::vector<detail::FileStruct> out;
+		out.reserve(layouts.size() + enums.size());
 		for (const auto& [path, s] : layouts) {
-			nlohmann::ordered_json j;
-			j["path"] = s.path;
-			j["kind"] = s.kind;
-			j["super"] = s.super;
-			j["size"] = s.size;
-			if (s.functionFlags) j["functionFlags"] = s.functionFlags;
-			nlohmann::ordered_json props = nlohmann::ordered_json::array();
+			detail::FileStruct f{s.path, s.kind, s.super, s.size, {}, {}, {}};
+			if (s.functionFlags) f.functionFlags = s.functionFlags;
 			for (const Property& p : s.properties) {
-				nlohmann::ordered_json q;
-				q["name"] = p.name;
-				q["kind"] = KindName(p.kind);
-				q["offset"] = p.offset;
-				q["size"] = p.elementSize;
-				if (p.arrayDim != 1) q["dim"] = p.arrayDim;
-				if (p.boolMask) q["mask"] = p.boolMask;
-				q["flags"] = p.flags;
-				if (!p.typePath.empty()) q["type"] = p.typePath;
-				if (p.innerKind != Kind::Unknown) q["inner"] = KindName(p.innerKind);
-				if (!p.innerPath.empty()) q["innerType"] = p.innerPath;
-				props.push_back(std::move(q));
+				detail::FileProperty q{p.name, KindName(p.kind), p.offset, p.elementSize, {}, {}, p.flags, {}, {}, {}};
+				if (p.arrayDim != 1) q.dim = p.arrayDim;
+				if (p.boolMask) q.mask = p.boolMask;
+				if (!p.typePath.empty()) q.type = p.typePath;
+				if (p.innerKind != Kind::Unknown) q.inner = KindName(p.innerKind);
+				if (!p.innerPath.empty()) q.innerType = p.innerPath;
+				f.properties.push_back(std::move(q));
 			}
-			j["properties"] = std::move(props);
-			root.push_back(std::move(j));
+			out.push_back(std::move(f));
 		}
-		return root.dump(1, '\t');
+		for (const auto& [path, values] : enums)
+			if (!layouts.contains(path))
+				out.push_back({path, "Enum", "", 0, {}, {}, values});
+		return jc::dump(out, true);
 	}
 
 	Layouts FromJson(const std::string& text, std::string* error)
 	{
 		Layouts out;
-		try {
-			const auto root = nlohmann::json::parse(text);
-			for (const auto& j : root) {
-				Struct s;
-				s.path = j.at("path").get<std::string>();
-				s.kind = j.at("kind").get<std::string>();
-				s.super = j.value("super", "");
-				s.size = j.at("size").get<std::uint32_t>();
-				s.functionFlags = j.value("functionFlags", 0u);
-				for (const auto& q : j.at("properties")) {
-					Property p;
-					p.name = q.at("name").get<std::string>();
-					p.kind = KindFromName(q.at("kind").get<std::string>());
-					p.offset = q.at("offset").get<std::uint32_t>();
-					p.elementSize = q.at("size").get<std::uint32_t>();
-					p.arrayDim = q.value("dim", 1u);
-					p.boolMask = q.value("mask", 0u);
-					p.flags = q.value("flags", std::uint64_t{0});
-					p.typePath = q.value("type", "");
-					p.type = p.typePath.substr(p.typePath.find_last_of('.') + 1);
-					p.innerKind = KindFromName(q.value("inner", "Unknown"));
-					p.innerPath = q.value("innerType", "");
-					p.innerType = p.innerPath.substr(p.innerPath.find_last_of('.') + 1);
-					s.properties.push_back(std::move(p));
-				}
-				out.emplace(s.path, std::move(s));
+		std::vector<detail::FileStruct> file;
+		if (const auto ec = glz::read<jc::kLenient>(file, text)) {
+			if (error) *error = glz::format_error(ec, text);
+			return out;
+		}
+		for (detail::FileStruct& f : file) {
+			Struct s;
+			s.path = std::move(f.path);
+			s.kind = std::move(f.kind);
+			s.super = std::move(f.super);
+			s.size = f.size;
+			s.functionFlags = f.functionFlags.value_or(0u);
+			for (detail::FileProperty& q : f.properties) {
+				Property p;
+				p.name = std::move(q.name);
+				p.kind = KindFromName(q.kind);
+				p.offset = q.offset;
+				p.elementSize = q.size;
+				p.arrayDim = q.dim.value_or(1u);
+				p.boolMask = q.mask.value_or(0u);
+				p.flags = q.flags;
+				p.typePath = q.type.value_or("");
+				p.type = p.typePath.substr(p.typePath.find_last_of('.') + 1);
+				p.innerKind = KindFromName(q.inner.value_or("Unknown"));
+				p.innerPath = q.innerType.value_or("");
+				p.innerType = p.innerPath.substr(p.innerPath.find_last_of('.') + 1);
+				s.properties.push_back(std::move(p));
 			}
-		} catch (const std::exception& e) {
-			if (error) *error = e.what();
-			out.clear();
+			const std::string key = s.path;
+			out.emplace(key, std::move(s));
 		}
 		return out;
 	}

@@ -4,7 +4,7 @@
 # Finding files (e.g. file(GLOB_RECUSE ...)) isn't necessary for this, so just add them manually
 add_executable(mirage_launcher src/main.cpp src/inject.cpp src/inject.h src/detect.cpp src/detect.h)
 
-target_link_libraries(mirage_launcher PRIVATE nlohmann_json::nlohmann_json shell32 advapi32)
+target_link_libraries(mirage_launcher PRIVATE glaze::glaze shell32 advapi32)
 target_compile_definitions(mirage_launcher PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE)
 
 if (MSVC)

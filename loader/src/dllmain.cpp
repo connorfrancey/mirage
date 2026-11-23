@@ -22,6 +22,7 @@
 #include "test_mode.h"
 #include "unload.h"
 #if MIRAGE_GAME
+#include "crashhandler/analyzer/4gb_patch.h"
 #include "game/game.h"
 #include "game/levels.h"
 #include "runtime/content.h"
@@ -117,6 +118,12 @@ static void Run(HMODULE module)
     if (installed) STARTUP_STEP(mirage::files::Install());
 #endif
     spdlog::info("Hardware: {}", hw::Get().Summary());   // After the hooks: they add the GPU
+    {
+        const auto space = crashhandler::analyzer::GameAddressSpace();
+        spdlog::info("Memory: {} MB of address space ({})", space.totalMb,
+                     space.largeAddressAware ? "MirrorsEdge.exe is Large Address Aware"
+                                             : "MirrorsEdge.exe isn't Large Address Aware: the installer gives it 4 GB");
+    }
     if (installed)
     {
 #if MIRAGE_GAME
@@ -147,7 +154,7 @@ static void Run(HMODULE module)
             game::RunOnGameThread([] { crashhandler::symbols::Refresh(); });   // The crash handler's engine names
             mirage::mods::game_api::WireChanges();   // Mods' transactions (step 15) write through the runtime's writer
             // The world phase's mods load on the first tick after a level has loaded
-            static std::atomic<bool> levelLoaded{false}, worldLoaded{false};
+            static std::atomic<bool> levelLoaded{false}, worldLoaded{false}, startFinished{false};
             game::OnLevelLoad([](bool finished) {
                 mirage::mods::DispatchLevelLoad(finished, finished ? game::MapName() : std::string());
                 mirage::mem::OnLevelLoad(finished, finished ? game::MapName() : std::string());
@@ -167,10 +174,11 @@ static void Run(HMODULE module)
             });
             game::OnTick([](float seconds) {
                 mirage::hang::BeatGame();
-                if (levelLoaded && !worldLoaded.exchange(true)) {
-                    mirage::mods::LoadPhase(mirage::mods::Phase::World);
-                    mirage::mods::StartupFinished();     // The start got through: no safe mode next time
-                }
+                if (levelLoaded && !worldLoaded.exchange(true)) mirage::mods::LoadPhase(mirage::mods::Phase::World);
+                // The start got through once a level with a player is up; the main menu is one (it loads before the
+                // level-load hook is in, so waiting for a level load would count quitting from the menu as a failed start)
+                if (!startFinished && game::Pawn() && !startFinished.exchange(true))
+                    mirage::mods::StartupFinished();     // No safe mode next time
                 mirage::actions::Tick();         // Mods' input actions the engine got since the last tick (step 8)
                 mirage::mods::DispatchTick(seconds);
                 mirage::world_events::Tick();    // Actors added and removed, levels streamed, restarts (step 14)
@@ -333,6 +341,7 @@ static DWORD WINAPI MainThread(LPVOID param)
         spdlog::critical("{}", message);
         spdlog::default_logger()->flush();
     });
+    failsafe::OnKill([] { mirage::mods::ForgetStart(); });   // A deliberate quit: no safe mode at the next start
     spdlog::info("Failsafe: {} force-quits the game, even when it stops responding", failsafe::kName);
 #ifdef _MSC_VER
     __try { Run(module); }

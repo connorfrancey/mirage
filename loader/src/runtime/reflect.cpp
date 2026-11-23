@@ -48,6 +48,7 @@ namespace mirage::reflect
 					const layout::Kind kind = layout::KindFromClass(f->Class->GetName());
 					if (kind == layout::Kind::Unknown) continue;	// A function, a const, an enum, a state...
 					Member m;
+					m.declaration = f;
 					m.name = f->GetName();
 					m.kind = kind;
 					m.offset = Dword(f, kOffset);

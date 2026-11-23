@@ -52,6 +52,8 @@ Every function a mod can call, in `MirageApi`'s order (ABI v1 only grows: entrie
 - [Sound](#sound) (3)
 - [Post-processing](#post-processing) (4)
 - [The game's options menu](#the-games-options-menu) (2)
+- [The mod's own 3D lines](#the-mods-own-3d-lines) (1)
+- [The mod's models as meshes](#the-mods-models-as-meshes) (2)
 - [Types](#types)
 
 ## Basics
@@ -1577,6 +1579,34 @@ int32_t(MIRAGE_CALL* menu_slider_value)(MirageMod* mod, int32_t id, float* value
 ```
 
 Its value now (the page's while it is open; Cancel puts it back): 1, or 0 for another mod's id or one that's gone
+
+## The mod's own 3D lines
+
+### `world_draw_lines`
+
+```c
+void(MIRAGE_CALL* world_draw_lines)(MirageMod* mod, const MirageWorldVertex* lines, uint32_t count);
+```
+
+Lines in the world (a line list: 2 vertices each) that are this mod's: drawn together with every other mod's and the moving layer (world_draw_set's MIRAGE_WORLD_MOVING), so mods don't replace each other's. The next call replaces them; NULL or 0 removes them. The 3D drawing is on while any mod has lines. Gone when the mod unloads. Any thread.
+
+## The mod's models as meshes
+
+### `model_mesh`
+
+```c
+MirageObject*(MIRAGE_CALL* model_mesh)(MirageMod* mod, const char* file, int32_t* pending);
+```
+
+A model file of the mod ("models/x.glb", converted with `mirage model --convert`) as a game StaticMesh, for an actor's mesh (SetStaticMesh). Built the first time in the background: NULL with *pending = 1 until it is ready (ask again on a later tick), NULL with *pending = 0 when it can't be (the log says why, once). Game thread.
+
+### `portal_class`
+
+```c
+MirageObject*(MIRAGE_CALL* portal_class)(const char* name);
+```
+
+The engine class by short name: PortalTeleporter, PortalMarker, PortalVolume, SceneCapturePortalActor, SceneCapturePortalComponent, SceneCaptureReflectActor, SceneCaptureReflectComponent, SceneCaptureActor, or SceneCaptureComponent. Returns NULL if the name is unknown or the class is unavailable. Game thread.
 
 ## Types
 

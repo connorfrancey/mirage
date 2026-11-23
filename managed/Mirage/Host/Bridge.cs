@@ -96,16 +96,29 @@ namespace Mirage
                 Assembly assembly;
                 try {
                     if (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
-                        // A script mod: every .cs in its folder, compiled now
-                        var compiled = Scripts.Compile("mod_" + id.Replace('-', '_'), Scripts.SourcesIn(Path.GetDirectoryName(path)!));
+                        // A script mod: every .cs in its folder, compiled now (or the same sources' assembly, kept in
+                        // the script cache)
+                        string name = "mod_" + id.Replace('-', '_');
+                        var sources = Scripts.SourcesIn(Path.GetDirectoryName(path)!).ToList();
+                        var compiled = Scripts.CompileCached(name, sources);
                         if (compiled.Assembly == null) {
                             context.Unload();
                             WriteError(string.Join("\n", compiled.Errors.Take(20)), error, capacity);
                             return 0;
                         }
                         foreach (var w in compiled.Warnings.Take(10)) Utf8.With(w, t => { Api->log(mod, Constants.LogWarn, (byte*)t); return 0; });
-                        Utf8.With($"compiled in {compiled.Milliseconds:0} ms", t => { Api->log(mod, Constants.LogInfo, (byte*)t); return 0; });
-                        assembly = context.LoadBytes(compiled.Assembly, compiled.Pdb);
+                        try {
+                            assembly = context.LoadBytes(compiled.Assembly, compiled.Pdb);
+                        } catch (BadImageFormatException) when (compiled.CacheKey != null) {
+                            // A broken entry of the cache: compiled again, and that kept instead
+                            Scripts.Forget(compiled.CacheKey);
+                            compiled = Scripts.CompileCached(name, sources);
+                            if (compiled.Assembly == null) throw;
+                            assembly = context.LoadBytes(compiled.Assembly, compiled.Pdb);
+                        }
+                        string how = compiled.CacheKey != null ? $"loaded from the script cache in {compiled.Milliseconds:0} ms"
+                                                               : $"compiled in {compiled.Milliseconds:0} ms";
+                        Utf8.With(how, t => { Api->log(mod, Constants.LogInfo, (byte*)t); return 0; });
                     } else {
                         assembly = context.LoadFromBytes(path);
                     }

@@ -25,7 +25,7 @@ namespace mirage::mem::sampler
 			std::uintptr_t ptr;			// 0: empty slot
 			std::uint32_t weight;		// Bytes it stands for (capped)
 			std::uint32_t size;
-			std::uint32_t seq;			// Generation
+			std::uint32_t seq;			// generation
 			std::uint32_t stack;		// Index + 1 in the stack table, 0 = none
 			std::uint32_t thread;		// Thread id that allocated it
 			std::uint64_t timeMs;

@@ -8,7 +8,7 @@
 #include <Windows.h>
 
 #include "sdk/SDK.hpp"
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 #include <spdlog/spdlog.h>
 
 #include <cctype>
@@ -430,42 +430,70 @@ bool FromHex(const std::string& hex, std::vector<std::uint8_t>& out)
     return true;
 }
 
-nlohmann::json ToJson(const ObjectSnapshot& o) { return {{"class", o.className}, {"data", ToHex(o.data)}}; }
+using jc::json;
 
-bool FromJson(const nlohmann::json& j, ObjectSnapshot& o)
+// Strict reads for Import: a missing member, a short array or a wrong type throws, and Import turns that into false
+const json& At(const json& j, const char* key)
 {
-    o.className = j.at("class").get<std::string>();
-    return FromHex(j.at("data").get<std::string>(), o.data);
+    if (!jc::contains(j, key)) throw std::runtime_error(std::string("missing \"") + key + '"');
+    return j[key];
+}
+const json& At(const json& j, int i)
+{
+    if (!j.is_array() || i < 0 || static_cast<std::size_t>(i) >= j.size()) throw std::runtime_error("array too short");
+    return j[i];
+}
+template <class T>
+T Get(const json& j)
+{
+    if constexpr (std::is_same_v<T, bool>) {
+        if (!j.is_boolean()) throw std::runtime_error("not a boolean");
+        return j.get<bool>();
+    } else if constexpr (std::is_arithmetic_v<T>) {
+        if (!j.is_number()) throw std::runtime_error("not a number");
+        return j.as<T>();
+    } else {
+        if (!j.is_string()) throw std::runtime_error("not a string");
+        return j.get<std::string>();
+    }
 }
 
-nlohmann::json Vec(const FVector& v) { return {v.X, v.Y, v.Z}; }
+json ToJson(const ObjectSnapshot& o) { return {{"class", o.className}, {"data", ToHex(o.data)}}; }
 
-FVector Vec(const nlohmann::json& j)
+bool FromJson(const json& j, ObjectSnapshot& o)
+{
+    o.className = Get<std::string>(At(j, "class"));
+    return FromHex(Get<std::string>(At(j, "data")), o.data);
+}
+
+json Vec(const FVector& v) { return {v.X, v.Y, v.Z}; }
+
+FVector Vec(const json& j)
 {
     FVector v{};
-    v.X = j.at(0).get<float>();
-    v.Y = j.at(1).get<float>();
-    v.Z = j.at(2).get<float>();
+    v.X = Get<float>(At(j, 0));
+    v.Y = Get<float>(At(j, 1));
+    v.Z = Get<float>(At(j, 2));
     return v;
 }
 
 template <class E>
-TEnumAsByte<E> Enum(const nlohmann::json& j)
+TEnumAsByte<E> Enum(const json& j)
 {
-    return TEnumAsByte<E>(static_cast<std::uint8_t>(j.get<int>()));
+    return TEnumAsByte<E>(static_cast<std::uint8_t>(Get<int>(j)));
 }
 
 constexpr int kFormat = 1;
 
 } // namespace
 
-nlohmann::json player_state::Export()
+json player_state::Export()
 {
     if (!g_hasSave) return nullptr;
     const Snapshot& s = g_save;
-    nlohmann::json moves = nlohmann::json::array();
-    for (const ObjectSnapshot& m : s.moves) moves.push_back(ToJson(m));
-    return {
+    json moves = jc::new_array();
+    for (const ObjectSnapshot& m : s.moves) jc::push(moves, ToJson(m));
+    return json{
         {"format", kFormat},
         {"map", s.map},
         {"location", Vec(s.location)},
@@ -474,40 +502,42 @@ nlohmann::json player_state::Export()
         {"soundMode", static_cast<int>(s.soundMode.GetValue())},
         {"reactionTime", s.reactionTime},
         {"timeDilation", s.timeDilation},
-        {"collision", {s.collisionHeight, s.collisionRadius}},
+        {"collision", json{s.collisionHeight, s.collisionRadius}},
         {"rootMotionMode", static_cast<int>(s.rootMotionMode.GetValue())},
-        {"neck", {s.startTranslateAtDegree, s.quadraticForward, s.quadraticDownward}},
+        {"neck", json{s.startTranslateAtDegree, s.quadraticForward, s.quadraticDownward}},
         {"pawn", ToJson(s.pawn)},
         {"controller", ToJson(s.controller)},
         {"moves", std::move(moves)},
     };
 }
 
-bool player_state::Import(const nlohmann::json& j)
+bool player_state::Import(const json& j)
 {
     try {
-        if (!j.is_object() || j.value("format", 0) != kFormat) return false;
+        if (!j.is_object() || jc::value(j, "format", 0) != kFormat) return false;
         Snapshot s;
-        s.map = Lower(j.at("map").get<std::string>());
-        s.location = Vec(j.at("location"));
-        s.velocity = Vec(j.at("velocity"));
-        if (!FromJson(j.at("pawn"), s.pawn) || !FromJson(j.at("controller"), s.controller)) return false;
-        for (const auto& m : j.at("moves"))
+        s.map = Lower(Get<std::string>(At(j, "map")));
+        s.location = Vec(At(j, "location"));
+        s.velocity = Vec(At(j, "velocity"));
+        if (!FromJson(At(j, "pawn"), s.pawn) || !FromJson(At(j, "controller"), s.controller)) return false;
+        const json& moves = At(j, "moves");
+        if (!moves.is_array()) return false;
+        for (const json& m : moves.get_array())
             if (!FromJson(m, s.moves.emplace_back())) return false;
-        s.movementState = Enum<EMovement>(j.at("movementState"));
-        s.soundMode = Enum<ESoundMode>(j.at("soundMode"));
-        s.reactionTime = j.at("reactionTime").get<bool>();
-        s.timeDilation = j.at("timeDilation").get<float>();
-        s.collisionHeight = j.at("collision").at(0).get<float>();
-        s.collisionRadius = j.at("collision").at(1).get<float>();
-        s.rootMotionMode = Enum<ERootMotionMode>(j.at("rootMotionMode"));
-        s.startTranslateAtDegree = j.at("neck").at(0).get<float>();
-        s.quadraticForward = j.at("neck").at(1).get<float>();
-        s.quadraticDownward = j.at("neck").at(2).get<float>();
+        s.movementState = Enum<EMovement>(At(j, "movementState"));
+        s.soundMode = Enum<ESoundMode>(At(j, "soundMode"));
+        s.reactionTime = Get<bool>(At(j, "reactionTime"));
+        s.timeDilation = Get<float>(At(j, "timeDilation"));
+        s.collisionHeight = Get<float>(At(At(j, "collision"), 0));
+        s.collisionRadius = Get<float>(At(At(j, "collision"), 1));
+        s.rootMotionMode = Enum<ERootMotionMode>(At(j, "rootMotionMode"));
+        s.startTranslateAtDegree = Get<float>(At(At(j, "neck"), 0));
+        s.quadraticForward = Get<float>(At(At(j, "neck"), 1));
+        s.quadraticDownward = Get<float>(At(At(j, "neck"), 2));
         g_save = std::move(s);
         g_hasSave = true;
         return true;
-    } catch (const nlohmann::json::exception& e) {
+    } catch (const std::exception& e) {
         spdlog::warn("Save state: can't read a stored state: {}", e.what());
         return false;
     }
@@ -519,18 +549,18 @@ void player_state::Clear() { g_hasSave = false; }
 
 unsigned player_state::LoadCount() { return g_loadCount; }
 
-nlohmann::json player_state::Capture()
+json player_state::Capture()
 {
     const Snapshot keep = g_save;
     const bool had = g_hasSave;
-    nlohmann::json j;
+    json j;
     if (Save()) j = Export();
     g_save = keep;
     g_hasSave = had;
     return j;
 }
 
-bool player_state::Apply(const nlohmann::json& state)
+bool player_state::Apply(const json& state)
 {
     const Snapshot keep = g_save;
     const bool had = g_hasSave;

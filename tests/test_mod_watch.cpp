@@ -60,6 +60,28 @@ TEST_F(ModWatch, UnwatchableRootKeepsFullScansEnabled)
 	EXPECT_TRUE(watch::TakeChanges().scanAll);
 }
 
+TEST_F(ModWatch, DeclarationEditsLeaveCodeFingerprintStable)
+{
+	fs::create_directory(mod / "config");
+	fs::create_directory(mod / "levels");
+	const fs::path actions = "config/actions.toml";
+	const fs::path settings = "levels/settings.toml";
+	std::ofstream(mod / actions) << "jump = \"J\"";
+	std::ofstream(mod / settings) << "speed = 42";
+	std::ofstream(mod / "main.lua") << "return 1";
+	const auto code = watch::Fingerprint(mod, actions, settings, true);
+	const auto before = watch::Fingerprint(mod, actions, settings);
+	std::ofstream(mod / actions) << "jump = \"Ctrl+J\"";
+	EXPECT_EQ(watch::Fingerprint(mod, actions, settings, true), code);
+	const auto actionChanged = watch::Fingerprint(mod, actions, settings);
+	EXPECT_NE(actionChanged, before);
+	std::ofstream(mod / settings) << "speed = 123";
+	EXPECT_NE(watch::Fingerprint(mod, actions, settings), actionChanged);
+	EXPECT_EQ(watch::Fingerprint(mod, actions, settings, true), code);
+	std::ofstream(mod / "main.lua") << "return 100";
+	EXPECT_NE(watch::Fingerprint(mod, actions, settings, true), code);
+}
+
 TEST_F(ModWatch, NotificationNamesTheChangedModFolder)
 {
 	watch::Start({root});

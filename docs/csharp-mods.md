@@ -55,7 +55,9 @@ mirage\mods\hello-script\
 `System`, `System.Linq`, `System.Collections.Generic` and `Mirage` are imported already. A compile error doesn't load
 the mod; the mod manager shows why with the file and line (`main.cs(5,17): error CS0029: ...`). With
 `hot_reload = true` saving a file compiles and reloads it. See `examples/mods/hello-script`. Roslyn is loaded only when a
-script compiles: a game with only built (DLL) C# mods never pays for it.
+script compiles: a game with only built (DLL) C# mods never pays for it. A compiled script is kept in
+`<mirage>\cache\scripts\` by its sources (and Mirage's and the compiler's versions): the same sources load in
+milliseconds instead of compiling again (the log says "loaded from the script cache"), and any change compiles anew.
 
 ## What the API covers
 

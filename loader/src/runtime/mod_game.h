@@ -57,6 +57,7 @@ namespace mirage::mods::game_api
 	uint32_t MIRAGE_CALL PostfxError(MirageMod* mod, int32_t handle, char* buffer, uint32_t capacity);
 	int32_t MIRAGE_CALL MenuSlider(MirageMod* mod, const char* label, float min, float max, float step, float value);
 	int32_t MIRAGE_CALL MenuSliderValue(MirageMod* mod, int32_t id, float* value);
+	MirageObject* MIRAGE_CALL ModelMesh(MirageMod* mod, const char* file, int32_t* pending);
 	int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor);
 	int32_t MIRAGE_CALL PhysicsCollisionSet(MirageMod* mod, MirageObject* actor, uint32_t flags);
 	int32_t MIRAGE_CALL WorldTrace(MirageMod* mod, const float* start, const float* end, const float* extent, uint32_t flags,
@@ -96,6 +97,7 @@ namespace mirage::mods::game_api
 	MirageObject* MIRAGE_CALL PlayerController();
 	MirageObject* MIRAGE_CALL WorldInfo();
 	MirageObject* MIRAGE_CALL ObjectFind(const char* fullName);
+	MirageObject* MIRAGE_CALL PortalClass(const char* name);
 	int32_t MIRAGE_CALL ObjectGet(MirageObject* object, const char* path, MirageValue* out);
 	int32_t MIRAGE_CALL ObjectSet(MirageObject* object, const char* path, const MirageValue* in);
 	uint32_t MIRAGE_CALL ObjectName(MirageObject* object, char* buffer, uint32_t capacity);

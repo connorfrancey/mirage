@@ -20,5 +20,6 @@ namespace mirage::mods::watch
 	void Stop();
 	Changes TakeChanges();
 
-	std::uintmax_t Fingerprint(const std::filesystem::path& folder);
+	std::uintmax_t Fingerprint(const std::filesystem::path& folder, const std::filesystem::path& actions = {},
+							   const std::filesystem::path& settings = {}, bool codeOnly = false);
 }

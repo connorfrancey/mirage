@@ -25,6 +25,7 @@ namespace Classes
 	class UObject;
 	class UStruct;
 	class UClass;
+	class UField;
 }
 
 namespace mirage::reflect
@@ -35,6 +36,7 @@ namespace mirage::reflect
 		layout::Kind kind = layout::Kind::Unknown;
 		std::uint32_t offset = 0, elementSize = 0, arrayDim = 1, boolMask = 0;
 		std::uint64_t flags = 0;
+		const Classes::UField* declaration = nullptr;
 		Classes::UStruct* structType = nullptr;		// Struct: its UScriptStruct
 		Classes::UClass* objectClass = nullptr;		// Object, Class, Component: the class it holds
 		std::shared_ptr<const Member> inner;		// Array: what one element is (its offset 0)

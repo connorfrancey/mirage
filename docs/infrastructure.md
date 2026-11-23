@@ -9,14 +9,14 @@ lives, what thread it runs on, and how it fails safe.
 | Hang detector | `runtime/hang.h` (same module) | Notices a game thread without ticks or a render thread without frames, says where it is stuck, writes a report, tells the player the failsafe key |
 | Event bus | `core/events.h` | Typed events between parts that don't know each other; delivery now, on the game or render thread, or on a worker |
 | Background tasks | `core/tasks.h` | A small pool of low-priority workers; results continued on the game or render thread; cancellation |
-| Resource cache | `core/resource_cache.h` | Files read once and shared; kept under the cache budget; same contents shared (XXH3) |
+| Resource cache | `core/resource_cache.h` | Files read once and shared; kept under the cache budget; same contents shared (rapidhash) |
 | Config cache | `runtime/config_cache.h` | Mirage's TOML files parsed once, re-read when they change on disk, typed lookups by dotted key |
 | Weak cache | `core/weak_cache.h` | Values found while someone holds them, never kept alive by the cache |
 | Adaptive cache | `core/adaptive_cache.h` | ARC: balances recency and frequency on its own; a scan of one-off keys can't flush the hot set |
 | Reflection path cache | `runtime/reflect.h` | Dotted paths parsed once; each segment's member found through a one-entry inline cache |
 | Adaptive update scheduler | `core/scheduler.h` | Under load, Low/Background entries are stretched by their own cost: expensive ones give way first |
 | Allocators | `runtime/mem/allocators.h`, `pool.h`, `arena.h` | Buddy, small-object (size classes), small buffer, stack, slab pools, arenas |
-| Hashing | `core/hash.h` | XXH3 (xxHash, header only) for keys and content fingerprints |
+| Hashing | `core/hash.h` | rapidhash (header only) for keys and content fingerprints |
 
 Already there before and reused, not duplicated: the cache budget manager (`core/cache_evict.h`, now driven by the
 memory manager's adaptive budget), the cache scheduler (`core/cache_sched.h`), the crash logger (`diag.h`: first-chance
@@ -68,6 +68,6 @@ unload drops the queue, asks running tasks to stop (`tasks::Cancelled()`), and j
 
 - Path cache, debug build, in the game: 1.94 us -> 1.55 us per resolve (1.3x) on five typical paths. The rest is the
   debug build's container checks; release not measured yet.
-- XXH3 against FNV-1a: `uv run mirage bench` (bench/bench_hash.cpp).
+- rapidhash against FNV-1a: `uv run mirage bench` (bench/bench_hash.cpp).
 - Adaptive scheduler: per-entry stretch is a pure function (`sched::AdaptiveScale`, unit tested); entries keep the
   old caps (Low 8x, Background 64x), so nothing runs less often than before at full pressure.

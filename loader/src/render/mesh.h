@@ -62,6 +62,9 @@ namespace rmesh {
         void Sphere(const rmath::Mat4& world, float radius, int segments = 16);
         void Cylinder(const rmath::Mat4& world, float radius, float halfHeight, int segments = 16);
         void Capsule(const rmath::Mat4& world, float radius, float halfCylinder, int segments = 16);
+        // A tube through `points` (a cable's simulated points), `radius` thick, in the style's color, shaded lighter on
+        // top so it reads as round without lighting. `sides` around it. Fewer than 2 points: nothing.
+        void Tube(const std::vector<rmath::Vec3>& points, float radius, int sides = 6);
 
     private:
         std::uint32_t OutlineColor() const;

@@ -4,9 +4,10 @@
 #include "core/setting.h"
 
 #include <gtest/gtest.h>
-#include <nlohmann/json.hpp>
 
-using json = nlohmann::ordered_json;
+#include "util/glz_compat.h"
+
+using jc::json;
 
 namespace {
 
@@ -28,7 +29,7 @@ public:
 // Every saved setting of a module, by name (what the config file holds for it).
 json SaveAll(const Module& m)
 {
-    json out = json::object();
+    json out = jc::new_object();
     for (const ctl::Setting* s : m.Settings())
         if (s->Persistent()) s->Save(out[s->Name()]);
     return out;
@@ -37,7 +38,7 @@ json SaveAll(const Module& m)
 void LoadAll(Module& m, const json& in)
 {
     for (ctl::Setting* s : m.Settings())
-        if (s->Persistent() && in.contains(s->Name())) s->Load(in[s->Name()]);
+        if (s->Persistent() && jc::contains(in, s->Name())) s->Load(in[s->Name()]);
 }
 
 } // namespace
@@ -73,7 +74,7 @@ TEST(Settings, SavedAndLoadedBack)
     EXPECT_FALSE(saved.contains("just text"));
 
     Sample b;
-    LoadAll(b, json::parse(saved.dump()));              // Through text, like the config file
+    LoadAll(b, jc::parse(jc::dump(saved)));              // Through text, like the config file
     EXPECT_FALSE(b.on.Get());
     EXPECT_FLOAT_EQ(b.speed, 7.5f);
     EXPECT_EQ(b.count.Get(), 3);

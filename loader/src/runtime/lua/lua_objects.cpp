@@ -212,6 +212,13 @@ namespace mirage::mods
 	int LuaMod::Controller(lua_State* L) { PushObject(L, Self(L).api_->player_controller()); return 1; }
 	int LuaMod::World(lua_State* L) { PushObject(L, Self(L).api_->world_info()); return 1; }
 	int LuaMod::Find(lua_State* L) { PushObject(L, Self(L).api_->object_find(luaL_checkstring(L, 1))); return 1; }
+	int LuaMod::PortalClass(lua_State* L)
+	{
+		const auto* api = Self(L).api_;
+		const char* name = luaL_checkstring(L, 1);
+		PushObject(L, MIRAGE_API_HAS(api, portal_class) ? api->portal_class(name) : nullptr);
+		return 1;
+	}
 
 	// mirage.load_class("classes/MirageBouncePad.uc") -> the class, compiled from UnrealScript and loaded by the engine
 	// (nil and the reason when it doesn't compile or load). Game thread.
@@ -242,7 +249,15 @@ namespace mirage::mods
 	{
 		LuaMod& self = Self(L);
 		luaL_checktype(L, 1, LUA_TTABLE);
-		nlohmann::json spec;
+		jc::json spec = jc::new_object();
+		const auto sorted = [&](const char* key) {	// The list's strings in order
+			std::vector<std::string> list;
+			for (const jc::json& v : jc::items(spec, key)) list.push_back(jc::as<std::string>(v));
+			std::sort(list.begin(), list.end());
+			jc::json out = jc::new_array();
+			for (std::string& v : list) jc::push(out, std::move(v));
+			spec[key] = std::move(out);
+		};
 		const auto field = [&](const char* key) -> std::string {
 			lua_getfield(L, 1, key);
 			std::string v = lua_isstring(L, -1) ? lua_tostring(L, -1) : "";
@@ -256,21 +271,21 @@ namespace mirage::mods
 		lua_pop(L, 1);
 		spec["extra"] = field("extra");
 		// vars: a list of declarations
-		spec["vars"] = nlohmann::json::array();
+		spec["vars"] = jc::new_array();
 		lua_getfield(L, 1, "vars");
 		if (lua_istable(L, -1))
 			for (lua_Integer i = 1; lua_rawgeti(L, -1, i) != LUA_TNIL; ++i) {
-				spec["vars"].push_back(lua_tostring(L, -1));
+				jc::push(spec["vars"], lua_tostring(L, -1));
 				lua_pop(L, 1);
 			}
 		lua_pop(L, 2);
 		// defaults: { Name = value } or a list of "Name=Value" lines
-		spec["defaults"] = nlohmann::json::array();
+		spec["defaults"] = jc::new_array();
 		bool keyed = false;		// { Name = value } (no order of its own) rather than a list of lines
 		lua_getfield(L, 1, "defaults");
 		if (lua_istable(L, -1) && lua_rawlen(L, -1) > 0) {		// A list of lines, in its order
 			for (lua_Integer i = 1; lua_rawgeti(L, -1, i) != LUA_TNIL; ++i) {
-				spec["defaults"].push_back(lua_isstring(L, -1) ? lua_tostring(L, -1) : "");
+				jc::push(spec["defaults"], lua_isstring(L, -1) ? lua_tostring(L, -1) : "");
 				lua_pop(L, 1);
 			}
 			lua_pop(L, 1);
@@ -283,21 +298,17 @@ namespace mirage::mods
 				else if (lua_type(L, -1) == LUA_TNUMBER) value = fmt::format("{}", lua_tonumber(L, -1));
 				else if (lua_isstring(L, -1)) value = lua_tostring(L, -1);
 				if (lua_type(L, -2) == LUA_TSTRING) {
-					spec["defaults"].push_back(std::string(lua_tostring(L, -2)) + "=" + value);
+					jc::push(spec["defaults"], std::string(lua_tostring(L, -2)) + "=" + value);
 					keyed = true;
 				}
-				else spec["defaults"].push_back(value);
+				else jc::push(spec["defaults"], value);
 				lua_pop(L, 1);
 			}
 		}
 		lua_pop(L, 1);
 		// pairs() has no fixed order: sorted, the same description gives the same source (and the same package and
 		// class after a hot reload)
-		if (keyed) {
-			std::vector<std::string> d = spec["defaults"].get<std::vector<std::string>>();
-			std::sort(d.begin(), d.end());
-			spec["defaults"] = d;
-		}
+		if (keyed) sorted("defaults");
 		// functions: { Name = fn } (an override) or { Name = { "declaration", fn } } (a new one)
 		struct Handler
 		{
@@ -305,7 +316,7 @@ namespace mirage::mods
 			int ref;
 		};
 		std::vector<Handler> handlers;
-		spec["functions"] = nlohmann::json::array();
+		spec["functions"] = jc::new_array();
 		lua_getfield(L, 1, "functions");
 		if (lua_istable(L, -1)) {
 			lua_pushnil(L);
@@ -316,11 +327,11 @@ namespace mirage::mods
 				}
 				const std::string name = lua_tostring(L, -2);
 				if (lua_isfunction(L, -1)) {
-					spec["functions"].push_back(name);
+					jc::push(spec["functions"], name);
 					lua_pushvalue(L, -1);
 				} else if (lua_istable(L, -1)) {
 					lua_rawgeti(L, -1, 1);
-					spec["functions"].push_back(lua_isstring(L, -1) ? lua_tostring(L, -1) : name);
+					jc::push(spec["functions"], lua_isstring(L, -1) ? lua_tostring(L, -1) : name);
 					lua_pop(L, 1);
 					lua_rawgeti(L, -1, 2);
 				} else {
@@ -332,14 +343,10 @@ namespace mirage::mods
 			}
 		}
 		lua_pop(L, 1);
-		{
-			std::vector<std::string> f = spec["functions"].get<std::vector<std::string>>();
-			std::sort(f.begin(), f.end());
-			spec["functions"] = f;
-		}
+		sorted("functions");
 
 		char error[2048]{};
-		MirageObject* cls = self.api_->class_define(self.mod_, spec.dump().c_str(), error, sizeof(error));
+		MirageObject* cls = self.api_->class_define(self.mod_, jc::dump(spec).c_str(), error, sizeof(error));
 		if (!cls) {
 			for (const Handler& h : handlers) luaL_unref(L, LUA_REGISTRYINDEX, h.ref);
 			return luaL_error(L, "mirage.define_class %s: %s", spec["name"].get<std::string>().c_str(), error);
@@ -548,6 +555,7 @@ namespace mirage::mods
 	// mirage: this file's functions (Bind puts every list in)
 	const LuaFunctions kFunctions(nullptr, {
 		{"pawn", LuaMod::Pawn}, {"controller", LuaMod::Controller}, {"world", LuaMod::World}, {"find", LuaMod::Find},
+		{"portal_class", LuaMod::PortalClass},
 		{"load_class", LuaMod::LoadClass}, {"define_class", LuaMod::DefineClass}, {"path", LuaMod::PathOf},
 		{"keep", LuaMod::KeepFn}, {"release", LuaMod::ReleaseFn}, {"layer_actor", LuaMod::LayerActor},
 		{"name", LuaMod::Name}, {"class", LuaMod::ClassName}, {"is_a", LuaMod::IsA}, {"all", LuaMod::All},

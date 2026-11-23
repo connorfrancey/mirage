@@ -50,6 +50,7 @@ namespace mirage::symbols
 
 	std::string_view BuiltIn() { return kBuiltIn; }
 
+	// TODO: Replace nlohmann/json with glaze
 	std::vector<Entry> Parse(std::string_view text, std::string* error)
 	{
 		std::vector<Entry> out;

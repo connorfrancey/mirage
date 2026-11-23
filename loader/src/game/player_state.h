@@ -1,5 +1,5 @@
 #pragma once
-#include <nlohmann/json_fwd.hpp>
+#include <glaze/json/generic_fwd.hpp>
 
 // Save states for the local player, like mmultiplayer's trainer: a snapshot of every plain value (bool, byte, int,
 // float, vector, rotator) of the pawn, its controller and each of the pawn's moves, put back on load. Object pointers,
@@ -28,8 +28,8 @@ namespace player_state
 
 	// The saved state as data, to keep or write to a file (null if nothing is saved), and back. Import replaces the
 	// saved state; Load still checks it fits this level and this player (classes and value layout) before using it.
-	nlohmann::json Export();
-	bool Import(const nlohmann::json& state);
+	glz::generic_i64 Export();
+	bool Import(const glz::generic_i64& state);
 	
 	// Puts the player back into plain walking: clears a death fall, a slide, a stuck animation and blocked input. What the
 	// trainer does before God/Fly take over from a "falling uncontrolled" state.
@@ -37,6 +37,6 @@ namespace player_state
 
 	// For mods (MirageApi player_state_*): the player now as data, and a state put back, without touching the slot
 	// above (the menu's own: the self-test's). Capture: null if there is no player or the layout is unknown.
-	nlohmann::json Capture();
-	bool Apply(const nlohmann::json& state);	// A Load of it; false: it doesn't fit (another level, no player, ...)
+	glz::generic_i64 Capture();
+	bool Apply(const glz::generic_i64& state);	// A Load of it; false: it doesn't fit (another level, no player, ...)
 }

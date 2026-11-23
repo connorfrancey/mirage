@@ -1,5 +1,7 @@
 #pragma once
+#include <optional>
 #include <string>
+#include <string_view>
 
 // Windows virtual-key helpers shared by the menu and the modules.
 //
@@ -34,4 +36,12 @@ namespace keys {
 
     std::string Name(int binding);  // "F5", "Ctrl+Shift+F5", "Mouse 4", ... ("None" for 0)
     bool Down(int binding);         // The key is held with the binding's modifiers (false for 0)
+
+    struct Chord {
+        std::string engineKey;      // Lowercase UE3 key name
+        int modifiers = 0;
+        int vk = 0;                 // Gamepad and wheel inputs have no Windows virtual key
+        bool operator==(const Chord&) const = default;
+    };
+    std::optional<Chord> ParseChord(std::string_view text);
 }

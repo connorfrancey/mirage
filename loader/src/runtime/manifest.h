@@ -49,6 +49,7 @@
 // Unknown keys are reported as warnings (a typo in a key would otherwise be silently ignored).
 
 #include "runtime/semver.h"
+#include "core/keys.h"
 
 #include <array>
 #include <filesystem>
@@ -73,9 +74,10 @@ namespace mirage::mods
 		double floatDefault = 0.0;
 		std::string stringDefault;
 		bool hasRange = false;
-		double min = 0.0, max = 0.0;
+		double min = 0.0, max = 0.0, step = 0.0;
 		std::vector<std::string> options;
 		std::array<float, 4> colorDefault{1.f, 1.f, 1.f, 1.f};	// Color: RGBA 0..1 ("#RRGGBB" or "#RRGGBBAA")
+		bool operator==(const SettingDecl&) const = default;
 	};
 	const char* SettingTypeName(SettingDecl::Type t);
 
@@ -83,7 +85,9 @@ namespace mirage::mods
 	// "LeftMouseButton"); the mod gets MIRAGE_EVENT_ACTION when the game gets that key (real or a TAS's)
 	struct ActionDecl
 	{
-		std::string name, key, description;
+		std::string name, key, description, label;
+		keys::Chord chord;
+		bool operator==(const ActionDecl&) const = default;
 	};
 
 	struct Dependency
@@ -107,6 +111,7 @@ namespace mirage::mods
 		std::vector<Dependency> required, optional, incompatible;
 		std::vector<SettingDecl> settings;	// In the order of the file
 		std::vector<ActionDecl> actions;	// In the order of the file
+		std::filesystem::path actionsFile, settingsFile;	// Relative to dir
 		std::filesystem::path dir;		// Load: the folder mod.toml is in
 	};
 

@@ -1,18 +1,38 @@
 #include "core/signature_cache.h"
 #include "core/memory_cache.h"
 
+#include "util/glz_compat.h"
+
 #include <Windows.h>
-#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <system_error>
 #include <vector>
 
 namespace sig
 {
+	namespace detail
+	{
+		// The file: which executable the offsets are for, and each pattern's offset by its key in hex
+		struct CacheImage
+		{
+			std::uint32_t timestamp = 0, size = 0, checksum = 0;
+		};
+		struct CacheFile
+		{
+			int format = 0;
+			CacheImage image;
+			std::map<std::string, std::uint32_t> signatures;
+		};
+	}
+	using detail::CacheFile;
+
 	namespace
 	{
 		constexpr int kFormat = 1;		// Bump when the key or the file layout changes: older files are then ignored
@@ -79,34 +99,30 @@ namespace sig
 	{
 		std::ifstream in(file_, std::ios::binary);
 		if (!in) return false;
-		try
+		const std::string text{std::istreambuf_iterator<char>(in), {}};
+		CacheFile f;
+		if (!jc::read(text, f))
 		{
-			const nlohmann::json j = nlohmann::json::parse(in);
-			if (j.value("format", 0) != kFormat) return false;
-			const auto& img = j.at("image");
-			const ImageId fileId{img.at("timestamp").get<std::uint32_t>(), img.at("size").get<std::uint32_t>(),
-								 img.at("checksum").get<std::uint32_t>()};
-			if (!(fileId == id_))
-			{
-				spdlog::info("Signature cache: {} is for another game executable, scanning again", file_.filename().string());
-				return false;
-			}
-			for (const auto& [key, offset] : j.at("signatures").items())
-			{
-				const std::uint64_t k = std::stoull(key, nullptr, 16);
-				const auto off = offset.get<std::uint32_t>();
-				if (off < size_) found_[k] = off;
-			}
-			loaded_ = found_.size();
-			spdlog::info("Signature cache: {} pattern(s) remembered from the last start", loaded_);
-			return true;
-		}
-		catch (const std::exception& e)
-		{
-			spdlog::warn("Signature cache: {} unreadable ({}), scanning again", file_.string(), e.what());
-			found_.clear();
+			spdlog::warn("Signature cache: {} unreadable, scanning again", file_.string());
 			return false;
 		}
+		if (f.format != kFormat) return false;
+		const ImageId fileId{f.image.timestamp, f.image.size, f.image.checksum};
+		if (!(fileId == id_))
+		{
+			spdlog::info("Signature cache: {} is for another game executable, scanning again", file_.filename().string());
+			return false;
+		}
+		for (const auto& [key, off] : f.signatures)
+		{
+			std::uint64_t k = 0;
+			const auto [end, err] = std::from_chars(key.data(), key.data() + key.size(), k, 16);
+			if (err != std::errc{} || end != key.data() + key.size()) continue;   // Not a key this version wrote
+			if (off < size_) found_[k] = off;
+		}
+		loaded_ = found_.size();
+		spdlog::info("Signature cache: {} pattern(s) remembered from the last start", loaded_);
+		return true;
 	}
 
 	void* Cache::Find(const char* pattern, const char* mask, std::size_t from, std::size_t to, Scanner scan)
@@ -159,21 +175,16 @@ namespace sig
 	{
 		std::lock_guard lock(mutex_);
 		if (!opt::kEnabled || !dirty_ || file_.empty()) return true;
-		nlohmann::json sigs = nlohmann::json::object();
+		CacheFile f{kFormat, {id_.timeDateStamp, id_.sizeOfImage, id_.checksum}, {}};
 		for (const auto& [key, offset] : found_)
-			if (offset) sigs[Hex(key)] = *offset;
-		const nlohmann::json j = {
-			{"format", kFormat},
-			{"image", {{"timestamp", id_.timeDateStamp}, {"size", id_.sizeOfImage}, {"checksum", id_.checksum}}},
-			{"signatures", sigs},
-		};
+			if (offset) f.signatures[Hex(key)] = *offset;
 
 		std::error_code ec;
 		std::filesystem::create_directories(file_.parent_path(), ec);
 		const std::filesystem::path tmp = file_.string() + ".tmp";
 		{
 			std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-			out << j.dump(1, '\t') << '\n';
+			out << jc::dump(f, true) << '\n';
 			if (!out)
 			{
 				spdlog::warn("Signature cache: could not write {}", tmp.string());
@@ -188,7 +199,7 @@ namespace sig
 			return false;
 		}
 		dirty_ = false;
-		spdlog::info("Signature cache: {} pattern(s) saved to {}", sigs.size(), file_.filename().string());
+		spdlog::info("Signature cache: {} pattern(s) saved to {}", f.signatures.size(), file_.filename().string());
 		return true;
 	}
 

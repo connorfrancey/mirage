@@ -13,13 +13,14 @@
 #include <fmt/format.h>
 #include <IconsFontAwesome6.h>
 #include <imgui.h>
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
 #include <map>
 #include <mutex>
+
 
 namespace
 {
@@ -53,21 +54,20 @@ namespace
 	std::vector<Row> ReadRows(Classes::AActor* pawn)
 	{
 		std::vector<Row> rows;
-		const auto sets = nlohmann::json::parse(mirage::anim::SetsJson(pawn), nullptr, false);
-		if (!sets.is_array()) return rows;
+		const jc::json sets = jc::parse(mirage::anim::SetsJson(pawn));
 		std::map<std::string, std::size_t> seen;		// set + sequence -> row
-		for (const auto& m : sets) {
-			const std::string mesh = m.value("mesh", std::string());
-			for (const auto& set : m["sets"]) {
-				const std::string setName = set.value("name", std::string());
-				for (const auto& q : set["sequences"]) {
-					const std::string name = q.value("name", std::string());
+		for (const jc::json& m : jc::items(sets)) {
+			const std::string mesh = jc::value(m, "mesh", std::string());
+			for (const jc::json& set : jc::items(m, "sets")) {
+				const std::string setName = jc::value(set, "name", std::string());
+				for (const jc::json& q : jc::items(set, "sequences")) {
+					const std::string name = jc::value(q, "name", std::string());
 					const auto [it, added] = seen.try_emplace(setName + "." + name, rows.size());
 					if (!added) {
 						rows[it->second].meshes += ", " + mesh;
 						continue;
 					}
-					rows.push_back({name, setName, mesh, q.value("length", 0.f), q.value("frames", 0)});
+					rows.push_back({name, setName, mesh, jc::value(q, "length", 0.f), jc::value(q, "frames", 0)});
 				}
 			}
 		}

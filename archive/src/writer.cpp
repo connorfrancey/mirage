@@ -162,8 +162,8 @@ namespace mirage::mpaf
 	void ArchiveWriter::AddDirectory(std::string_view path)
 	{
 		CheckSlot(path, false, 0);
-		if (path == ManifestPath)
-			Fail(ErrorCode::Path, "manifest.yaml must be a file");
+		if (IsManifestPath(path))
+			Fail(ErrorCode::Path, "MPAF manifest must be a file");
 		Store(path, std::monostate{}, false);
 	}
 
@@ -196,8 +196,11 @@ namespace mirage::mpaf
 
 	void ArchiveWriter::WriteTo(const std::function<void(Bytes)>& sink) const
 	{
-		if (!sources_.contains(ManifestPath))
-			Fail(ErrorCode::Missing, "MPAF requires manifest.yaml");
+		const bool toml = sources_.contains(TomlManifestPath), legacy = sources_.contains(ManifestPath);
+		if (!toml && !legacy)
+			Fail(ErrorCode::Missing, "MPAF requires a manifest");
+		if (toml && legacy)
+			Fail(ErrorCode::Duplicate, "MPAF contains two manifests");
 
 		struct PlannedEntry
 		{
@@ -224,7 +227,7 @@ namespace mirage::mpaf
 				entry.dataSize = GetFileSize(*file);
 			else
 				entry.type = EntryType::Directory;
-			if (path == ManifestPath)
+			if (IsManifestPath(path))
 				entry.type = EntryType::Manifest;
 			const auto next = std::next(it);
 			if (entry.type != EntryType::Directory && next != sources_.end() && next->first.starts_with(path))

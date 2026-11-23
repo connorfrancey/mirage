@@ -1,0 +1,6 @@
+clear = "F7"
+
+[deploy]
+key = "F6"
+label = "Deploy Field Lab"
+description = "Deploy or move the Field Lab"

@@ -9,7 +9,7 @@ add_executable(mirage_bench
 target_include_directories(mirage_bench PRIVATE ${CMAKE_SOURCE_DIR}/loader/src)
 target_compile_definitions(mirage_bench PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(mirage_bench PRIVATE benchmark::benchmark nlohmann_json::nlohmann_json magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash)
+target_link_libraries(mirage_bench PRIVATE benchmark::benchmark magic_enum::magic_enum unordered_dense::unordered_dense rapidhash::rapidhash)
 if(TARGET mirage::mpaf)
   target_sources(mirage_bench PRIVATE ${PROJECT_SOURCE_DIR}/archive/tests/bench_mpaf.cpp)
   target_link_libraries(mirage_bench PRIVATE mirage::mpaf)

@@ -8,7 +8,7 @@
 //   Full     every allocation is recorded (exact, slow: a stack capture each). For a leak check of one operation.
 //   Off      nothing new is recorded (what is recorded stays until freed).
 //
-// Leak checks:  const auto gen = Generation();  ...work...  Report(gen) lists what the work left behind, by stack.
+// Leak checks:  const auto gen = generation();  ...work...  Report(gen) lists what the work left behind, by stack.
 // Leak suspects: Report() groups the live blocks by stack, with the age of the oldest; the manager watches each
 // stack's live bytes over time (a stack that only grows is a leak suspect).
 //

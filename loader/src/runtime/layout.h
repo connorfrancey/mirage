@@ -87,6 +87,7 @@ namespace mirage::layout
 	const std::vector<std::string>& SdkPackages();
 
 	// Layouts as JSON and back (FromJson: empty with `error` set when the text isn't valid)
-	std::string ToJson(const Layouts& layouts);
+	using EnumValues = std::map<std::string, std::vector<std::string>>;
+	std::string ToJson(const Layouts& layouts, const EnumValues& enums = {});
 	Layouts FromJson(const std::string& text, std::string* error = nullptr);
 }

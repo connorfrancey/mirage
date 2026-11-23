@@ -5,7 +5,7 @@
 #include "runtime/kismet.h"
 #include "sdk/SDK.hpp"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 
 #include <chrono>
 #include <cstring>
@@ -112,18 +112,33 @@ namespace mirage::kismet_trace
 		if (!on) m.hits.clear();
 	}
 
+	namespace detail
+	{
+		struct TraceEntry
+		{
+			std::uint64_t tick;
+			std::string op, cls;
+			int times;
+			struct glaze
+			{
+				using T = TraceEntry;
+				static constexpr auto value = glz::object("tick", &T::tick, "op", &T::op, "class", &T::cls, "times", &T::times);
+			};
+		};
+	}
+
 	std::uint32_t Read(const std::string& modId, char* buffer, std::uint32_t capacity)
 	{
 		ModTrace& m = g_mods[modId];
-		nlohmann::json out = nlohmann::json::array();
+		std::vector<detail::TraceEntry> out;
 		for (Hit& h : m.hits) {
 			if (h.path.empty() && game::AliveAt(h.op, h.slot)) {
 				h.path = h.op->GetPathName();
 				h.cls = h.op->Class ? h.op->Class->GetName() : std::string();
 			}
-			out.push_back({{"tick", h.tick}, {"op", h.path}, {"class", h.cls}, {"times", h.times}});
+			out.push_back({h.tick, h.path, h.cls, h.times});
 		}
-		const std::string text = out.dump();
+		const std::string text = jc::dump(out);
 		if (buffer && capacity) {
 			const std::size_t n = text.size() < capacity - 1 ? text.size() : capacity - 1;
 			std::memcpy(buffer, text.data(), n);

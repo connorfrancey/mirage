@@ -6,7 +6,4 @@ name = "Double Jump (test)"
 version = "1.0.0"
 description = "Self-test mod (tests/mods): a double jump from an input action and a move of its own"
 mirage = "^0.1"
-
-[actions.double_jump]
-key = "SpaceBar"
-description = "Jump again in the air"
+actions = "config/actions.toml"

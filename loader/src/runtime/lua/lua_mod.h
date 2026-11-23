@@ -4,13 +4,14 @@
 // holds one area of the table (modules, drawing, objects, Kismet, the world, events, script patching).
 
 #include "runtime/mod_lua.h"
+#include "runtime/lua/lua_functions.h"
 #include "runtime/lua_vec.h"
 #include "runtime/lua_vm.h"
 #include "runtime/mod_lua_ui.h"
 #include <lauxlib.h>
 #include <lua.h>
 #include <fmt/format.h>
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 #include <algorithm>
 #include <cstring>
 #include <fstream>
@@ -63,48 +64,37 @@ namespace mirage::mods
 		};
 		enum Hook { kEnable, kDisable, kTick, kRender, kTrigger, kPanel, kHooks };
 		inline constexpr const char* kHookNames[kHooks] = {"on_enable", "on_disable", "on_tick", "on_render", "on_trigger", "on_panel"};
+
 		// A JSON value as Lua values: objects as tables by key, arrays as sequences (Kismet and transitions read JSON)
-		inline void PushJson(lua_State* L, const nlohmann::json& j)
+		inline void PushJson(lua_State* L, const jc::json& j)
 		{
-			switch (j.type()) {
-				case nlohmann::json::value_t::object:
-					lua_createtable(L, 0, static_cast<int>(j.size()));
-					for (auto it = j.begin(); it != j.end(); ++it) {
-						PushJson(L, it.value());
-						lua_setfield(L, -2, it.key().c_str());
-					}
-					break;
-				case nlohmann::json::value_t::array: {
-					lua_createtable(L, static_cast<int>(j.size()), 0);
-					lua_Integer i = 1;
-					for (const auto& v : j) {
-						PushJson(L, v);
-						lua_rawseti(L, -2, i++);
-					}
-					break;
+			if (j.is_object()) {
+				lua_createtable(L, 0, static_cast<int>(j.size()));
+				for (const auto& [key, v] : j.get_object()) {
+					PushJson(L, v);
+					lua_setfield(L, -2, key.c_str());
 				}
-				case nlohmann::json::value_t::string: lua_pushstring(L, j.get_ref<const std::string&>().c_str()); break;
-				case nlohmann::json::value_t::boolean: lua_pushboolean(L, j.get<bool>()); break;
-				case nlohmann::json::value_t::number_integer:
-				case nlohmann::json::value_t::number_unsigned: lua_pushinteger(L, j.get<lua_Integer>()); break;
-				case nlohmann::json::value_t::number_float: lua_pushnumber(L, j.get<double>()); break;
-				default: lua_pushnil(L);
+			} else if (j.is_array()) {
+				lua_createtable(L, static_cast<int>(j.size()), 0);
+				lua_Integer i = 1;
+				for (const auto& v : j.get_array()) {
+					PushJson(L, v);
+					lua_rawseti(L, -2, i++);
+				}
+			} else if (const auto* str = j.get_if<std::string>()) {
+				lua_pushstring(L, str->c_str());
+			} else if (const auto* b = j.get_if<bool>()) {
+				lua_pushboolean(L, *b);
+			} else if (const auto* n = j.get_if<std::int64_t>()) {
+				lua_pushinteger(L, static_cast<lua_Integer>(*n));
+			} else if (const auto* d = j.get_if<double>()) {
+				lua_pushnumber(L, *d);
+			} else {
+				lua_pushnil(L);
 			}
 		}
 	}
 	using namespace lua_detail;
-
-	// A list of functions of the `mirage` table, or of one of its tables (`table`: "draw", "config", ...; nullptr: `mirage`
-	// itself). Each area's file holds its own, at the end, and Bind puts every list in. Adding a function to the API: write
-	// it in its area's file (a static member of LuaMod declared below, or a free function there that finds its mod with
-	// LuaMod::Self(L)) and add {"name", Function} to that file's list.
-	struct LuaFunctions
-	{
-		LuaFunctions(const char* table, std::initializer_list<luaL_Reg> fns);
-		const char* table;
-		std::vector<luaL_Reg> fns;		// Ending with {nullptr, nullptr}, as luaL_setfuncs reads it
-		static std::vector<const LuaFunctions*>& All();
-	};
 
 	class LuaMod
 	{
@@ -261,6 +251,7 @@ namespace mirage::mods
 		static int Controller(lua_State* L);
 		static int World(lua_State* L);
 		static int Find(lua_State* L);
+		static int PortalClass(lua_State* L);
 		static int LoadClass(lua_State* L);
 		static int DefineClass(lua_State* L);
 		static int PathOf(lua_State* L);
@@ -291,6 +282,7 @@ namespace mirage::mods
 		static int ForceFn(lua_State* L);
 		static int SpawnPropFn(lua_State* L);
 		static int SpawnFn(lua_State* L);
+		static int ModelFn(lua_State* L);
 		static int SoundPlayFn(lua_State* L);
 		static int SoundStopFn(lua_State* L);
 		static int SoundPlayingFn(lua_State* L);

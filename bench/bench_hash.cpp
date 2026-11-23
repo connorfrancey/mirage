@@ -1,4 +1,4 @@
-// FNV-1a (the byte loop the menu used for every hash) against XXH3 (core/hash.h), on the sizes the menu hashes: names
+// FNV-1a (the byte loop the menu used for every hash) against rapidhash (core/hash.h), on the sizes the menu hashes: names
 // and keys (16 B), records (256 B), files read by the resource cache (64 KB, 4 MB).
 #include "core/hash.h"
 
@@ -31,7 +31,7 @@ void BM_Fnv1a(benchmark::State& state)
     state.SetBytesProcessed(static_cast<std::int64_t>(state.iterations()) * state.range(0));
 }
 
-void BM_Xxh3(benchmark::State& state)
+void BM_Rapidhash(benchmark::State& state)
 {
     const auto data = Data(static_cast<std::size_t>(state.range(0)));
     for (auto _ : state) benchmark::DoNotOptimize(hash::Bytes(data.data(), data.size()));
@@ -41,4 +41,4 @@ void BM_Xxh3(benchmark::State& state)
 } // namespace
 
 BENCHMARK(BM_Fnv1a)->Arg(16)->Arg(256)->Arg(64 << 10)->Arg(4 << 20);
-BENCHMARK(BM_Xxh3)->Arg(16)->Arg(256)->Arg(64 << 10)->Arg(4 << 20);
+BENCHMARK(BM_Rapidhash)->Arg(16)->Arg(256)->Arg(64 << 10)->Arg(4 << 20);

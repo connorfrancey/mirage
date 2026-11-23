@@ -25,7 +25,7 @@
 //     };
 //     MEM_MODULE(Crosshair)
 //
-// `tab` is the menu column it is listed in (tabs are created on demand), `order` its position there: lower first, then
+// `tab` is its menu category (created on demand), `order` its position there: lower first, then
 // by name. The rest (default key, on by default, ...) are the public fields below, set in the constructor.
 class Module 
 {
@@ -103,7 +103,6 @@ namespace modules
 	{
 		std::string name;
 		int order = 100;
-		float width = 200.f;
 		std::vector<Module*> modules;		// Sorted
 	};
 	
@@ -111,10 +110,10 @@ namespace modules
 	using Factory = std::unique_ptr<Module> (*)();
 	void Register(Factory factory);
 	
-	// Declares a menu column: its position and width (features/tabs.cpp). Tabs only modules mention go last.
+	// Declares a category's position (features/tabs.cpp). Custom categories follow in name order.
 	struct TabRegistrar
 	{
-		TabRegistrar(std::string name, int order, float width);
+		TabRegistrar(std::string name, int order);
 	};
 
 	// ---- Lifetime ------------------------------------------------------------------------------------------------------------------

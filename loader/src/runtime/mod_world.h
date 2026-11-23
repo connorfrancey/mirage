@@ -10,5 +10,6 @@ namespace mirage::mods::world
 	void MIRAGE_CALL DrawStats(MirageWorldStats* out);
 	int32_t MIRAGE_CALL WorldToScreen(float x, float y, float z, float* sx, float* sy);
 	int32_t MIRAGE_CALL CameraGet(MirageCamera* out);
+	void MIRAGE_CALL DrawLines(MirageMod* mod, const MirageWorldVertex* lines, uint32_t count);
 	void Unloading(MirageMod* mod);		// A mod unloads: its drawing goes with it
 }

@@ -27,6 +27,7 @@ import os
 import re
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import time
@@ -120,6 +121,48 @@ def install(game_dir: Path, dll: Path, loader: Path) -> None:
     if pdb.exists():
         shutil.copy2(pdb, menu_dir / "Mirage.pdb")
     install_dotnet(dll.parent, menu_dir)
+    make_large_address_aware(game_dir / "MirrorsEdge.exe")
+
+
+EXE_BACKUP = "MirrorsEdge.exe.mirage-backup"
+
+
+def pe_checksum(data: bytes, checksum_at: int) -> int:
+    """The PE header checksum, like loader/src/util/pe_laa.h (the field itself counted as zero)."""
+    total = 0
+    for i in range(0, len(data) - 1, 2):
+        if i in (checksum_at, checksum_at + 2):
+            continue
+        total += data[i] | data[i + 1] << 8
+        total = (total & 0xFFFF) + (total >> 16)
+    if len(data) % 2:
+        total += data[-1]
+    total = (total & 0xFFFF) + (total >> 16)
+    total = (total & 0xFFFF) + (total >> 16)
+    return (total + len(data)) & 0xFFFFFFFF
+
+
+def make_large_address_aware(exe: Path) -> None:
+    """The installer's 4GB patch (installer/src/install.cpp): the game tested with the address space players get. The
+    original is kept as MirrorsEdge.exe.mirage-backup, which the installer's uninstall puts back."""
+    data = bytearray(exe.read_bytes())
+    if data[:2] != b"MZ":
+        return
+    nt = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[nt:nt + 4] != b"PE\0\0":
+        return
+    flags = struct.unpack_from("<H", data, nt + 22)[0]
+    if flags & 0x20:
+        return
+    backup = exe.with_name(EXE_BACKUP)
+    if not backup.exists():
+        shutil.copy2(exe, backup)
+    struct.pack_into("<H", data, nt + 22, flags | 0x20)
+    checksum_at = nt + 24 + 64
+    struct.pack_into("<I", data, checksum_at, pe_checksum(bytes(data), checksum_at))
+    tmp = exe.with_name(exe.name + ".mirage-tmp")
+    tmp.write_bytes(data)
+    tmp.replace(exe)
 
 
 def install_dotnet(build_dir: Path, menu_dir: Path) -> None:

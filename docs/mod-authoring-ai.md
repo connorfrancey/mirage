@@ -263,6 +263,70 @@ uv run mirage mod test session-speed
 
 For a mod that also spawns objects, installs hooks, registers callbacks, or modifies reflected properties, track the ownership of each resource and release or restore it on disable and unload. Use a reversible transaction where the existing binding supports it. The Field Lab example shows a session teardown with hook removal and `mirage.revert`. Preserve teardown on partial initialization failures as well as normal disable.
 
+## Declare actions and settings
+
+Use separate TOML files when a mod has more than a few declarations. All paths are relative to the mod folder.
+Mod IDs can use dot-separated namespaces. The installed folder name must match the ID.
+
+```toml
+id = "cryptigo.field-lab"
+name = "Mirage Field Lab"
+version = "1.0.0"
+mirage = ">=0.1.0"
+hot_reload = true
+actions = "config/actions.toml"
+settings = "config/settings.toml"
+
+[entrypoints]
+lua = "scripts/main.lua"
+```
+
+In `config/actions.toml`, use an engine key name or a keyboard chord.
+
+```toml
+deploy = "F6"
+clear = "F7"
+
+[scanner]
+key = "Ctrl+F6"
+label = "Toggle Scanner"
+description = "Enable or disable the scanner"
+```
+
+In `config/settings.toml`, a scalar or the `default` field determines the type. `options` infers an enum.
+Use `type = "keybind"` for a keyboard or mouse binding. A numeric setting with a range displays a slider.
+
+```toml
+hud = true
+
+[volume]
+default = 0.5
+range = [0.0, 1.0]
+step = 0.05
+
+[scanner_mode]
+default = "normal"
+options = ["normal", "advanced", "experimental"]
+
+[scanner_key]
+type = "keybind"
+default = "Ctrl+F7"
+```
+
+For inline declarations, put compact actions in `[actions]`, expanded actions in `[actions.<id>]`, scalar settings
+in `[settings]`, and expanded settings in `[settings.<id>]`. Existing `choice`, `key`, `color`, `min`, and `max`
+declarations still work. The legacy top-level `entry`, `lua`, and `dotnet` fields remain supported. The matching
+`[entrypoints]` names are `native`, `lua`, and `dotnet`.
+
+With hot reload enabled, valid edits to external action declarations take effect without restarting the code.
+Settings-only edits to defaults keep the existing controls and user-changed values. Restart after adding or removing
+settings, changing their metadata, or editing their defaults alongside the mod code. Invalid edits leave the active
+declarations in use.
+
+Run `uv run mirage mod package <folder> --format miragemod` to build an MPAF archive with the TOML manifest and
+its referenced declaration files. If the packer is absent, build it with `uv run mirage build -t mirage_pack`.
+The package command still defaults to ZIP.
+
 ## Verification and handoff
 
 | Check | What it covers |

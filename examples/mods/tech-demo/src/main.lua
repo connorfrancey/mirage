@@ -9,6 +9,15 @@ local radius = 75
 local model = "models/Probe.obj"
 local instrumentClass = "classes/MirageFieldInstrument.uc"
 local launchSpeed, volume, showHud
+
+mirage.test("Field Lab declaration files supply its controls", function()
+    if not launchSpeed or not volume or not showHud then
+        return false, "config/settings.toml did not register all three controls"
+    end
+    if type(launchSpeed:get()) ~= "number" or type(volume:get()) ~= "number" or type(showHud:get()) ~= "boolean" then
+        return false, "Field Lab controls have unexpected types"
+    end
+end)
 local request, run, module
 local shader, sound, animatedPawn
 local phase, flash = "ready", 0

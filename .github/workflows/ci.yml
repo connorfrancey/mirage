@@ -1,0 +1,61 @@
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Windows x86 (${{ matrix.config }})
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [debug, release]
+
+    env:
+      CPM_SOURCE_CACHE: ${{ github.workspace }}/.cpm-cache
+      PYTHONUTF8: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - uses: lukka/get-cmake@latest
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CPM_SOURCE_CACHE }}
+          key: cpm-${{ runner.os }}-${{ hashFiles('cmake/Libraries.cmake', 'cmake/CPM.cmake') }}
+          restore-keys: |
+            cpm-${{ runner.os }}-
+
+      - name: Verify toolchain
+        run: uv run mirage info
+
+      - name: Configure
+        run: >
+          uv run mirage configure
+          -c ${{ matrix.config }}
+          -D MIRAGE_BUILD_TESTS=ON
+
+      - name: Build
+        run: uv run mirage build -c ${{ matrix.config }}
+
+      - name: Run unit tests
+        run: uv run mirage test -c ${{ matrix.config }} --no-build
