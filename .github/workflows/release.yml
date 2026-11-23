@@ -52,8 +52,8 @@ jobs:
         run: uv run mirage info
 
       - name: Configure
-        # No Doxygen on the runner: leave out the SDK docs target. Tests and installer are off by default.
-        run: uv run mirage configure -c release -D MIRAGE_BUILD_TESTS=ON -D MIRAGE_BUILD_INSTALLER=ON
+        # package --no-build requires both the installer and the launcher.
+        run: uv run mirage configure -c release -D MIRAGE_BUILD_TESTS=ON -D MIRAGE_BUILD_INSTALLER=ON -D MIRAGE_BUILD_LAUNCHER=ON
 
       - name: Build
         run: uv run mirage build -c release
