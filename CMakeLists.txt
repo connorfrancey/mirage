@@ -10,7 +10,7 @@ project(Mirage
         DESCRIPTION "Mirror's Edge Runtime and Gameplay Extensions (MIRAGE)"
         LANGUAGES ${_mirage_languages})
 
-set(MIRAGE_VERSION "0.1.0-dev")   # Shown by the installer, stamped into the loader
+set(MIRAGE_VERSION "0.1.0-alpha.1")   # Shown by the installer, stamped into the loader
 
 if(MIRAGE_BUILD_DOCS OR MIRAGE_DOCS_ONLY)
   include(cmake/Doxygen.cmake)
