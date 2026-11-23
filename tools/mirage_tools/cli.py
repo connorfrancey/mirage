@@ -1578,6 +1578,8 @@ def _third_party_notices(config: str) -> str:
 
     for name, what, url, package, files in THIRD_PARTY:
         src = dirs.get(package.lower())
+        if src is None and package == "imgui_filebrowser":
+            continue  # CMake fetches the file browser only when the TAS feature is enabled.
         if src is None:
             raise FileNotFoundError(f"{package} isn't in {b.build_dir(config).name}/CMakeCache.txt (build it first)")
         found = next((src / f for f in files if (src / f).is_file()), None)

@@ -17,6 +17,7 @@ uv run mirage install-game
 - A workstation can select a local UnrealLib via `-D CPM_UnrealLib_SOURCE=...`. Inspect the active cache first. Local `Libraries.cmake` or `Versions.cmake` edits can belong to the user. [Toolchain](../tools/mirage_tools/toolchain.py), [dependency pins](../cmake/Versions.cmake)
 - On a failed build, inspect `mirage-build.log` or `mirage-configure.log` in that preset's directory. Ninja setup errors appear in those logs even when the CLI counts zero compiler errors. [Build driver](../tools/mirage_tools/build.py)
 - Configure Release with both `MIRAGE_BUILD_INSTALLER=ON` and `MIRAGE_BUILD_LAUNCHER=ON` before running `uv run mirage package --no-build`. The bundle includes the installer and a launcher for trying Mirage without installing it. [Release workflow](../.github/workflows/release.yml)
+- License notice generation resolves dependency source paths from the Release CMake cache. The optional TAS file browser can be absent when its feature is disabled. [Packaging command](../tools/mirage_tools/cli.py)
 
 Use [testing](testing.md) for permission and verification rules. Use [tooling](tooling.md) for generation and docs commands.
 
