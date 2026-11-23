@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -214,7 +215,8 @@ TEST(Textures, RewritesAMapPackage)
 	Package original = Package::open(file);
 	std::set<std::string> full;
 	for (std::size_t i = 0; i < original.exports().size(); ++i)
-		if (const std::string cls = original.class_name(ObjectIndex::from_export(i)); Assets::is_texture2d_class(cls) || cls == "StaticMesh")
+		if (const std::string cls = original.class_name(ObjectIndex::from_export(i));
+			Assets::is_texture2d_class(cls) || cls == "StaticMesh" || cls == "SkeletalMesh" || cls == "SoundNodeWave")
 			full.insert(original.object_path(ObjectIndex::from_export(i)));
 	const auto scanned = ScanReplaceable(file);
 	EXPECT_EQ(scanned.size(), full.size());
@@ -267,4 +269,60 @@ TEST(Textures, RewritesAMapPackage)
 	const Assets::Image back = Assets::decode_mip(added, tex, 0);
 	EXPECT_EQ(back.width, 64u);
 	EXPECT_LE(MaxError(img, back, false), 40);
+}
+
+TEST(SoundOverlays, ReplacesCookedWave)
+{
+	const fs::path cooked = FindCookedPC();
+	if (cooked.empty()) GTEST_SKIP() << "Mirror's Edge not found";
+	const std::string target = "a_ambience_construction.hammering_raw.a_ambience_construction_hammering_02";
+	const fs::path file = cooked / "Maps/SP01/Edge_Pt1_Aud.me1";
+	ASSERT_TRUE(fs::is_regular_file(file)) << file;
+	const auto scanned = ScanReplaceable(file);
+	ASSERT_NE(std::find(scanned.begin(), scanned.end(), target), scanned.end());
+
+	// A 125 ms mono tone generated at 24 kHz with FFmpeg's sine source and Vorbis encoder.
+	const fs::path ogg = fs::path(__FILE__).parent_path() / "mods/sound-lua/sounds/overlay-tone.ogg";
+	const auto overlay = BuildOverlay(file, {{target, ogg}});
+	ASSERT_TRUE(overlay.problems.empty()) << overlay.problems.front();
+	ASSERT_EQ(overlay.replaced, std::vector<std::string>{target});
+
+	const Package original = Package::open(file);
+	Package rewritten;
+	rewritten.load_from_memory(overlay.bytes, original.name());
+	ASSERT_EQ(rewritten.exports().size(), original.exports().size());
+	Linker linker;
+	linker.add_search_path(cooked);
+	const Package& added = linker.add(std::move(rewritten));
+	const auto leaf = target.substr(target.rfind('.') + 1);
+	std::optional<Assets::SoundWave> wave;
+	for (std::size_t i = 0; i < added.exports().size(); ++i) {
+		const auto index = ObjectIndex::from_export(i);
+		if (added.class_name(index) == "SoundNodeWave" && NormalizePath(added.object_name(index)) == leaf) {
+			wave = Assets::read_sound_wave(linker, {&added, index});
+		} else {
+			const auto before = original.export_data(i), after = added.export_data(i);
+			EXPECT_TRUE(std::equal(before.begin(), before.end(), after.begin(), after.end())) << "export " << i;
+		}
+	}
+	ASSERT_TRUE(wave);
+	EXPECT_EQ(wave->channels, 1);
+	EXPECT_EQ(wave->sample_rate, 24000);
+	EXPECT_FLOAT_EQ(wave->duration, 0.125f);
+	EXPECT_FALSE(wave->raw_data.has_payload());
+	EXPECT_TRUE(wave->compressed_pc.is_inline());
+	EXPECT_FALSE(wave->compressed_pc.offset_mismatch());
+	const auto extracted = Assets::extract_sound(added, *wave);
+	ASSERT_TRUE(extracted);
+	EXPECT_EQ(extracted->container, Assets::AudioContainer::Ogg);
+	std::ifstream source(ogg, std::ios::binary);
+	const std::vector<char> expected((std::istreambuf_iterator<char>(source)), {});
+	EXPECT_TRUE(std::equal(extracted->bytes.begin(), extracted->bytes.end(), expected.begin(), expected.end(),
+						   [](std::byte a, char b) { return std::to_integer<char>(a) == b; }));
+
+	const auto invalid = BuildOverlay(file, {{target, ogg.parent_path() / "tone.wav"}});
+	EXPECT_TRUE(invalid.replaced.empty());
+	EXPECT_TRUE(invalid.bytes.empty());
+	ASSERT_EQ(invalid.problems.size(), 1u);
+	EXPECT_NE(invalid.problems.front().find(".ogg"), std::string::npos);
 }

@@ -79,22 +79,22 @@ namespace mirage::textures
 	// A DDS file's surfaces (throws std::runtime_error for anything else).
 	Encoded ParseDds(const std::vector<std::byte>& file);
 
-	// The paths of the exports a mod can replace, Texture2D (and subclasses), StaticMesh and SkeletalMesh, of a package, read from
-	// its header only (the chunks that hold the tables, not the whole file), lowercase: "b_c_01.facade.t_x". A copy
+	// The lowercase paths of replaceable textures, meshes and SoundNodeWave exports from the package tables. A copy
 	// keeps its original path; an object of the package itself gets the package's name in front
 	// ("edge_p.lightmaps.lm_1").
 	std::vector<std::string> ScanReplaceable(const std::filesystem::path& package);
 
-	// The object path a mod names a texture or mesh by, lowercase (see ScanReplaceable).
+	// The lowercase object path a mod names an asset by.
 	std::string NormalizePath(std::string path);
 
 	// A model file (.glb, .gltf, .fbx, .obj): a mesh's replacement, read from its converted <file>.mmesh
 	bool IsModelFile(const std::filesystem::path& file);
+	bool IsSoundFile(const std::filesystem::path& file);
 
 	struct Replacement
 	{
 		std::string path;					// Lowercase object path (NormalizePath)
-		std::filesystem::path file;			// The mod's image, or its model (IsModelFile)
+		std::filesystem::path file;			// The mod's image, model or Ogg Vorbis file
 	};
 	struct Overlay
 	{
@@ -103,12 +103,12 @@ namespace mirage::textures
 		std::vector<std::string> problems;	// Replacements that couldn't be used, and why
 	};
 	// `package` with every replacement it holds a copy of rewritten (textures: NeverStream, all mips inline, sizes and
-	// format from the image; meshes: the model, see above). Throws std::runtime_error if the package itself can't be read or written.
+	// format from the image; meshes: the converted model; sound waves: the Ogg Vorbis stream and its metadata).
 	// `compress`: LZO like the original (slow: seconds per map), else uncompressed (the engine reads both; the game's
 	// own storage packages are uncompressed).
 	/// @brief Build an in-memory package overlay with matching exports replaced.
 	/// @param package Cooked package to read. The file remains untouched.
-	/// @param replacements Requested textures or meshes.
+	/// @param replacements Requested textures, meshes or sound waves.
 	/// @param compress Write LZO-compressed package data when true.
 	/// @return Owned package bytes and diagnostics for replacements that failed.
 	/// @throws std::runtime_error When the package cannot be read or serialized.

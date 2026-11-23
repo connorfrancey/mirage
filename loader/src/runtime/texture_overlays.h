@@ -1,18 +1,18 @@
 #pragma once
-// Texture replacement, in the game (Mirage, step 7): mods' replacements turned on and off, and the rewritten packages
+// Asset replacement in the game: mods' replacements turned on and off, and the rewritten packages
 // that carry them (runtime/texture_files.h) built, cached and opened in place of the originals (runtime/file_redirect.h).
 //
-//   1. The index: which packages hold a copy of which texture, read from every package header under CookedPC once and
+//   1. The index maps asset paths to each package holding a copy. It reads each package header under CookedPC and is
 //      kept in <menu>\cache\textures\index.txt (only packages whose size or time changed are read again).
-//   2. Per package that holds a replaced texture, a rewritten copy in <menu>\cache\textures\overlays, named by a hash
-//      of the original and of the images. It is made the first time the game opens that package (in the opening
+//   2. For each affected package, a rewritten copy in <menu>\cache\textures\overlays, named by a hash
+//      of the original and of the replacements. It is made the first time the game opens that package (in the opening
 //      thread: a fraction of a second for a map, uncompressed so it is quick) and reused until one of them changes.
 //      Only the packages the game loads get a copy: a common texture is in about a hundred.
-//   3. The game's open of that package opens the copy: the replacement shows from the next level load on. Turned off,
-//      the redirect goes and the next load is the original again.
+//   3. Whenever the game opens a package for the first time, it uses the active overlay. Once opened, the package
+//      keeps its copy for the session.
 //
 // The index is kept up to date on a background thread; Activate / Deactivate only record what is wanted. Several mods
-// replacing the same texture: the one activated last wins.
+// replacing the same asset are applied in activation order. The last one wins.
 
 #include "runtime/texture_files.h"
 

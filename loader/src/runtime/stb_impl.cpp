@@ -1,4 +1,4 @@
-// The stb implementations used by texture replacement (runtime/texture_files.cpp): image decoding and DXT encoding.
+// The stb implementations used by package overlays.
 // Their own code: warnings off.
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
@@ -14,6 +14,10 @@
 
 #define STB_DXT_IMPLEMENTATION
 #include <stb_dxt.h>
+
+#define STB_VORBIS_NO_STDIO
+#define STB_VORBIS_NO_PUSHDATA_API
+#include <stb_vorbis.c>
 
 #if defined(_MSC_VER)
 #pragma warning(pop)

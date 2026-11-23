@@ -4,6 +4,7 @@
 
 #include <UnrealLib/Assets/BulkData.hpp>
 #include <UnrealLib/Assets/SkeletalMesh.hpp>
+#include <UnrealLib/Assets/Sound.hpp>
 #include <UnrealLib/Assets/StaticMesh.hpp>
 #include <UnrealLib/Core/Error.hpp>
 #include <UnrealLib/Linker/Linker.hpp>
@@ -20,6 +21,10 @@
 
 #include <stb_dxt.h>
 #include <stb_image.h>
+#define STB_VORBIS_HEADER_ONLY
+#define STB_VORBIS_NO_STDIO
+#define STB_VORBIS_NO_PUSHDATA_API
+#include <stb_vorbis.c>
 
 #include <algorithm>
 #include <cctype>
@@ -27,6 +32,8 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -170,6 +177,49 @@ namespace mirage::textures
 			if (!p) p = &AddProperty(props, model, name, PropertyType::Bool, "BoolProperty", 0);
 			p->value.value = value;
 			if (p->tag) p->tag->bool_value = value;
+		}
+
+		struct Sound
+		{
+			std::vector<std::byte> ogg;
+			std::int32_t channels;
+			std::int32_t rate;
+			float duration;
+		};
+
+		Sound ReadSound(const fs::path& file)
+		{
+			constexpr std::uint64_t maxBytes = 32 * 1024 * 1024;
+			auto bytes = ReadFile(file, 0, maxBytes + 1);
+			if (bytes.size() > maxBytes) throw Fail("Ogg Vorbis file exceeds 32 MiB");
+			if (Assets::detect_audio_container(bytes) != Assets::AudioContainer::Ogg)
+				throw Fail("expected an Ogg Vorbis stream");
+			int error = 0;
+			const std::unique_ptr<stb_vorbis, decltype(&stb_vorbis_close)> stream(
+				stb_vorbis_open_memory(reinterpret_cast<const unsigned char*>(bytes.data()),
+									   static_cast<int>(bytes.size()), &error, nullptr), stb_vorbis_close);
+			if (!stream) throw Fail("invalid Ogg Vorbis headers (decoder error " + std::to_string(error) + ")");
+			const stb_vorbis_info info = stb_vorbis_get_info(stream.get());
+			const unsigned samples = stb_vorbis_stream_length_in_samples(stream.get());
+			if (samples == 0 || stb_vorbis_get_error(stream.get()) != VORBIS__no_error)
+				throw Fail("Ogg Vorbis stream has no readable duration");
+			if (info.channels < 1 || info.channels > 2 || info.sample_rate == 0 || info.sample_rate > 48000)
+				throw Fail("expected mono or stereo Ogg Vorbis at up to 48 kHz");
+			return {std::move(bytes), info.channels, static_cast<std::int32_t>(info.sample_rate),
+					static_cast<float>(samples) / static_cast<float>(info.sample_rate)};
+		}
+
+		std::vector<std::byte> SoundData(const SerializationContext& ctx, const Sound& sound, std::uint64_t base)
+		{
+			BinaryWriter writer(ctx);
+			BulkData empty{};
+			write_bulk_data(writer, empty, {}, base);	// RawData
+			BulkData pc{};
+			pc.element_count = static_cast<std::int32_t>(sound.ogg.size());
+			write_bulk_data(writer, pc, sound.ogg, base);
+			write_bulk_data(writer, empty, {}, base);	// Xbox 360
+			write_bulk_data(writer, empty, {}, base);	// PS3
+			return writer.take();
 		}
 
 		// The texture's native data (version 536 layout, see UnrealLib read_texture2d): source art, then the mips,
@@ -397,6 +447,8 @@ namespace mirage::textures
 		return ext == ".glb" || ext == ".gltf" || ext == ".fbx" || ext == ".obj";
 	}
 
+	bool IsSoundFile(const fs::path& file) { return Lower(file.extension().string()) == ".ogg"; }
+
 	std::vector<std::string> ScanReplaceable(const fs::path& package)
 	{
 		std::vector<std::byte> head = ReadFile(package, 0, 64 * 1024);
@@ -468,7 +520,7 @@ namespace mirage::textures
 		for (std::size_t i = 0; i < exports.size(); ++i) {
 			const ObjectIndex idx = ObjectIndex::from_export(i);
 			const std::string cls = className(idx);
-			if (!Assets::is_texture2d_class(cls) && cls != "StaticMesh" && cls != "SkeletalMesh") continue;
+			if (!Assets::is_texture2d_class(cls) && cls != "StaticMesh" && cls != "SkeletalMesh" && cls != "SoundNodeWave") continue;
 			out.push_back(ObjectPath(idx, packageName, name, outer, className));
 		}
 		return out;
@@ -505,6 +557,7 @@ namespace mirage::textures
 			std::shared_ptr<Assets::StaticMesh> mesh;		// A mesh's replacement (else a texture's)
 			std::shared_ptr<Assets::StaticMesh> bodyOf;		// A replaced mesh's RB_BodySetup, given this mesh's shape
 			std::shared_ptr<Assets::SkeletalMesh> skeletal;	// A skeletal mesh's replacement
+			std::optional<Sound> sound;
 			std::string path;
 		};
 		std::vector<Edit> edits;
@@ -513,12 +566,36 @@ namespace mirage::textures
 			const std::string cls = pkg.class_name(idx);
 			const bool isSkeletal = cls == "SkeletalMesh";
 			const bool isMesh = cls == "StaticMesh" || isSkeletal;
-			if (!isMesh && !Assets::is_texture2d_class(cls)) continue;
+			const bool isSound = cls == "SoundNodeWave";
+			if (!isMesh && !isSound && !Assets::is_texture2d_class(cls)) continue;
 			const std::string path = ObjectPath(idx, packageName, [&](ObjectIndex o) { return pkg.object_name(o); },
 												[&](ObjectIndex o) { return pkg.outer(o); },
 												[&](ObjectIndex o) { return pkg.class_name(o); });
 			const auto it = wanted.find(path);
 			if (it == wanted.end()) continue;
+			if (isSound != IsSoundFile(it->second->file)) {
+				result.problems.push_back(path + ": use an .ogg file for a SoundNodeWave and name it by the wave's full path");
+				continue;
+			}
+			if (isSound) {
+				try {
+					if (ctx.file_version != 536) throw Fail("sound replacement requires Mirror's Edge PC package version 536");
+					(void)Assets::read_sound_wave(linker, ObjectRef{&pkg, idx});
+					ObjectProperties op = linker.read_properties(ObjectRef{&pkg, idx});
+					Edit e;
+					e.index = idx;
+					e.path = path;
+					e.propertiesOffset = op.header.properties_offset;
+					e.propertiesEnd = op.end_offset;
+					e.oldNative = pkg.export_data(i).size() - op.end_offset;
+					e.properties = std::move(op.properties);
+					e.sound = ReadSound(it->second->file);
+					edits.push_back(std::move(e));
+				} catch (const std::exception& ex) {
+					result.problems.push_back(path + ": " + ex.what());
+				}
+				continue;
+			}
 			if (isMesh != IsModelFile(it->second->file)) {
 				result.problems.push_back(path + ": " + (isMesh ? "a mesh is replaced by a model file (glb, gltf, fbx, obj)"
 																 : "a texture is replaced by an image, not a model"));
@@ -624,6 +701,7 @@ namespace mirage::textures
 		PackageModel model = PackageModel::from_package(pkg);
 		const auto native = [&](const Edit& e, std::uint64_t base) {
 			if (e.bodyOf) return std::vector<std::byte>(4);		// PreCachedPhysData: none (PhysX cooks the new shape)
+			if (e.sound) return SoundData(ctx, *e.sound, base);
 			if (e.skeletal)
 				return Assets::write_skeletal_mesh(*e.skeletal, ctx, pkg.profile().assets,
 												   [&](std::string_view text) { return model.make_name(text); }, base);
@@ -641,7 +719,14 @@ namespace mirage::textures
 				data.insert(data.end(), bytes.begin(), bytes.end());
 				continue;
 			}
-			if (e.mesh || e.skeletal) {
+			if (e.sound || e.mesh || e.skeletal) {
+				if (e.sound) {
+					SetInt(e.properties, model, "NumChannels", e.sound->channels);
+					SetInt(e.properties, model, "SampleRate", e.sound->rate);
+					Property* duration = FindProperty(e.properties, "Duration");
+					if (!duration) duration = &AddProperty(e.properties, model, "Duration", PropertyType::Float, "FloatProperty", 4);
+					duration->value.value = e.sound->duration;
+				}
 				// The new triangles are the collision, not the original's simple shapes
 				if (e.mesh) {
 					SetBool(e.properties, model, "UseSimpleLineCollision", false);

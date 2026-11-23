@@ -22,7 +22,7 @@ namespace mirage::textures
 
 	namespace
 	{
-		constexpr const char* kIndexHeader = "mirage-texture-index 3";		// 2: static meshes too; 3: skeletal meshes
+		constexpr const char* kIndexHeader = "mirage-texture-index 4";		// Includes SoundNodeWave exports
 		constexpr const char* kOverlayVersion = "mirage-texture-overlay 5";	// Change when the copies' format changes (4: a replaced mesh's body; 5: skeletal meshes)
 
 		std::mutex g_lock;
@@ -38,9 +38,9 @@ namespace mirage::textures
 		{
 			std::uintmax_t size = 0;
 			std::int64_t time = 0;
-			std::vector<std::string> textures;
+			std::vector<std::string> assets;
 		};
-		std::map<std::string, Entry> g_index;		// Package path relative to CookedPC (UTF-8, '/') -> its textures
+		std::map<std::string, Entry> g_index;		// Package path relative to CookedPC (UTF-8, '/') -> its replaceable assets
 		bool g_indexLoaded = false, g_pruned = false;
 		std::set<std::string> g_failedKeys;			// Copies that couldn't be built this session (not tried again)
 
@@ -76,7 +76,7 @@ namespace mirage::textures
 					std::getline(ls >> std::ws, path);
 					current = &(g_index[path] = std::move(e));
 				} else if (line[0] == 'T' && current) {
-					current->textures.push_back(line.substr(2));
+					current->assets.push_back(line.substr(2));
 				}
 			}
 		}
@@ -91,7 +91,7 @@ namespace mirage::textures
 				out << kIndexHeader << '\n';
 				for (const auto& [path, e] : g_index) {
 					out << "P " << e.size << ' ' << e.time << ' ' << path << '\n';
-					for (const auto& t : e.textures) out << "T " << t << '\n';
+					for (const auto& t : e.assets) out << "T " << t << '\n';
 				}
 			}
 			fs::rename(tmp, CacheDir() / "index.txt", ec);
@@ -121,10 +121,10 @@ namespace mirage::textures
 				e.size = size;
 				e.time = time;
 				try {
-					e.textures = ScanReplaceable(it->path());
+					e.assets = ScanReplaceable(it->path());
 				} catch (const std::exception& ex) {
-					e.textures.clear();
-					if (++failed <= 5) spdlog::warn("Content: {} can't be read for its textures: {}", rel, ex.what());
+					e.assets.clear();
+					if (++failed <= 5) spdlog::warn("Content: {} can't be read for replaceable assets: {}", rel, ex.what());
 				}
 				++read;
 			}
@@ -134,7 +134,7 @@ namespace mirage::textures
 			std::lock_guard lock(g_lock);
 			g_status.indexedPackages = g_index.size();
 			g_status.indexSeconds = s;
-			if (read) spdlog::info("Content: texture index updated, {} of {} packages read in {:.1f} s", read, g_index.size(), s);
+			if (read) spdlog::info("Content: asset index updated, {} of {} packages read in {:.1f} s", read, g_index.size(), s);
 		}
 
 		std::uint64_t Fnv(std::uint64_t h, const std::string& s)
@@ -189,7 +189,7 @@ namespace mirage::textures
 			UpdateIndex(cooked);
 			if (!g_pruned) Prune();
 
-			// What is wanted, the last owner of a texture winning
+			// What is wanted, the last owner of an asset winning
 			std::map<std::string, std::pair<std::string, Replacement>> merged;
 			for (const auto& [owner, reps] : wanted)
 				for (const Replacement& r : reps) merged[r.path] = {owner, r};
@@ -198,7 +198,7 @@ namespace mirage::textures
 			std::map<std::string, std::string> ownerOf;
 			int found = 0;
 			for (const auto& [rel, e] : g_index)
-				for (const std::string& t : e.textures)
+				for (const std::string& t : e.assets)
 					if (const auto it = merged.find(t); it != merged.end()) perPackage[rel].push_back(it->second.second);
 			for (const auto& [path, or_] : merged) {
 				ownerOf[path] = or_.first;
@@ -257,7 +257,7 @@ namespace mirage::textures
 						fs::rename(tmp, plan.copy, ec);
 						if (ec) throw std::runtime_error("can't write " + Utf8(plan.copy) + ": " + ec.message());
 						result = plan.copy;
-						spdlog::info("Content: {} rewritten with {} texture(s) in {:.0f} ms ({:.1f} MB)", plan.rel, o.replaced.size(),
+						spdlog::info("Content: {} rewritten with {} replacement(s) in {:.0f} ms ({:.1f} MB)", plan.rel, o.replaced.size(),
 									 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count(),
 									 static_cast<double>(o.bytes.size()) / 1048576.0);
 					}

@@ -102,6 +102,25 @@ Confirm the packaged ZIP has `mod.toml` and `content/defaults.toml` at the expec
 
 For a different content task, use the loader’s existing paths. Place per-map actor declarations under `levels/<package>.toml`, where `<package>` is the map package such as `edge_p`. Use an explicit actor name and an existing fully qualified class; see `tests/mods/layer-test/levels/edge_p.toml` for the schema. Place texture replacements in `content/textures` using the asset’s fully qualified object path as the filename stem. For mesh conversion, follow [Exporting models](models.md). Use authored or licensed assets and keep game packages outside commits.
 
+### Replace a sound
+
+With `content = ["content"]` in `mod.toml`, place an Ogg Vorbis file at
+`content/sounds/<full SoundNodeWave path>.ogg`. For example, this filename targets a construction ambience wave.
+
+```text
+content/sounds/A_Ambience_Construction.Hammering_RAW.A_Ambience_Construction_Hammering_02.ogg
+```
+
+Use a mono or stereo Vorbis stream at up to 48 kHz and 32 MiB per file. This command converts a WAV to mono Vorbis.
+
+```powershell
+ffmpeg -i replacement.wav -ac 1 -ar 44100 -c:a libvorbis replacement.ogg
+```
+
+Target the wave used by the cue. Mirage replaces the sample and updates its duration, channel count, and sample rate.
+The game still controls the cue's volume, looping, and spatial behavior. Enable the mod before opening the level with
+the wave. Packages already opened keep their current version until the game restarts.
+
 ## Complex mod · a session peak-speed tracker
 
 **Goal.** Sample player movement on the game thread, publish a short HUD string to the render callback, and clear the recorded peak on demand or when the player’s session changes. Keep the peak calculation in a separate Lua module so it can be tested with synthetic values.

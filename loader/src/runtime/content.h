@@ -24,8 +24,10 @@
 //       meshes/CH_TKY_Crim_Fixer_1P.SK_UpperBody.glb         # a skeletal mesh: a skinned model, its bones named as
 //                                                            # the original's (Faith's first-person arms here)
 //
-//   Every package holding a copy of the texture or mesh opens as a rewritten copy (runtime/texture_overlays.h): the new
-//   one shows from the next level load on, and turning the content off gives the original on the one after.
+//   sounds/         replacement audio as Ogg Vorbis, named by the SoundNodeWave's full object path.
+//
+//   Packages holding a replaced asset open as rewritten copies (runtime/texture_overlays.h). Opened packages keep
+//   their copy for the rest of the session.
 //   A skeletal mesh already loaded (Faith's arms) is swapped in memory at once, and back when turned off (runtime/models.h).
 //
 // Applied on the game thread, re-applied after every level load (objects that came with the level), and undone
@@ -60,7 +62,7 @@ namespace mirage::content
 	struct Stats
 	{
 		int objects = 0, values = 0, missing = 0;	// Values applied; missing: objects or properties not found
-		int textures = 0;							// Replacement textures the content has
+		int replacements = 0;						// Replacement assets the content has
 		std::vector<std::string> notes;				// The first problems
 	};
 	Stats GetStats(const Set& set);

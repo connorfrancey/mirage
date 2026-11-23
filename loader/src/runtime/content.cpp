@@ -56,7 +56,7 @@ namespace mirage::content
 	public:
 		std::string mod;
 		std::vector<Target> targets;
-		std::vector<textures::Replacement> textures;
+		std::vector<textures::Replacement> replacements;
 		std::vector<anim::Clip> clips;			// animations/<Name>.json
 		bool applied = false;
 		std::vector<Saved> saved;
@@ -147,6 +147,10 @@ namespace mirage::content
 	{
 		auto set = std::make_shared<Set>();
 		set->mod = modId;
+		const auto replace = [&](const std::string& path, const std::filesystem::path& file) {
+			std::erase_if(set->replacements, [&](const textures::Replacement& r) { return r.path == path; });
+			set->replacements.push_back({path, file});
+		};
 		for (const auto& folder : folders) {
 			std::error_code ec;
 			// animations/<Name>.json: custom animations, sequences of the player's meshes by that name
@@ -178,10 +182,20 @@ namespace mirage::content
 									   ": name it by the texture's full path, like M_Rooftops.Textures.T_Roof_02_D.png");
 					continue;
 				}
-				std::erase_if(set->textures, [&](const textures::Replacement& r) { return r.path == path; });
-				set->textures.push_back({path, e.path()});
+				replace(path, e.path());
 			}
-			// meshes/<full path of the static mesh>.<model> (step 31), with its converted .mmesh next to it
+			// sounds/<full path of the SoundNodeWave>.ogg
+			for (const auto& e : std::filesystem::directory_iterator(folder / "sounds", ec)) {
+				if (!e.is_regular_file(ec)) continue;
+				const std::string name = e.path().filename().string();
+				const std::string path = textures::NormalizePath(e.path().stem().string());
+				if (!textures::IsSoundFile(e.path()) || path.find('.') == std::string::npos) {
+					problems.push_back("sounds/" + name + ": use Ogg Vorbis and name it by the wave's full path");
+					continue;
+				}
+				replace(path, e.path());
+			}
+			// meshes/<full path of the static mesh>.<model>, with its converted .mmesh next to it
 			for (const auto& e : std::filesystem::directory_iterator(folder / "meshes", ec)) {
 				if (!e.is_regular_file(ec)) continue;
 				const std::string name = e.path().filename().string();
@@ -199,8 +213,7 @@ namespace mirage::content
 					problems.push_back("meshes/" + name + " isn't converted: run `mirage model " + name + " --convert`");
 					continue;
 				}
-				std::erase_if(set->textures, [&](const textures::Replacement& r) { return r.path == path; });
-				set->textures.push_back({path, e.path()});
+				replace(path, e.path());
 			}
 			const auto file = folder / "defaults.toml";
 			if (!std::filesystem::exists(file)) continue;
@@ -231,7 +244,7 @@ namespace mirage::content
 		return set;
 	}
 
-	bool Empty(const Set& set) { return set.targets.empty() && set.textures.empty() && set.clips.empty(); }
+	bool Empty(const Set& set) { return set.targets.empty() && set.replacements.empty() && set.clips.empty(); }
 	bool Applied(const Set& set) { return set.applied; }
 	Stats GetStats(const Set& set) { return set.stats; }
 
@@ -240,9 +253,9 @@ namespace mirage::content
 		const bool wasApplied = set.applied;
 		set.applied = true;
 		set.stats = {};
-		set.stats.textures = static_cast<int>(set.textures.size());
-		if (!set.textures.empty()) textures::Activate(set.mod, set.textures);	// Again after a level load: a no-op
-		if (!set.textures.empty()) models::ActivateSkeletal(set.mod, set.textures);	// Skeletal meshes already loaded
+		set.stats.replacements = static_cast<int>(set.replacements.size());
+		if (!set.replacements.empty()) textures::Activate(set.mod, set.replacements);	// Again after a level load: a no-op
+		if (!set.replacements.empty()) models::ActivateSkeletal(set.mod, set.replacements);	// Skeletal meshes already loaded
 		if (!set.clips.empty() && !wasApplied) anim::Register(set.mod, set.clips);		// Installed on the player by anim::Tick
 		for (const Target& t : set.targets) {
 			Classes::UObject* object = FindTarget(t.key);
@@ -266,7 +279,7 @@ namespace mirage::content
 		}
 		spdlog::info("[mod {}] content on: {} values on {} objects{}{}", set.mod, set.stats.values, set.stats.objects,
 					 set.stats.missing ? " (" + std::to_string(set.stats.missing) + " not found)" : std::string(),
-					 set.textures.empty() ? std::string() : ", " + std::to_string(set.textures.size()) + " texture(s)");
+					 set.replacements.empty() ? std::string() : ", " + std::to_string(set.replacements.size()) + " asset replacement(s)");
 	}
 
 	void Restore(Set& set)
@@ -297,12 +310,12 @@ namespace mirage::content
 				}
 			}
 		}
-		if (!set.textures.empty()) textures::Deactivate(set.mod);
-		if (!set.textures.empty()) models::DeactivateSkeletal(set.mod);
+		if (!set.replacements.empty()) textures::Deactivate(set.mod);
+		if (!set.replacements.empty()) models::DeactivateSkeletal(set.mod);
 		if (!set.clips.empty()) anim::Unregister(set.mod);
 		set.applied = false;
 		spdlog::info("[mod {}] content off: {} values put back{}", set.mod, restored,
-					 set.textures.empty() ? std::string() : ", textures original from the next level load");
+					 set.replacements.empty() ? std::string() : ", opened packages keep their copies until restart");
 	}
 
 	void Register(std::shared_ptr<Set> set)
