@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-  project(MiragePayloadArchive LANGUAGES CXX)
+  project(MiragePayloadArchive LANGUAGES C CXX)
   set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
   set(CMAKE_CXX_STANDARD 20)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,8 +34,22 @@ add_library(mirage::mpaf ALIAS mirage_mpaf)
 target_compile_features(mirage_mpaf PUBLIC cxx_std_20)
 target_include_directories(mirage_mpaf PUBLIC include)
 target_link_libraries(mirage_mpaf PRIVATE xxhash::xxhash simdutf::simdutf)
+CPMAddPackage(NAME lz4 GITHUB_REPOSITORY lz4/lz4 GIT_TAG v1.10.0 DOWNLOAD_ONLY YES)
+add_library(mirage_mums_lz4 STATIC
+  ${lz4_SOURCE_DIR}/lib/lz4.c
+  ${lz4_SOURCE_DIR}/lib/lz4frame.c
+  ${lz4_SOURCE_DIR}/lib/lz4hc.c
+  ${lz4_SOURCE_DIR}/lib/xxhash.c)
+target_include_directories(mirage_mums_lz4 SYSTEM PUBLIC "${lz4_SOURCE_DIR}/lib")
+target_compile_definitions(mirage_mums_lz4 PRIVATE XXH_NAMESPACE=LZ4_)
+
+add_library(mirage_mums STATIC src/mums.cpp)
+add_library(mirage::mums ALIAS mirage_mums)
+target_compile_features(mirage_mums PUBLIC cxx_std_20)
+target_include_directories(mirage_mums PUBLIC include)
+target_link_libraries(mirage_mums PRIVATE mirage::mpaf mirage_mums_lz4)
 add_executable(mirage_pack src/pack.cpp)
-target_link_libraries(mirage_pack PRIVATE mirage::mpaf)
+target_link_libraries(mirage_pack PRIVATE mirage::mpaf mirage::mums)
 if(WIN32)
   target_compile_definitions(mirage_mpaf PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
@@ -50,8 +64,8 @@ if(MIRAGE_BUILD_TESTS)
     CPMAddPackage(NAME googletest GITHUB_REPOSITORY google/googletest GIT_TAG ${GOOGLETEST_VERSION}
       OPTIONS "INSTALL_GTEST OFF" "BUILD_GMOCK OFF" "gtest_force_shared_crt OFF")
   endif()
-  add_executable(mirage_mpaf_tests tests/test_mpaf.cpp)
-  target_link_libraries(mirage_mpaf_tests PRIVATE mirage::mpaf GTest::gtest_main)
+  add_executable(mirage_mpaf_tests tests/test_mpaf.cpp tests/test_mums.cpp)
+  target_link_libraries(mirage_mpaf_tests PRIVATE mirage::mpaf mirage::mums GTest::gtest_main)
   target_compile_definitions(mirage_mpaf_tests PRIVATE MPAF_VECTOR_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/vectors")
   include(GoogleTest)
   gtest_discover_tests(mirage_mpaf_tests)

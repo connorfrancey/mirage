@@ -316,6 +316,9 @@ def package(built: Path, info: ModInfo, format: str = "zip") -> Path:
             run = subprocess.run([str(packer), str(staging), str(temp)], capture_output=True, text=True)
             if run.returncode != 0:
                 raise ValueError(run.stderr.strip() or "mirage_pack failed")
+            with temp.open("rb") as envelope:
+                if envelope.read(8) != b"MUMS\0\0\0\0":
+                    raise ValueError("Rebuild the selected mirage_pack tool to package the MUMS envelope")
         else:
             with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as z:
                 for f in sorted(staging.rglob("*")):

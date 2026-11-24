@@ -6,8 +6,6 @@
 
 namespace mirage::mpaf::detail
 {
-	std::uint32_t UpdateCrc(std::uint32_t crc, Bytes bytes) noexcept;
-
 	class HashState
 	{
 	public:

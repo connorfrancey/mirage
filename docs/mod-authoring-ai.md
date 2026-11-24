@@ -323,8 +323,8 @@ Settings-only edits to defaults keep the existing controls and user-changed valu
 settings, changing their metadata, or editing their defaults alongside the mod code. Invalid edits leave the active
 declarations in use.
 
-Run `uv run mirage mod package <folder> --format miragemod` to build an MPAF archive with the TOML manifest and
-its referenced declaration files. If the packer is absent, build it with `uv run mirage build -t mirage_pack`.
+Run `uv run mirage mod package <folder> --format miragemod` to wrap the MPAF archive in a [MUMS envelope](../MUMS_SPEC.md).
+The payload contains `mod.toml` and its referenced declaration files. If the packer is absent, build it with `uv run mirage build -t mirage_pack`.
 The package command still defaults to ZIP.
 
 ## Verification and handoff
