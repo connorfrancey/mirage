@@ -69,8 +69,10 @@ THIRD_PARTY = [
     ("readerwriterqueue", "the hooking library's diagnostic events", "https://github.com/cameron314/readerwriterqueue",
      "readerwriterqueue", ["LICENSE.md"]),
     ("spdlog", "the log", "https://github.com/gabime/spdlog", "spdlog", ["LICENSE"]),
-    ("{fmt} (bundled with spdlog)", "text formatting", "https://github.com/fmtlib/fmt", "spdlog",
-     ["include/spdlog/fmt/bundled/fmt.license.rst", "include/spdlog/fmt/bundled/LICENSE.rst"]),
+    ("{fmt}", "text formatting", "https://github.com/fmtlib/fmt", "fmt", ["LICENSE"]),
+    ("UnrealLib", "reading and writing Unreal Engine packages", "https://github.com/connorfrancey/UnrealLib",
+     "unreallib", ["LICENSE"]),
+    ("zlib", "decompressing Unreal Engine packages", "https://github.com/madler/zlib", "zlib", ["LICENSE"]),
     ("Zstandard", "compressing old logs", "https://github.com/facebook/zstd", "zstd", ["LICENSE"]),
     ("Glaze", "settings, caches and every JSON file", "https://github.com/stephenberry/glaze", "glaze",
      ["LICENSE"]),
@@ -1577,7 +1579,13 @@ def _third_party_notices(config: str) -> str:
         parts.append("=" * 100 + f"\n{title}: {what}\n{url}\n" + "=" * 100 + "\n\n" + text.replace("﻿", "").strip() + "\n")   # no BOMs
 
     for name, what, url, package, files in THIRD_PARTY:
+        if package in {"unreallib", "zlib"} and "unreallib" not in dirs:
+            continue
         src = dirs.get(package.lower())
+        if package == "fmt" and src is None:
+            src = dirs.get("spdlog")
+            files = ["include/spdlog/fmt/bundled/fmt.license.rst", "include/spdlog/fmt/bundled/LICENSE.rst"]
+            name = "{fmt} (bundled with spdlog)"
         if src is None and package == "imgui_filebrowser":
             continue  # CMake fetches the file browser only when the TAS feature is enabled.
         if src is None:

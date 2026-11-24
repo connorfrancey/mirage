@@ -11,4 +11,6 @@ MPAF uses checked offsets, sorted UTF-8 paths, an indexed file table, and CRC-32
 
 The MPAF reader accepts either supported manifest path. New `.miragemod` packages carry `mod.toml`. The packer can verify MUMS and the inner file hashes with `mirage_pack --verify <file>`. Installed mods are discovered as directories.
 
+Release notices use the license files from the configured dependency sources. If UnrealLib is configured, include its notice and zlib's. Use the separate fmt notice when that source is configured. [Packaging](../tools/mirage_tools/cli.py)
+
 The [identity specification](../docs/specifications/mirrors-edge-mod-identity.md) concerns identity metadata across tools. UE3 cooked files are covered in [assets](assets.md).
