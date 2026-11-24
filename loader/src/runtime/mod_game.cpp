@@ -5,7 +5,6 @@
 #include "game/object_query.h"
 #include "game/object_ref.h"
 #include "game/player_state.h"
-#include <nlohmann/json.hpp>
 #include <fstream>
 #include "game/uobject.h"
 #include "gui.h"
@@ -17,6 +16,7 @@
 #include "runtime/class_source.h"
 #include "runtime/classes.h"
 #include "runtime/layers.h"
+#include "util/glz_compat.h"
 #include "core/hooking.h"
 #include "runtime/detours.h"
 #include "runtime/symbols.h"
@@ -34,6 +34,7 @@
 #include "runtime/natives.h"
 #include "runtime/mod_internal.h"
 #include "runtime/mod_profile.h"
+#include "runtime/models.h"
 #include "runtime/mods.h"
 #include "runtime/reflect.h"
 #include "sdk/SDK.hpp"
@@ -51,6 +52,7 @@
 #include <functional>
 #include <list>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -566,26 +568,27 @@ namespace mirage::mods
 			if (!mod || !spec) return ClassError(mod, "class_define", "no mod or description", error, capacity);
 			if (!game::IsGameThread()) return ClassError(mod, "class_define", "only on the game thread (a tick event, a hook)", error, capacity);
 			classes::ClassSpec c;
-			try {
-				const nlohmann::json j = nlohmann::json::parse(spec);
-				c.name = j.value("name", "");
-				c.extends = j.value("extends", "");
-				c.placeable = j.value("placeable", false);
+			{
+				std::string why;
+				const jc::json j = jc::parse(spec, why);
+				if (!why.empty() || !j.is_object())
+					return ClassError(mod, "class_define", "the description isn't valid JSON: " + (why.empty() ? std::string("not an object") : why), error, capacity);
+				c.name = jc::value(j, "name", "");
+				c.extends = jc::value(j, "extends", "");
+				c.placeable = jc::value(j, "placeable", false);
 				const auto list = [&](const char* key, std::vector<std::string>& out) {
-					if (!j.contains(key)) return;
-					for (const auto& v : j.at(key)) out.push_back(v.get<std::string>());
+					for (const jc::json& v : jc::items(j, key))
+						if (v.is_string()) out.push_back(v.get<std::string>());
 				};
 				list("vars", c.vars);
 				list("functions", c.functions);
-				if (j.contains("defaults") && j.at("defaults").is_object()) {
-					for (const auto& [k, v] : j.at("defaults").items())
-						c.defaults.push_back(k + "=" + (v.is_string() ? v.get<std::string>() : v.is_boolean() ? (v.get<bool>() ? "True" : "False") : v.dump()));
+				if (const jc::json& d = jc::member(j, "defaults"); d.is_object()) {
+					for (const auto& [k, v] : d.get_object())
+						c.defaults.push_back(k + "=" + (v.is_string() ? v.get<std::string>() : v.is_boolean() ? (v.get<bool>() ? "True" : "False") : jc::dump(v)));
 				} else {
 					list("defaults", c.defaults);
 				}
-				c.extra = j.value("extra", "");
-			} catch (const std::exception& e) {
-				return ClassError(mod, "class_define", std::string("the description isn't valid JSON: ") + e.what(), error, capacity);
+				c.extra = jc::value(j, "extra", "");
 			}
 			const std::string what = "class_define " + c.name;
 			std::string why;
@@ -713,6 +716,20 @@ namespace mirage::mods
 		MirageObject* MIRAGE_CALL ObjectFind(const char* fullName)
 		{
 			return fullName ? Handle(game::FindObject<Classes::UObject>(fullName)) : nullptr;
+		}
+
+		MirageObject* MIRAGE_CALL PortalClass(const char* name)
+		{
+			if (!name || !game::IsGameThread()) return nullptr;
+			static constexpr std::string_view classes[] = {
+				"PortalTeleporter", "PortalMarker", "PortalVolume", "SceneCapturePortalActor",
+				"SceneCapturePortalComponent", "SceneCaptureReflectActor", "SceneCaptureReflectComponent",
+				"SceneCaptureActor", "SceneCaptureComponent",
+			};
+			for (const std::string_view cls : classes) {
+				if (cls == name) return ObjectFind((std::string("Class Engine.") + name).c_str());
+			}
+			return nullptr;
 		}
 
 		int32_t MIRAGE_CALL ObjectGet(MirageObject* object, const char* path, MirageValue* out)
@@ -1013,14 +1030,14 @@ namespace mirage::mods
 
 		uint32_t MIRAGE_CALL MovementTransitions(char* buffer, uint32_t capacity)
 		{
-			nlohmann::json out = nlohmann::json::array();
+			jc::json out = jc::new_array();
 			{
 				std::lock_guard lock(g_transitionLock);
 				for (const Transition& t : g_transitions)
-					out.push_back({{"tick", t.tick}, {"time", t.time}, {"from", t.from}, {"to", t.to}, {"from_name", MoveName(t.from)},
+					jc::push(out, {{"tick", t.tick}, {"time", t.time}, {"from", t.from}, {"to", t.to}, {"from_name", MoveName(t.from)},
 								   {"to_name", MoveName(t.to)}, {"skipped", t.skipped}});
 			}
-			return CopyOut(out.dump(), buffer, capacity);
+			return CopyOut(jc::dump(out), buffer, capacity);
 		}
 
 		// ---- Physics and world queries (step 6) -------------------------------------------------------------------
@@ -1267,6 +1284,24 @@ namespace mirage::mods
 		int32_t MIRAGE_CALL MenuSliderValue(MirageMod* mod, int32_t id, float* value)
 		{
 			return mod && options_menu::Value(mod->id, id, value) ? 1 : 0;
+		}
+
+		MirageObject* MIRAGE_CALL ModelMesh(MirageMod* mod, const char* file, int32_t* pending)
+		{
+			if (pending) *pending = 0;
+			if (!mod || !file || !*file) return nullptr;
+			const std::string_view name(file);
+			const std::filesystem::path path = std::filesystem::path(std::u8string(mod->dir.begin(), mod->dir.end())) /
+											   std::filesystem::path(std::u8string(name.begin(), name.end()));
+			std::string why;
+			bool waiting = false;
+			Classes::UStaticMesh* mesh = models::MeshOf(path, &why, &waiting);
+			if (pending) *pending = waiting ? 1 : 0;
+			if (!mesh && !waiting) {
+				static std::set<std::string> told;		// Asked every tick by a mod that keeps trying: said once
+				if (told.insert(mod->id + "|" + file).second) spdlog::warn("[mod {}] model {}: {}", mod->id, file, why);
+			}
+			return mesh ? Handle(mesh) : nullptr;
 		}
 
 		int32_t MIRAGE_CALL PhysicsCollisionGet(MirageObject* actor)
@@ -1726,14 +1761,14 @@ namespace mirage::mods
 
 		uint32_t MIRAGE_CALL PlayerStateCapture(char* buffer, uint32_t capacity)
 		{
-			const nlohmann::json j = player_state::Capture();
-			return CopyOut(j.is_null() ? std::string() : j.dump(), buffer, capacity);
+			const jc::json j = player_state::Capture();
+			return CopyOut(j.is_null() ? std::string() : jc::dump(j), buffer, capacity);
 		}
 		int32_t MIRAGE_CALL PlayerStateApply(const char* state)
 		{
 			if (!state) return 0;
-			const auto j = nlohmann::json::parse(state, nullptr, false);
-			return !j.is_discarded() && player_state::Apply(j) ? 1 : 0;
+			const jc::json j = jc::parse(state);
+			return !j.is_null() && player_state::Apply(j) ? 1 : 0;
 		}
 		void MIRAGE_CALL PlayerResetMovement()
 		{

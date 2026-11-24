@@ -42,6 +42,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
+from mirage_apigen.cli import api as api_commands
 
 from . import build as b
 from . import example_mods as em
@@ -68,11 +69,13 @@ THIRD_PARTY = [
     ("readerwriterqueue", "the hooking library's diagnostic events", "https://github.com/cameron314/readerwriterqueue",
      "readerwriterqueue", ["LICENSE.md"]),
     ("spdlog", "the log", "https://github.com/gabime/spdlog", "spdlog", ["LICENSE"]),
-    ("{fmt} (bundled with spdlog)", "text formatting", "https://github.com/fmtlib/fmt", "spdlog",
-     ["include/spdlog/fmt/bundled/fmt.license.rst", "include/spdlog/fmt/bundled/LICENSE.rst"]),
+    ("{fmt}", "text formatting", "https://github.com/fmtlib/fmt", "fmt", ["LICENSE"]),
+    ("UnrealLib", "reading and writing Unreal Engine packages", "https://github.com/connorfrancey/UnrealLib",
+     "unreallib", ["LICENSE"]),
+    ("zlib", "decompressing Unreal Engine packages", "https://github.com/madler/zlib", "zlib", ["LICENSE"]),
     ("Zstandard", "compressing old logs", "https://github.com/facebook/zstd", "zstd", ["LICENSE"]),
-    ("JSON for Modern C++", "settings and macro files", "https://github.com/nlohmann/json", "nlohmann_json",
-     ["LICENSE.MIT", "LICENSE"]),
+    ("Glaze", "settings, caches and every JSON file", "https://github.com/stephenberry/glaze", "glaze",
+     ["LICENSE"]),
     ("imgui-filebrowser", "the file browser", "https://github.com/AirGuanZ/imgui-filebrowser", "imgui_filebrowser",
      ["LICENSE", "LICENSE.txt"]),
 ]
@@ -843,11 +846,13 @@ def model(ctx: click.Context, model_file: Path, as_json: bool, strict: bool, con
 @click.option("--no-build", is_flag=True, help="Run mirage_sdkgen as it was last built.")
 @click.option("--no-check", is_flag=True, help="Don't compile the generated SDK afterwards (its layout checks).")
 @click.option("--no-report", is_flag=True, help="Don't compare with the old (mmultiplayer) SDK.")
+@click.option("--metadata", type=click.Path(dir_okay=False, path_type=Path),
+              help="Export merged SDK metadata JSON without regenerating headers.")
 @click.argument("sdkgen_args", nargs=-1, type=click.UNPROCESSED)
 @verbose_option
 @click.pass_context
 def sdk(ctx: click.Context, config: str, no_build: bool, no_check: bool, no_report: bool,
-        sdkgen_args: tuple[str, ...], verbose: bool) -> None:
+        metadata: Path | None, sdkgen_args: tuple[str, ...], verbose: bool) -> None:
     """Generate the Mirage SDK (sdk/) from the game's packages with mirage_sdkgen, then compile it.
 
     Settings are in tools/sdkgen/sdkgen.toml; SDKGEN_ARGS go to mirage_sdkgen (after --, e.g. `mirage sdk --
@@ -863,19 +868,208 @@ def sdk(ctx: click.Context, config: str, no_build: bool, no_check: bool, no_repo
         console.print(f"[red]{exe} not found[/]: build it first (without --no-build).")
         ctx.exit(1)
     args = [str(exe)]
+    if metadata is not None:
+        metadata = metadata.resolve()
+        metadata.parent.mkdir(parents=True, exist_ok=True)
+        args += ["--metadata-only", str(metadata)]
     old = b.cache_value(config, "CPM_PACKAGE_mmultiplayer_SOURCE_DIR")
     if not no_report and old and (Path(old) / "Client" / "sdk").is_dir():
         args += ["--old-sdk", str(Path(old) / "Client" / "sdk")]
     console.rule("mirage_sdkgen")
     if subprocess.run([*args, *sdkgen_args], cwd=ROOT).returncode != 0:
         ctx.exit(1)
-    if no_check:
+    if no_check or metadata is not None or "--metadata-only" in sdkgen_args:
         return
     # The SDK's CMakeLists is picked up by tools/sdkgen when it exists: configure again the first time
     console.rule("Compiling the SDK (every offset and size is a static_assert)")
     result = b.configure(console, _toolchain(ctx), config, verbose=verbose)
     if result.returncode != 0 or _build(ctx, config, ("mirage_sdk",), verbose=verbose).returncode != 0:
         ctx.exit(1)
+
+
+@cli.command("sdk-browse")
+@click.argument("query", required=False)
+@click.option("-m", "--members", is_flag=True, help="Find fields and functions by name in every type instead.")
+@click.option("-i", "--inherited", is_flag=True, help="Also the fields of what the type extends, by offset.")
+@click.option("-f", "--functions", is_flag=True, help="List the type's functions too.")
+@click.option("-g", "--gui", is_flag=True, help="Open the SDK browser window (PyQt6), at QUERY if given.")
+@click.option("--api-output", type=click.Path(file_okay=False, path_type=Path),
+              help="Read API generation metadata from this directory in the SDK browser.")
+@click.pass_context
+def sdk_browse(ctx: click.Context, query: str | None, members: bool, inherited: bool, functions: bool, gui: bool,
+               api_output: Path | None) -> None:
+    """Browse the generated SDK (sdk/include/sdk): a type's layout, or the types and members matching QUERY.
+
+    QUERY is a C++ name (ATdPawn), an UnrealScript name (TdPawn) or a path (TdGame.TdPawn); a single match is shown
+    whole (offsets, sizes, types, flags, what it extends), several are listed. Type::Member finds a member on its
+    declaring type. --gui opens a window instead.
+    """
+    if gui:
+        from . import sdkbrowse_gui
+        ctx.exit(sdkbrowse_gui.run(query, api_output))
+    if not query:
+        raise click.UsageError("QUERY is needed without --gui")
+    from . import sdkbrowse as sb
+
+    types = sb.load()
+    if not types:
+        console.print(f"[red]No SDK headers in {sb.SDK_DIR}[/] (run `mirage sdk`)")
+        raise SystemExit(1)
+
+    if members or sb.QUALIFIED_MEMBER.fullmatch(query):
+        found = sb.find_members(types, query)
+        table = Table("Type", "Member", "Offset", "Type / signature", box=None)
+        for column in table.columns[:3]:
+            column.no_wrap = True
+        for t, m in found[:300]:
+            if isinstance(m, sb.Field):
+                table.add_row(t.cpp, m.name, f"0x{m.offset:04X}", escape(m.type))
+            else:
+                table.add_row(t.cpp, sb.function_name(m), "", escape(m))
+        console.print(table)
+        console.print(f"[dim]{len(found)} member(s){' (the first 300)' if len(found) > 300 else ''}[/]")
+        return
+
+    found = sb.find(types, query)
+    if not found:
+        console.print(f"[yellow]No type matches '{escape(query)}'[/] (try -m to search members)")
+        raise SystemExit(1)
+    if len(found) > 1:
+        table = Table("Kind", "C++", "Path", "Size", "Where", box=None)
+        for t in found[:300]:
+            table.add_row(t.kind, t.cpp, t.path, f"0x{t.size:04X}" if t.size is not None else "", f"{t.file}:{t.line}")
+        console.print(table)
+        console.print(f"[dim]{len(found)} type(s){' (the first 300)' if len(found) > 300 else ''}; name one to see it[/]")
+        return
+
+    t = found[0]
+    size = f", 0x{t.size:04X} bytes" if t.size is not None else ""
+    console.print(f"[bold]{t.kind} {t.path}[/] ({t.cpp}{size})  [dim]sdk/include/sdk/{t.file}:{t.line}[/]")
+    if t.kind == "Enum":
+        for name, value in t.values:
+            console.print(f"  {value:>4}  {name}")
+        return
+    bases = sb.chain(types, t)
+    if len(bases) > 1:
+        console.print("[dim]" + " > ".join(b_.cpp for b_ in bases) + "[/]")
+    table = Table("Offset", "Size", "Type", "Name", "Flags", *(["From"] if inherited else []), box=None)
+    table.columns[2].no_wrap = True
+    rows = [(f, b_) for b_ in (bases if inherited else [t]) for f in b_.fields]
+    for f, b_ in sorted(rows, key=lambda r: r[0].offset):
+        table.add_row(f"0x{f.offset:04X}", f"0x{f.size:X}", escape(f.type), f.name, f"[dim]{escape(f.annotations)}[/]",
+                      *([b_.cpp] if inherited else []))
+    console.print(table)
+    if functions:
+        for fn in t.functions:
+            console.print("  " + escape(fn))
+    console.print(f"[dim]{len(rows)} field(s), {len(t.functions)} function(s)"
+                  f"{'' if functions else ' (-f lists them)'}{'' if inherited else '; -i adds inherited fields'}[/]")
+
+
+INDEX_DB = ROOT / "build" / "content-index.sqlite"
+
+
+@cli.command("index")
+@config_option
+@click.argument("pattern", required=False)
+@click.option("--class", "cls", help="Only objects of this class (e.g. Material, PortalTeleporter).")
+@click.option("--sql", help="Run this SQL on the table objects(package, path, class, outer, size) instead.")
+@click.option("--limit", default=50, show_default=True, help="Rows to show.")
+@click.option("--rebuild", is_flag=True, help="Index the game's packages again.")
+@verbose_option
+@click.pass_context
+def index(ctx: click.Context, config: str, pattern: str | None, cls: str | None, sql: str | None, limit: int,
+          rebuild: bool, verbose: bool) -> None:
+    """Search every object in the game's cooked packages (built once into build/content-index.sqlite by mirage_index).
+
+    `mirage index portal` finds paths containing "portal"; `mirage index --class TextureSampleParameter2D`;
+    `mirage index --sql "select outer from objects where class = 'MaterialExpressionScreenPosition'"`.
+    """
+    import sqlite3
+
+    if rebuild or not INDEX_DB.exists():
+        game = _find_game_dir()
+        cooked = game.parent / "TdGame" / "CookedPC" if game else None
+        if not cooked or not cooked.is_dir():
+            console.print("[red]The game's TdGame/CookedPC wasn't found[/].")
+            ctx.exit(1)
+        _enable_parts(ctx, config, ["sdkgen"], verbose)
+        if _build(ctx, config, ("mirage_index",), verbose=verbose).returncode != 0:
+            ctx.exit(1)
+        tsv = b.build_dir(config) / "content-index.tsv"
+        console.rule(f"Indexing {cooked}")
+        if subprocess.run([str(_artifact(config, "bin/mirage_index.exe")), str(cooked), str(tsv)]).returncode != 0:
+            ctx.exit(1)
+        INDEX_DB.parent.mkdir(exist_ok=True)
+        INDEX_DB.unlink(missing_ok=True)
+        with sqlite3.connect(INDEX_DB) as db, tsv.open(encoding="utf-8", errors="replace") as rows:
+            db.execute("create table objects(package text, path text, class text, outer text, size integer)")
+            db.executemany("insert into objects values (?, ?, ?, ?, ?)",
+                           (line.rstrip("\n").split("\t") for line in rows if line.count("\t") == 4))
+            db.execute("create index objects_class on objects(class)")
+            db.execute("create index objects_outer on objects(outer)")
+        console.print(f"Index: {INDEX_DB.relative_to(ROOT)}")
+
+    query, args = sql, ()
+    if not query:
+        where = [w for w, on in (("path like ?", pattern), ("class = ?", cls)) if on]
+        args = tuple(v for v in (f"%{pattern}%" if pattern else None, cls) if v)
+        query = "select package, path, class, size from objects" + (" where " + " and ".join(where) if where else "")
+        if not where and not rebuild:
+            query = "select class, count(*) n from objects group by class order by n desc"
+    with sqlite3.connect(INDEX_DB) as db:
+        cursor = db.execute(query, args)
+        table = Table(*[d[0] for d in cursor.description])
+        rows = cursor.fetchmany(limit)
+        for row in rows:
+            table.add_row(*(str(v) for v in row))
+    console.print(table)
+    if len(rows) == limit:
+        console.print(f"(first {limit} rows: --limit for more)")
+
+
+ASSET_DB = ROOT / "build" / "asset-catalog.sqlite"
+
+
+@cli.command("assets")
+@config_option
+@click.argument("query", required=False)
+@click.option("--rebuild", is_flag=True, help="Read the game's assets again (after a game update).")
+@verbose_option
+@click.pass_context
+def assets(ctx: click.Context, config: str, query: str | None, rebuild: bool, verbose: bool) -> None:
+    """Browse the game's textures, sounds, meshes, animations and materials in a window, with their details.
+
+    The catalog is built once by mirage_assets (a few minutes) into build/asset-catalog.sqlite; previews (a texture's
+    image, a sound) are made when an asset is picked, into build/asset-previews. QUERY fills the search. Export CSV
+    saves all matches for the current search and filters.
+    """
+    game = _find_game_dir()
+    cooked = game.parent / "TdGame" / "CookedPC" if game else None
+    if not cooked or not cooked.is_dir():
+        console.print("[red]The game's TdGame/CookedPC wasn't found[/].")
+        ctx.exit(1)
+    tool = _artifact(config, "bin/mirage_assets.exe")
+    if rebuild or not ASSET_DB.exists() or not tool.exists():
+        _enable_parts(ctx, config, ["sdkgen"], verbose)
+        if _build(ctx, config, ("mirage_assets",), verbose=verbose).returncode != 0:
+            ctx.exit(1)
+    if rebuild or not ASSET_DB.exists():
+        from .assets_gui import load_catalog
+        jsonl = b.build_dir(config) / "asset-catalog.jsonl"
+        console.rule(f"Reading the assets of {cooked}")
+        if subprocess.run([str(tool), "catalog", str(cooked), str(jsonl)]).returncode != 0:
+            ctx.exit(1)
+        ASSET_DB.parent.mkdir(exist_ok=True)
+        try:
+            console.print(f"{load_catalog(jsonl, ASSET_DB):,} assets in {ASSET_DB.relative_to(ROOT)}")
+        except PermissionError:
+            console.print(f"[red]{ASSET_DB.relative_to(ROOT)} is open in an asset window[/]: close it and run "
+                          "`mirage assets --rebuild` again.")
+            ctx.exit(1)
+        shutil.rmtree(ROOT / "build" / "asset-previews", ignore_errors=True)   # Made from the old catalog's packages
+    from . import assets_gui
+    ctx.exit(assets_gui.run(ASSET_DB, tool, cooked, ROOT / "build" / "asset-previews", query))
 
 
 def _remove_build_dir(config: str) -> None:
@@ -1385,7 +1579,15 @@ def _third_party_notices(config: str) -> str:
         parts.append("=" * 100 + f"\n{title}: {what}\n{url}\n" + "=" * 100 + "\n\n" + text.replace("﻿", "").strip() + "\n")   # no BOMs
 
     for name, what, url, package, files in THIRD_PARTY:
+        if package in {"unreallib", "zlib"} and "unreallib" not in dirs:
+            continue
         src = dirs.get(package.lower())
+        if package == "fmt" and src is None:
+            src = dirs.get("spdlog")
+            files = ["include/spdlog/fmt/bundled/fmt.license.rst", "include/spdlog/fmt/bundled/LICENSE.rst"]
+            name = "{fmt} (bundled with spdlog)"
+        if src is None and package == "imgui_filebrowser":
+            continue  # CMake fetches the file browser only when the TAS feature is enabled.
         if src is None:
             raise FileNotFoundError(f"{package} isn't in {b.build_dir(config).name}/CMakeCache.txt (build it first)")
         found = next((src / f for f in files if (src / f).is_file()), None)
@@ -1436,6 +1638,8 @@ def _early_dev_flag(argv: list[str]) -> None:
 # Need Windows itself (the D3D9 test host, the installer and launcher exes, the minimal build's MSVC presets). On Linux
 # the game runs in Proton: install with install.sh, test with game-test.
 _WINDOWS_ONLY = {"verbose-build", "install-game", "uninstall-game", "launch", "dev-test", "package", "minimal"}
+
+cli.add_command(api_commands)
 
 
 def main() -> None:

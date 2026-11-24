@@ -1,4 +1,4 @@
-# A first-party mod: part of the menu, written against the public API only (Lua). It ships inside the menu's DLL and
+  # A first-party mod: part of the menu, written against the public API only (Lua). It ships inside the menu's DLL and
 # is written to mirage\mods\mirage-blink at startup: edit a copy under another id, not this folder. See main.lua.
 id = "mirage-blink"
 name = "Blink"

@@ -1,6 +1,5 @@
 #include "runtime/firstparty.h"
 
-#include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
 #include <Windows.h>
 #include <toml.hpp>

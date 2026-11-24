@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 import zipfile
 from dataclasses import dataclass
@@ -28,6 +29,7 @@ import click
 from rich.console import Console
 
 from . import example_mods as em
+from .build import build_dir
 from .toolchain import ROOT
 
 TEMPLATES = Path(__file__).parent / "templates"
@@ -35,11 +37,10 @@ LANGS = {"lua": "Lua: no build, saved files reload in the game",
          "cs": "C# script: compiled in the game, no SDK needed",
          "native": "C++: its own CMake project, built for x86 against the mod API headers",
          "content": "Content: property overrides and asset replacements, no code"}
-ID_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
-MANIFEST_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]{1,63}")
+ID_RE = re.compile(r"[a-z][a-z0-9]*(?:[-.][a-z0-9]+)*")
+MANIFEST_ID_RE = re.compile(r"[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$")
-SETTING_TYPES = {"bool", "int", "float", "string", "choice", "key", "color"}
-OUT = ROOT / "build" / "mods"
+SETTING_TYPES = {"bool", "int", "float", "string", "choice", "key", "color", "enum", "keybind"}
 DIST = ROOT / "dist" / "mods"
 KEEP_ON_INSTALL = ("config.toml",)      # What the game wrote into an installed mod's folder (its saved settings)
 
@@ -54,7 +55,7 @@ class ModInfo:
 
 
 def _class_name(mod_id: str) -> str:
-    return "".join(part.capitalize() for part in mod_id.split("-"))
+    return "".join(part.capitalize() for part in re.split(r"[-.]", mod_id))
 
 
 def _render(text: str, values: dict[str, str]) -> str:
@@ -77,7 +78,7 @@ def create(mod_id: str, lang: str, parent: Path, name: str | None = None, descri
            author: str | None = None) -> Path:
     """The mod's folder <parent>/<mod_id> from templates/<lang>. Raises ValueError for a bad id or an existing folder."""
     if not 2 <= len(mod_id) <= 64 or not ID_RE.fullmatch(mod_id):
-        raise ValueError(f"\"{mod_id}\": use 2–64 lowercase letters and digits, words joined by '-' (\"my-mod\")")
+        raise ValueError(f"\"{mod_id}\": use 2–64 lowercase letters and digits, joined by '-' or '.'")
     if lang not in LANGS:
         raise ValueError(f"no template for \"{lang}\" ({', '.join(LANGS)})")
     target = parent / mod_id
@@ -89,7 +90,7 @@ def create(mod_id: str, lang: str, parent: Path, name: str | None = None, descri
         "description": description or "What this mod does",
         "author": author or _author(),
         "class": _class_name(mod_id),
-        "ident": mod_id.replace("-", "_"),
+        "ident": re.sub(r"[-.]", "_", mod_id),
         "api_dir": (ROOT / "loader" / "include").as_posix(),
     }
     manifest_values = {key: json.dumps(value, ensure_ascii=False)[1:-1] for key, value in values.items()}
@@ -109,9 +110,34 @@ def create(mod_id: str, lang: str, parent: Path, name: str | None = None, descri
 def _relative_path(value: str) -> Path | None:
     # Mirage loads Windows paths even when a project is prepared on Linux.
     path = PureWindowsPath(value)
-    if path.anchor or ".." in path.parts or "\0" in value:
+    if path.anchor or ".." in path.parts or ":" in value or any(ord(c) < 32 for c in value):
         return None
     return Path(*path.parts)
+
+
+def _declaration_path(name: str) -> Path | None:
+    path = _relative_path(name)
+    if path is None or path.suffix.lower() != ".toml" or str(path).lower() in ("mod.toml", "config.toml"):
+        return None
+    return path
+
+
+def _section(folder: Path, name: str, value, problems: list[str]) -> dict:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        path = _declaration_path(value)
+        if path is not None:
+            try:
+                file = (folder / path).resolve(strict=True)
+                if not file.is_relative_to(folder.resolve()) or not file.is_file():
+                    raise ValueError("expected a file inside the mod folder")
+                return tomllib.loads(file.read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                problems.append(f"{name}: {value}: {exc}")
+                return {}
+    problems.append(f"{name} must be a table or a TOML file path inside the mod folder")
+    return {}
 
 
 def inspect(folder: Path) -> tuple[ModInfo | None, list[str]]:
@@ -125,29 +151,51 @@ def inspect(folder: Path) -> tuple[ModInfo | None, list[str]]:
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as e:
         return None, [f"mod.toml: {e}"]
     mod_id = m.get("id", "")
-    if not isinstance(mod_id, str) or not MANIFEST_ID_RE.fullmatch(mod_id):
-        problems.append("id must be 2–64 lowercase letters, digits, '-' or '_', starting with a letter or digit")
+    if not isinstance(mod_id, str) or not 2 <= len(mod_id) <= 64 or not MANIFEST_ID_RE.fullmatch(mod_id):
+        problems.append("id must be 2–64 characters with valid dot-separated components")
     version = m.get("version", "")
     if not isinstance(version, str) or not SEMVER_RE.fullmatch(version):
         problems.append(f"version \"{version}\" isn't a semantic version (\"1.0.0\")")
     if not isinstance(m.get("mirage"), str) or not m["mirage"].strip():
         problems.append('mirage must be a compatibility range such as "^0.1"')
-    settings = m.get("settings", {})
-    if not isinstance(settings, dict):
-        problems.append("settings must be a table of [settings.<key>] entries")
-        settings = {}
+    settings = _section(folder, "settings", m.get("settings", {}), problems)
     for key, s in settings.items():
-        t = s.get("type") if isinstance(s, dict) else None
+        default = s.get("default") if isinstance(s, dict) else s
+        inferred = {bool: "bool", int: "int", float: "float", str: "string"}.get(type(default))
+        t = s.get("type", "enum" if "options" in s else inferred) if isinstance(s, dict) else inferred
         if not isinstance(t, str) or t not in SETTING_TYPES:
             problems.append(f"settings.{key}: type \"{t}\" ({', '.join(sorted(SETTING_TYPES))})")
-        if t == "choice" and not s.get("options"):
-            problems.append(f"settings.{key}: a choice needs options = [...]")
+        if t in ("choice", "enum"):
+            options = s.get("options", [])
+            if not isinstance(options, list) or not options or not all(isinstance(o, str) and o for o in options):
+                problems.append(f"settings.{key}: an enum needs nonempty string options")
+            elif len(set(options)) != len(options) or default not in options:
+                problems.append(f"settings.{key}: options must be unique and include the default")
+
+    actions = _section(folder, "actions", m.get("actions", {}), problems)
+    for key, action in actions.items():
+        binding = action.get("key") if isinstance(action, dict) else action
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,63}", key):
+            problems.append(f"actions.{key}: invalid action id")
+        if not isinstance(binding, str) or not binding:
+            problems.append(f"actions.{key}: a key or chord is required")
 
     native_project = (folder / "CMakeLists.txt").is_file()
     managed_project = any(folder.glob("*.csproj"))
+    declared = {key: m[key] for key in ("entry", "lua", "dotnet") if key in m}
+    entrypoints = m.get("entrypoints", {})
+    if not isinstance(entrypoints, dict):
+        problems.append("entrypoints must be a table")
+    else:
+        for key, value in entrypoints.items():
+            field = {"native": "entry", "lua": "lua", "dotnet": "dotnet"}.get(key)
+            if field is None or field in declared or value == "":
+                problems.append(f"entrypoints.{key}: unknown, empty or duplicate entry point")
+            else:
+                declared[field] = value
     entries: dict[str, Path] = {}
     for key, suffixes in (("entry", {".dll"}), ("lua", {".lua"}), ("dotnet", {".cs", ".dll"})):
-        value = m.get(key, "")
+        value = declared.get(key, "")
         if value == "":
             continue
         path = _relative_path(value) if isinstance(value, str) else None
@@ -175,7 +223,7 @@ def inspect(folder: Path) -> tuple[ModInfo | None, list[str]]:
 
     if native_project:
         kind = "native"
-        if "entry" not in entries and not m.get("entry"):
+        if "entry" not in entries and not declared.get("entry"):
             problems.append("a native mod needs entry = \"<its>.dll\"")
     elif managed_project:
         kind = "csproj"
@@ -197,15 +245,41 @@ def inspect(folder: Path) -> tuple[ModInfo | None, list[str]]:
 def build(info: ModInfo, toolchain) -> tuple[Path | None, str]:
     """The mod as it is installed: (folder, what happened). Native and C# projects are built; the rest is the folder."""
     if info.kind == "native":
-        return em.build_native(toolchain, info.id, source=info.folder)
-    if info.kind == "csproj":
-        return em.build_csharp(info.id, source=info.folder)
-    return info.folder, f"{info.id}: {info.kind}, nothing to build"
+        built, message = em.build_native(toolchain, info.id, source=info.folder)
+    elif info.kind == "csproj":
+        built, message = em.build_csharp(info.id, source=info.folder)
+    else:
+        return info.folder, f"{info.id}: {info.kind}, nothing to build"
+    if built is not None:
+        for field in ("actions", "settings"):
+            reference = info.manifest.get(field)
+            if isinstance(reference, str):
+                path = _declaration_path(reference)
+                if path is None:
+                    return None, f"{field}: invalid TOML path {reference!r}"
+                dest = built / path
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(info.folder / path, dest)
+    return built, message
 
 
 def _copy_mod(source: Path, target: Path) -> None:
-    ignore = shutil.ignore_patterns("build", "bin", "obj", ".vs", ".idea", "*.user", "__pycache__", *KEEP_ON_INSTALL)
+    patterns = shutil.ignore_patterns("build", "obj", ".git", ".vs", ".idea", "*.user", "__pycache__")
+
+    def ignore(folder, names):
+        return patterns(folder, names) | (set(KEEP_ON_INSTALL) if Path(folder) == source else set())
+
     shutil.copytree(source, target, ignore=ignore, dirs_exist_ok=True)
+    manifest = tomllib.loads((source / "mod.toml").read_text(encoding="utf-8"))
+    for field in ("actions", "settings"):
+        reference = manifest.get(field)
+        if isinstance(reference, str):
+            path = _declaration_path(reference)
+            if path is None:
+                raise ValueError(f"{field}: invalid TOML path {reference!r}")
+            if not (target / path).is_file():
+                (target / path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source / path, target / path)
 
 
 def install(built: Path, mod_id: str, game_dir: Path) -> Path:
@@ -227,17 +301,30 @@ def install(built: Path, mod_id: str, game_dir: Path) -> Path:
     return target
 
 
-def package(built: Path, info: ModInfo) -> Path:
+def package(built: Path, info: ModInfo, format: str = "zip") -> Path:
     DIST.mkdir(parents=True, exist_ok=True)
-    out = DIST / f"{info.id}-{info.version}.zip"
-    staging = OUT / "package" / info.id
-    if staging.exists():
-        shutil.rmtree(staging)
-    _copy_mod(built, staging)
-    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        for f in sorted(staging.rglob("*")):
-            if f.is_file():
-                z.write(f, Path(info.id) / f.relative_to(staging))
+    out = DIST / f"{info.id}-{info.version}.{format}"
+    with tempfile.TemporaryDirectory(dir=DIST) as scratch:
+        staging = Path(scratch) / info.id
+        temp = Path(scratch) / out.name
+        _copy_mod(built, staging)
+        if format == "miragemod":
+            packer = next((p for config in ("release", "debug")
+                           if (p := build_dir(config) / "archive" / "mirage_pack.exe").is_file()), None)
+            if packer is None:
+                raise ValueError("Build the archive tool first with uv run mirage build -t mirage_pack")
+            run = subprocess.run([str(packer), str(staging), str(temp)], capture_output=True, text=True)
+            if run.returncode != 0:
+                raise ValueError(run.stderr.strip() or "mirage_pack failed")
+            with temp.open("rb") as envelope:
+                if envelope.read(8) != b"MUMS\0\0\0\0":
+                    raise ValueError("Rebuild the selected mirage_pack tool to package the MUMS envelope")
+        else:
+            with zipfile.ZipFile(temp, "w", zipfile.ZIP_DEFLATED) as z:
+                for f in sorted(staging.rglob("*")):
+                    if f.is_file():
+                        z.write(f, Path(info.id) / f.relative_to(staging))
+        temp.replace(out)
     return out
 
 
@@ -308,11 +395,15 @@ def register(cli: click.Group, console: Console, toolchain_of, find_game_dir) ->
 
     @mod.command("package")
     @folder_arg
+    @click.option("--format", "archive_format", type=click.Choice(["zip", "miragemod"]), default="zip", show_default=True)
     @click.pass_context
-    def package_cmd(ctx: click.Context, folder: Path) -> None:
-        """Builds it and zips the mod as it is installed: dist/mods/<id>-<version>.zip."""
+    def package_cmd(ctx: click.Context, folder: Path, archive_format: str) -> None:
+        """Build the mod and package it in dist/mods."""
         info = resolve(ctx, folder)
-        out = package(built_or_exit(ctx, info), info)
+        try:
+            out = package(built_or_exit(ctx, info), info, archive_format)
+        except (OSError, ValueError) as exc:
+            raise click.ClickException(str(exc)) from exc
         console.print(f"[green]Packaged[/]: {out}")
 
     @mod.command("install")

@@ -2,7 +2,7 @@
 # against the public API only, and embedded in the menu's DLL as a resource; runtime/firstparty writes it out next to
 # the mod's other files at startup.
 #
-#   mods/<id>/CMakeLists.txt:   mirage_native_mod(<id> SOURCES a.cpp b.cpp [LIBS nlohmann_json::nlohmann_json])
+#   mods/<id>/CMakeLists.txt:   mirage_native_mod(<id> SOURCES a.cpp b.cpp [LIBS glaze::glaze])
 #   mods/<id>/mod.toml:         entry = "<id>.dll"
 #
 # What a native mod may use: loader/include/ (mirage/api.h, mirage/mirage.hpp), its own files and the header-only libraries listed
@@ -11,7 +11,7 @@
 
 # The SDK is public (sdk/, loader/include/mirage/sdk.hpp). imgui (+ imgui_filebrowser): only with MirageApi imgui_context, which
 # refuses a mod built with another ImGui version (loader/include/mirage/imgui.hpp).
-set(MIRAGE_MOD_ALLOWED_LIBS nlohmann_json::nlohmann_json mirage::sdk fmt::fmt unordered_dense magic_enum::magic_enum
+set(MIRAGE_MOD_ALLOWED_LIBS glaze::glaze mirage::sdk fmt::fmt unordered_dense magic_enum::magic_enum
     imgui imgui_filebrowser)
 
 function(mirage_native_mod id)

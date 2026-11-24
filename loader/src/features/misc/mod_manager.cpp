@@ -20,7 +20,7 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cfloat>
+#include <cstring>
 #include <deque>
 #include <string>
 #include <vector>
@@ -41,14 +41,23 @@ namespace
 			if (!gui::visible) return;		// A window to work in: only with the menu open
 			++g_frames;
 			theme::Begin();
-			ImGui::SetNextWindowPos({300.f, 120.f}, ImGuiCond_FirstUseEver);
-			ImGui::SetNextWindowSize({760.f, 460.f}, ImGuiCond_FirstUseEver);
-			ImGui::SetNextWindowSizeConstraints({480.f, 260.f}, {FLT_MAX, FLT_MAX});
+			const auto* viewport = ImGui::GetMainViewport();
+			const ImVec2 room{std::max(1.f, viewport->WorkSize.x - 16.f), std::max(1.f, viewport->WorkSize.y - 16.f)};
+			ImGui::SetNextWindowPos(viewport->GetWorkCenter(), ImGuiCond_FirstUseEver, {0.5f, 0.5f});
+			ImGui::SetNextWindowSize({std::min(760.f, room.x), std::min(460.f, room.y)}, ImGuiCond_FirstUseEver);
+			ImGui::SetNextWindowSizeConstraints({std::min(410.f, room.x), std::min(260.f, room.y)}, room);
 			bool open = true;
 			if (ImGui::Begin("Mod Manager", &open, ImGuiWindowFlags_NoCollapse)) {
-				const auto mods = mirage::mods::List();
+				auto mods = mirage::mods::List();
+				std::ranges::sort(mods, [](const auto& left, const auto& right) {
+					const auto& a = left.name.empty() ? left.id : left.name;
+					const auto& b = right.name.empty() ? right.id : right.name;
+					const int order = _stricmp(a.c_str(), b.c_str());
+					return order ? order < 0 : left.id < right.id;
+				});
 				g_rows = mods.size();
-				if (selected_.empty() && !mods.empty()) selected_ = mods.front().id;
+				auto selected = std::ranges::find(mods, selected_, &mirage::mods::Info::id);
+				if (selected == mods.end() && !mods.empty()) selected_ = mods.front().id;
 				// Safe mode (step 10): why nothing loaded, and that the next start is a normal one
 				if (const std::string why = mirage::mods::SafeModeReason(); !why.empty()) {
 					ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{0.95f, 0.8f, 0.3f, 1.f});
@@ -71,14 +80,30 @@ namespace
 						ImGui::TreePop();
 					}
 				}
-				ImGui::BeginChild("##list", {230.f, 0.f}, ImGuiChildFlags_Borders);
-				for (const auto& m : mods) DrawRow(m);
+				const float sidebar = std::clamp(ImGui::GetContentRegionAvail().x * 0.33f, 142.f, 265.f);
+				ImGui::SetNextItemWidth(sidebar);
+				if (ImGui::InputTextWithHint("##mod-filter", "Filter mods", filter_.InputBuf, sizeof(filter_.InputBuf)))
+					filter_.Build();
+				if (ImGui::BeginChild("##list", {sidebar, 0.f}, ImGuiChildFlags_Borders)) {
+					bool any = false;
+					std::string searchable;
+					for (const auto& m : mods) {
+						if (filter_.IsActive()) {
+							searchable.assign(m.name).append(" ").append(m.id);
+							if (!filter_.PassFilter(searchable.c_str())) continue;
+						}
+						DrawRow(m);
+						any = true;
+					}
+					if (!any && !mods.empty()) ImGui::TextDisabled("No matching mods.");
+				}
 				ImGui::EndChild();
 				ImGui::SameLine();
-				ImGui::BeginChild("##details", {0.f, 0.f}, ImGuiChildFlags_Borders);
-				const auto it = std::find_if(mods.begin(), mods.end(), [&](const auto& m) { return m.id == selected_; });
-				if (it != mods.end()) DrawDetails(*it);
-				else ImGui::TextDisabled("No mods: put mod folders in mirage\\mods");
+				if (ImGui::BeginChild("##details", {0.f, 0.f}, ImGuiChildFlags_Borders)) {
+					selected = std::ranges::find(mods, selected_, &mirage::mods::Info::id);
+					if (selected != mods.end()) DrawDetails(*selected);
+					else ImGui::TextDisabled("No mods installed.");
+				}
 				ImGui::EndChild();
 			}
 			ImGui::End();
@@ -174,17 +199,20 @@ namespace
 			for (const auto& a : m.actions) {
 				const std::string id = m.id + "/" + a.name;
 				ImGui::PushID(id.c_str());
-				ImGui::TextUnformatted(a.name.c_str());
+				ImGui::TextUnformatted((a.label.empty() ? a.name : a.label).c_str());
 				if (!a.description.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", a.description.c_str());
 				ImGui::SameLine(ImGui::GetFontSize() * 12.f);
 				if (g_capturing == id) {
-					ImGui::Button("Press a key (Esc: cancel)");
+					ImGui::Button("Press a key or chord (Esc: cancel)");
 					if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) g_capturing.clear();
 					else
 						for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k)
 							if (ImGui::IsKeyPressed(static_cast<ImGuiKey>(k), false))
 								if (const std::string name = EngineKeyName(static_cast<ImGuiKey>(k)); !name.empty()) {
-									mirage::mods::SetActionKey(m.id, a.name, name == a.defaultKey ? "" : name);
+									const auto& io = ImGui::GetIO();
+									const std::string binding = std::string(io.KeyCtrl ? "Ctrl+" : "") +
+										(io.KeyShift ? "Shift+" : "") + (io.KeyAlt ? "Alt+" : "") + name;
+									mirage::mods::SetActionKey(m.id, a.name, binding == a.defaultKey ? "" : binding);
 									g_capturing.clear();
 									break;
 								}
@@ -380,6 +408,7 @@ namespace
 		}
 
 		std::string selected_;
+		ImGuiTextFilter filter_;
 		std::uint64_t lastId_ = 0;
 		std::deque<logging::Entry> lines_;
 	};

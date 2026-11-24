@@ -6,6 +6,7 @@ add_executable(mirage_tests
         test_float_util.cpp
         test_cache_system.cpp
         test_mesh.cpp
+        test_pe_laa.cpp
         test_geometry.cpp
         test_static_scene.cpp
         test_settings.cpp
@@ -78,10 +79,15 @@ target_include_directories(mirage_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src $
         ${CMAKE_BINARY_DIR}/generated)   # symbols_toml.inc
 target_compile_definitions(mirage_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
         MIRAGE_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
-target_link_libraries(mirage_tests PRIVATE GTest::gtest_main zstd_compress nlohmann_json::nlohmann_json imgui imgui_color_text_edit spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense xxhash::xxhash FastFloat::fast_float)
+target_link_libraries(mirage_tests PRIVATE GTest::gtest_main zstd_compress imgui imgui_color_text_edit spdlog::spdlog toml11::toml11 MirageHook::MirageHook Zydis magic_enum::magic_enum unordered_dense::unordered_dense rapidhash::rapidhash FastFloat::fast_float)
 if(MSVC)
-  target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8)
+  # Keep frame pointers in optimized builds so sampler tests walk stacks like the loader does.
+  target_compile_options(mirage_tests PRIVATE /W4 /permissive- /utf-8 $<$<NOT:$<CONFIG:Debug>>:/Oy->)
 endif()
+
+# glaze and ImReflect, used as Mirage uses them
+target_sources(mirage_tests PRIVATE test_libraries.cpp)
+target_link_libraries(mirage_tests PRIVATE glaze::glaze imreflect)
 
 # mirage.vec runs in a plain Lua state (Lua is built with the game layer)
 if(TARGET lua::lua)
@@ -95,6 +101,14 @@ gtest_discover_tests(mirage_tests DISCOVERY_MODE PRE_TEST)
 
 # docs/api-reference.md is generated from loader/include/mirage/api.h (`mirage docs api`): out of date fails here
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(MIRAGE_BUILD_APIGEN)
+  add_executable(mirage_apigen_tests test_apigen.cpp
+      ${CMAKE_SOURCE_DIR}/loader/src/runtime/lua/lua_functions.cpp
+      $<TARGET_OBJECTS:mirage_apigen_bindings>)
+  target_include_directories(mirage_apigen_tests PRIVATE ${CMAKE_SOURCE_DIR}/loader/src ${CMAKE_SOURCE_DIR}/loader/include)
+  target_link_libraries(mirage_apigen_tests PRIVATE lua::lua)
+  add_test(NAME MirageAPIGen.Bindings COMMAND mirage_apigen_tests)
+endif()
 if(Python3_Interpreter_FOUND)
   add_test(NAME ApiReference.UpToDate COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/gen_api_docs.py --check)
 endif()
@@ -113,7 +127,7 @@ add_executable(installer_tests
         ${CMAKE_SOURCE_DIR}/installer/src/install.cpp
         ${CMAKE_SOURCE_DIR}/launcher/src/detect.cpp
         ${MIRAGE_TEST_PAYLOAD_RC})
-target_include_directories(installer_tests PRIVATE ${CMAKE_SOURCE_DIR}/installer/src ${CMAKE_SOURCE_DIR}/launcher/src)
+target_include_directories(installer_tests PRIVATE ${CMAKE_SOURCE_DIR}/installer/src ${CMAKE_SOURCE_DIR}/launcher/src ${CMAKE_SOURCE_DIR}/loader/src)
 target_compile_definitions(installer_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE MIRAGE_VERSION="test"
         MIRAGE_TEST_DATA="${CMAKE_CURRENT_SOURCE_DIR}/installer")
 target_link_libraries(installer_tests PRIVATE GTest::gtest_main shell32 advapi32)

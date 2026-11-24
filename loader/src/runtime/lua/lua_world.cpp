@@ -171,6 +171,24 @@ namespace mirage::mods
 		return 1;
 	}
 
+	// mirage.model("models/x.glb"): the mod's model as a game StaticMesh (for an actor's SetStaticMesh), or nil and
+	// "pending" while it is built (ask again on a later tick), or nil (it can't be: the log says why). Game thread.
+	int LuaMod::ModelFn(lua_State* L)
+	{
+		LuaMod& self = Self(L);
+		if (!MIRAGE_API_HAS(self.api_, model_mesh)) return luaL_error(L, "mirage.model: this runtime has no mod models");
+		int32_t pending = 0;
+		MirageObject* mesh = self.api_->model_mesh(self.mod_, luaL_checkstring(L, 1), &pending);
+		if (mesh) {
+			PushObject(L, mesh);
+			return 1;
+		}
+		lua_pushnil(L);
+		if (!pending) return 1;
+		lua_pushstring(L, "pending");
+		return 2;
+	}
+
 	// mirage.spawn(class, {x, y, z}, {pitch, yaw, roll}): an actor (destroyed on revert and unload), or nil. class: the
 	// mod's "classes/X.uc", another mod's "mirage-ai:classes/MirageBot.uc", or "Engine.Trigger"
 	int LuaMod::SpawnFn(lua_State* L)
@@ -397,8 +415,8 @@ namespace mirage::mods
 
 	// mirage.draw3d.lines({{a, b, color}, ...}): lines in the world, drawn by the runtime's renderer inside the game's
 	// frame (behind walls where there is depth); a, b vectors, color as mirage.rgba gives it. Each call replaces the last
-	// (the renderer's moving layer: call it every tick for what moves). The drawing is the last mod's to set it (the
-	// Collision View's when that is on). mirage.draw3d.clear(): the mod's lines gone. Game thread.
+	// (the renderer's moving layer: call it every tick for what moves). Each mod's lines are its own: drawn with every
+	// other mod's. mirage.draw3d.clear(): the mod's lines gone. Game thread.
 	int LuaMod::Draw3dLines(lua_State* L)
 	{
 		LuaMod& self = Self(L);
@@ -428,6 +446,10 @@ namespace mirage::mods
 			}
 			lua_settop(L, line - 1);
 		}
+		if (MIRAGE_API_HAS(self.api_, world_draw_lines)) {		// The mod's own lines: other mods' stay
+			self.api_->world_draw_lines(self.mod_, lines.data(), static_cast<uint32_t>(lines.size()));
+			return 0;
+		}
 		MirageWorldMesh mesh{};
 		mesh.size = sizeof mesh;
 		mesh.lines = lines.data();
@@ -440,6 +462,10 @@ namespace mirage::mods
 	int LuaMod::Draw3dClear(lua_State* L)
 	{
 		LuaMod& self = Self(L);
+		if (MIRAGE_API_HAS(self.api_, world_draw_lines)) {
+			self.api_->world_draw_lines(self.mod_, nullptr, 0);
+			return 0;
+		}
 		if (!MIRAGE_API_HAS(self.api_, world_draw_set)) return 0;
 		self.api_->world_draw_set(MIRAGE_WORLD_MOVING, nullptr);
 		self.api_->world_draw_active(self.mod_, 0);
@@ -929,7 +955,7 @@ namespace mirage::mods
 		MirageObject* actor = CheckObject(L, 1);
 		std::string text(self.api_->anim_sets(actor, nullptr, 0) + 1, '\0');
 		text.resize(self.api_->anim_sets(actor, text.data(), static_cast<uint32_t>(text.size())));
-		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		PushJson(L, jc::parse(text));
 		return 1;
 	}
 
@@ -965,22 +991,21 @@ namespace mirage::mods
 		LuaMod& self = Self(L);
 		std::string text(self.api_->change_list(self.mod_, nullptr, 0) + 1, '\0');
 		self.api_->change_list(self.mod_, text.data(), static_cast<uint32_t>(text.size()));
-		const auto j = nlohmann::json::parse(text.c_str(), nullptr, false);
+		const jc::json j = jc::parse(text.c_str());
 		lua_newtable(L);
-		if (!j.is_array()) return 1;
 		int n = 0;
-		for (const auto& t : j) {
+		for (const jc::json& t : jc::items(j)) {
 			lua_newtable(L);
-			lua_pushinteger(L, t.value("id", 0));
+			lua_pushinteger(L, jc::value(t, "id", 0));
 			lua_setfield(L, -2, "id");
-			lua_pushstring(L, t.value("name", std::string()).c_str());
+			lua_pushstring(L, jc::value(t, "name", std::string()).c_str());
 			lua_setfield(L, -2, "name");
-			lua_pushboolean(L, t.value("reverted", false));
+			lua_pushboolean(L, jc::value(t, "reverted", false));
 			lua_setfield(L, -2, "reverted");
 			lua_newtable(L);
 			int k = 0;
-			for (const auto& v : t.value("values", nlohmann::json::array())) {
-				lua_pushstring(L, v.get<std::string>().c_str());
+			for (const jc::json& v : jc::items(t, "values")) {
+				lua_pushstring(L, jc::as<std::string>(v).c_str());
 				lua_rawseti(L, -2, ++k);
 			}
 			lua_setfield(L, -2, "values");
@@ -1098,7 +1123,7 @@ namespace mirage::mods
 		{"menu_slider", LuaMod::MenuSliderFn}, {"menu_slider_value", LuaMod::MenuSliderValueFn},
 		{"call", LuaMod::CallGame}, {"valid", LuaMod::Valid}, {"actors", LuaMod::Actors}, {"changes", LuaMod::Changes},
 		{"body", LuaMod::BodyFn}, {"set_body", LuaMod::SetBodyFn}, {"impulse", LuaMod::ImpulseFn},
-		{"force", LuaMod::ForceFn}, {"spawn_prop", LuaMod::SpawnPropFn}, {"spawn", LuaMod::SpawnFn},
+		{"force", LuaMod::ForceFn}, {"spawn_prop", LuaMod::SpawnPropFn}, {"spawn", LuaMod::SpawnFn}, {"model", LuaMod::ModelFn},
 		{"collision", LuaMod::CollisionFn}, {"set_collision", LuaMod::SetCollisionFn}, {"trace", LuaMod::TraceFn},
 		{"camera", LuaMod::CameraFn}, {"world_to_screen", LuaMod::WorldToScreenFn}, {"overlap", LuaMod::OverlapFn},
 		{"joint", LuaMod::JointFn}, {"trigger", LuaMod::TriggerFn}, {"trigger_count", LuaMod::TriggerCountFn},

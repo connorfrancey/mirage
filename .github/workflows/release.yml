@@ -52,8 +52,8 @@ jobs:
         run: uv run mirage info
 
       - name: Configure
-        # No Doxygen on the runner: leave out the SDK docs target. Tests and installer are off by default.
-        run: uv run mirage configure -c release -D MIRAGE_BUILD_TESTS=ON -D MIRAGE_BUILD_INSTALLER=ON
+        # package --no-build requires both the installer and the launcher.
+        run: uv run mirage configure -c release -D MIRAGE_BUILD_TESTS=ON -D MIRAGE_BUILD_INSTALLER=ON -D MIRAGE_BUILD_LAUNCHER=ON
 
       - name: Build
         run: uv run mirage build -c release
@@ -81,19 +81,10 @@ jobs:
           # v2.0.1-dev, v2.1.0-rc1, ...: a pre-release, so releases/latest (what install.ps1 / install.sh get) skips it
           prerelease: ${{ contains(github.ref_name, '-') }}
           body: |
-            ## Install
+            ## Install on Windows
 
-            Paste this into PowerShell and accept the administrator prompt:
+            Download [mirage_installer.exe](${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/mirage_installer.exe) for this release.
+            Verify the download against [SHA256SUMS.txt](${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}/SHA256SUMS.txt).
 
-            ```powershell
-            irm https://raw.githubusercontent.com/${{ github.repository }}/master/install.ps1 | iex
-            ```
-
-            Linux, Steam Deck or macOS (Proton / Wine): paste this into a terminal and follow its last step:
-
-            ```sh
-            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/master/install.sh | bash
-            ```
-
-            Or download `mirage_installer.exe` below and click **Install**. Then start Mirror's Edge as usual:
-            **INSERT** opens the menu, **END** unloads it. Run the command again any time to update.
+            Run the installer and click **Install**. Start Mirror's Edge as usual.
+            **Insert** opens the Mirage menu and **End** unloads it.

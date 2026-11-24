@@ -1,4 +1,25 @@
+<div align="center">
+<img src="assets/mirage-logo.png" alt="Mirage Logo" width="220">
+
 # Mirage
+
+**A modern, high-performance mod loader for Mirror's Edge (2008).**
+
+[![Build](https://github.com/connorfrancey/mirage/actions/workflows/build.yml/badge.svg)](https://github.com/connorfrancey/mirage/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/connorfrancey/mirage?include_prereleases)](https://github.com/connorfrancey/mirage/releases)
+[![Downloads](https://img.shields.io/github/downloads/connorfrancey/mirage/total)](https://github.com/connorfrancey/mirage/releases)
+
+![C++](https://img.shields.io/badge/C++-20-00599C?logo=cplusplus&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-x86-0078D4?logo=windows&logoColor=white)
+![UE3](https://img.shields.io/badge/Unreal%20Engine-3-313131)
+![Status](https://img.shields.io/badge/status-Pre--Alpha-orange)
+
+[Installation](docs/installation.md) ·
+[Documentation](docs/getting-started.md) ·
+[Mod Development](docs/mod-development.md) ·
+[Releases](https://github.com/connorfrancey/mirage/releases)
+
+</div>
 
 A mod loader for **Mirror's Edge** (2008, PC). Mirage loads mods with the game, gives them a live, reflected view of
 the Unreal Engine 3 underneath, and keeps them isolated, hot-reloadable and undoable. Mods are written in **Lua**,
@@ -103,7 +124,7 @@ use its wrapper `mirage.hpp`, C# mods `managed/Mirage`, and the engine's types a
 | `loader/proxy/` | `dinput8.dll`: sits next to the game and loads `mirage\Mirage.dll` |
 | `sdk/` | The Mirror's Edge SDK, generated from the game's packages (`tools/sdkgen`; never edited by hand) |
 | `managed/` | `Mirage.dll` for C# mods (.NET 10, x86) |
-| `mods/` | Mirage's first-party mods, built into the loader: `mirage-levels` (level select, sublevels, restart), `mirage-collision` (Collision View), `mirage-grapple` (Grappling Hook), `mirage-ai` (enemies for level layers) |
+| `mods/` | Mirage's first-party mods, built into the loader: `mirage-levels` (level select, sublevels, restart), `mirage-collision` (Collision View), `mirage-grapple` (Grappling Hook), `mirage-portals` (Portal Gun), `mirage-ai` (enemies for level layers) |
 | `examples/mods/` | Example mods and the mod author's guide |
 | `installer/`, `launcher/` | `mirage_installer.exe`; `mirage_launcher.exe` (injects into a running game) |
 | `tests/` | Unit tests (GoogleTest), the self-test's test mods, the sources of test maps |
@@ -124,6 +145,7 @@ uv run mirage test                  # unit tests, no game needed
 uv run mirage game-test             # the in-game self-test in the real game (installs, runs, closes it)
 uv run mirage install-game          # build and install into the game
 uv run mirage sdk                   # regenerate sdk/ from the game's packages
+uv run mirage sdk-browse TdPawn     # a type's layout in sdk/ (-m finds fields and functions by name)
 uv run mirage package               # the installer, in dist/
 ```
 

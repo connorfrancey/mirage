@@ -18,6 +18,7 @@
 // removed mid-publish is not called once removal returned).
 //
 // Statistics per event type (published, handlers, time in handlers, failures) for the diagnostics.
+// TODO: Add EnTT layer
 #include <algorithm>
 #include <atomic>
 #include <chrono>

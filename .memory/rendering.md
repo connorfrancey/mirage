@@ -2,6 +2,7 @@
 
 The live backend is Direct3D 9 with ImGui Win32/DX9. `hooks.cpp` owns EndScene, Reset, window/input integration, frame dispatch, and device-loss callbacks. `gui.cpp` presents the module UI and controls. Render work and ImGui go through the render thread. [Hooks](../loader/src/hooks.cpp), [GUI](../loader/src/gui.cpp), [thread ownership](architecture.md)
 
+- The main window browses categories and searches module controls. The same ordered insertion path handles built-ins, startup mods, and render-thread publication. Category order and module order are presentation concerns. The Mod Manager sorts its display by name and shows load order in details. [Registry](../loader/src/core/module.cpp), [default categories](../loader/src/features/tabs.cpp), [Mod Manager](../loader/src/features/misc/mod_manager.cpp)
 - `debug_renderer` consumes snapshots of world geometry. Snapshot construction can happen off the render thread, while engine reads obey game-thread ownership. Reuse existing depth and overlay paths. [Debug renderer](../loader/src/render/debug_renderer.h), [mesh helpers](../loader/src/render/mesh.h)
 - `postfx` draws ordered fullscreen D3D9 effects in EndScene before the menu. Follow its state preservation and reset hooks when adding device resources. [Post effects](../loader/src/render/postfx.h)
 - The `MirageUi` API supplies stable rendering controls to mods. Native mods using the ImGui wrapper depend on context and version compatibility. [Public API](../loader/include/mirage/api.h), [ImGui wrapper](../loader/include/mirage/imgui.hpp)

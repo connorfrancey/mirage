@@ -1,0 +1,21 @@
+# A first-party mod: part of the menu, written against the public API only (Lua). It ships inside the menu's DLL and
+# is written to mirage\mods\mirage-portals at startup: edit a copy under another id, not this folder. See main.lua.
+id = "mirage-portals"
+name = "Portal Gun"
+version = "1.0.0"
+description = "Shoot a blue and an orange portal onto any surface, then walk, run or fall through one to come out of the other"
+authors = ["Mirage"]
+mirage = "^0.1"
+
+# Input actions: keys the player can rebind in the mod manager
+[actions.blue]
+key = "LeftMouseButton"
+description = "Shoot the blue portal at the surface you aim at"
+
+[actions.orange]
+key = "RightMouseButton"
+description = "Shoot the orange portal at the surface you aim at"
+
+[actions.close]
+key = "R"
+description = "Close both portals"

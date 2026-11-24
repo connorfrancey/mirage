@@ -10,6 +10,7 @@
 #include <functional>
 #include <atomic>
 #include <mutex>
+#include <tuple>
 #include <spdlog/spdlog.h>
 
 // ---- Module --------------------------------------------------------------------------------------------------------------
@@ -50,7 +51,6 @@ namespace {
 struct TabDecl {
     std::string name;
     int order;
-    float width;
 };
 
 // Function-local statics: modules register from static initializers in many files, in no particular order.
@@ -78,18 +78,29 @@ void EachModule(F&& f)
     for (std::size_t i = 0; i < n; ++i) f(*g_modules[i]);
 }
 
+bool TabLess(const std::unique_ptr<modules::Tab>& left, const std::unique_ptr<modules::Tab>& right)
+{
+    return std::tie(left->order, left->name) < std::tie(right->order, right->name);
+}
+
+modules::Tab& AddTab(std::unique_ptr<modules::Tab> tab)
+{
+    const auto at = std::lower_bound(g_tabs.begin(), g_tabs.end(), tab, TabLess);
+    return **g_tabs.insert(at, std::move(tab));
+}
+
 void InsertInTab(Module* m)
 {
-    auto it = std::find_if(g_tabs.begin(), g_tabs.end(), [&](const auto& t) { return t->name == m->Tab(); });
-    if (it == g_tabs.end()) {
-        auto tab = std::make_unique<modules::Tab>();
-        tab->name = m->Tab();
-        g_tabs.push_back(std::move(tab));
-        it = g_tabs.end() - 1;
+    const auto it = std::find_if(g_tabs.begin(), g_tabs.end(), [&](const auto& t) { return t->name == m->Tab(); });
+    modules::Tab* tab = it == g_tabs.end() ? nullptr : it->get();
+    if (!tab) {
+        auto created = std::make_unique<modules::Tab>();
+        created->name = m->Tab();
+        tab = &AddTab(std::move(created));
     }
-    auto& list = (*it)->modules;
-    const auto at = std::find_if(list.begin(), list.end(), [&](const Module* o) {
-        return o->Order() != m->Order() ? m->Order() < o->Order() : m->Name() < o->Name();
+    auto& list = tab->modules;
+    const auto at = std::lower_bound(list.begin(), list.end(), m, [](const Module* a, const Module* b) {
+        return std::pair{a->Order(), std::string_view(a->Name())} < std::pair{b->Order(), std::string_view(b->Name())};
     });
     list.insert(at, m);
 }
@@ -109,9 +120,9 @@ bool Append(std::unique_ptr<Module> module)
 
 void modules::Register(Factory factory) { Factories().push_back(factory); }
 
-modules::TabRegistrar::TabRegistrar(std::string name, int order, float width)
+modules::TabRegistrar::TabRegistrar(std::string name, int order)
 {
-    TabDecls().push_back({std::move(name), order, width});
+    TabDecls().push_back({std::move(name), order});
 }
 
 std::vector<std::unique_ptr<modules::Tab>>& modules::Tabs() { return g_tabs; }
@@ -124,34 +135,10 @@ void modules::Init()
     for (Factory make : Factories()) g_modules.push_back(make());
     g_count.store(g_modules.size(), std::memory_order_release);
 
-    // Tabs: the declared ones first (by their order), then any tab only modules mention, in the order they first appear.
-    std::vector<TabDecl> decls = TabDecls();
-    std::stable_sort(decls.begin(), decls.end(), [](const TabDecl& a, const TabDecl& b) { return a.order < b.order; });
-    for (const TabDecl& d : decls) {
-        auto tab = std::make_unique<Tab>();
-        tab->name = d.name;
-        tab->order = d.order;
-        tab->width = d.width;
-        g_tabs.push_back(std::move(tab));
+    for (const TabDecl& d : TabDecls()) {
+        AddTab(std::make_unique<Tab>(Tab{d.name, d.order, {}}));
     }
-
-    // Registration order depends on the linker, so sort the modules first: tab, then order, then name.
-    std::vector<Module*> sorted;
-    for (auto& m : g_modules) sorted.push_back(m.get());
-    std::sort(sorted.begin(), sorted.end(), [](const Module* a, const Module* b) {
-        if (a->Order() != b->Order()) return a->Order() < b->Order();
-        return a->Name() < b->Name();
-    });
-    for (Module* m : sorted) {
-        auto it = std::find_if(g_tabs.begin(), g_tabs.end(), [&](const auto& t) { return t->name == m->Tab(); });
-        if (it == g_tabs.end()) {
-            auto tab = std::make_unique<Tab>();
-            tab->name = m->Tab();
-            g_tabs.push_back(std::move(tab));
-            it = g_tabs.end() - 1;
-        }
-        (*it)->modules.push_back(m);
-    }
+    for (auto& m : g_modules) InsertInTab(m.get());
     spdlog::info("{} modules in {} tabs", g_modules.size(), g_tabs.size());
 }
 
@@ -167,8 +154,8 @@ Module* modules::Add(std::unique_ptr<Module> module)
 void modules::Remove(Module* module)
 {
     if (g_started) return;
-    // Its tab goes too when this was its last module (a tab only a mod's modules used)
-    std::erase_if(g_tabs, [&](const auto& t) { return std::erase(t->modules, module) > 0 && t->modules.empty(); });
+    // Keep the category's declared position if another mod registers a module there later.
+    for (const auto& tab : g_tabs) std::erase(tab->modules, module);
     std::erase_if(g_modules, [&](const auto& m) { return m.get() == module; });
     g_count.store(g_modules.size(), std::memory_order_release);
 }

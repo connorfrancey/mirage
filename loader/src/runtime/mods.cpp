@@ -8,6 +8,7 @@
 #include "core/module.h"
 #include "core/setting.h"
 #include "game/game.h"
+#include "hooks.h"
 #include "runtime/content.h"
 #include "runtime/manifest.h"
 #include "runtime/options_menu.h"
@@ -146,7 +147,7 @@ namespace mirage::mods
 		std::set<std::string> g_userOff, g_crashed;
 
 		// ---- Safe mode (step 10): <mods folder>/starting.toml lives from the start of loading until the first level ---
-		// has loaded (or the menu unloads cleanly). Found at a start, the last one never got there: a crash during the
+		// with a player is up, the main menu included (or the menu unloads cleanly). Found at a start, the last one never got there: a crash during the
 		// start (one a mod's crash record doesn't explain: recording one removes the marker), or the game closed early.
 		std::filesystem::path g_marker;
 		std::string g_safeMode;					// Why no mod loads in this session ("" normally)
@@ -462,12 +463,13 @@ namespace mirage::mods
 						s = std::make_unique<ctl::SliderInt>(&m, d.name, static_cast<int>(d.intDefault),
 															 static_cast<int>(std::clamp<double>(d.min, -(INT32_MAX / 2), INT32_MAX / 2)),
 															 static_cast<int>(std::clamp<double>(d.max, -(INT32_MAX / 2), INT32_MAX / 2)),
-															 d.format.empty() ? std::string("%d") : d.format, 0, d.description);
+												 d.format.empty() ? std::string("%d") : d.format, static_cast<int>(d.step),
+												 d.description, d.hasRange, d.step > 0);
 						break;
 					case T::Float:
 						s = std::make_unique<ctl::Slider>(&m, d.name, static_cast<float>(d.floatDefault), static_cast<float>(d.min),
 														  static_cast<float>(d.max), d.format.empty() ? std::string("%.2f") : d.format,
-														  0.f, d.description);
+												  static_cast<float>(d.step), d.description, d.hasRange, d.step > 0);
 						break;
 					case T::String: s = std::make_unique<ctl::Text>(&m, d.name, d.stringDefault, d.description); break;
 					case T::Color: s = std::make_unique<ctl::ColorPick>(&m, d.name, d.colorDefault, d.description); break;
@@ -946,7 +948,8 @@ namespace mirage::mods
 			game_api::MoveRemove, game_api::AnimPlay, game_api::AnimStop, game_api::AnimState, game_api::AnimSets,
 			game_api::ActorSpawn, game_api::SoundPlay, game_api::SoundStop, game_api::SoundPlaying,
 			game_api::PostfxCreate, game_api::PostfxSet, game_api::PostfxEnable, game_api::PostfxError,
-			game_api::MenuSlider, game_api::MenuSliderValue,
+			game_api::MenuSlider, game_api::MenuSliderValue, world::DrawLines, game_api::ModelMesh,
+			game_api::PortalClass,
 		};
 
 		// ---- Loading -----------------------------------------------------------------------------------------------
@@ -1030,7 +1033,8 @@ namespace mirage::mods
 			mod.state = State::Loading;
 			mod.pending.clear();
 			for (ModModule* m : mod.modules) m->Unbind();
-			mod.fingerprint = watch::Fingerprint(mod.manifest.dir);
+			mod.fingerprint = watch::Fingerprint(mod.manifest.dir, mod.manifest.actionsFile, mod.manifest.settingsFile);
+			mod.codeFingerprint = watch::Fingerprint(mod.manifest.dir, mod.manifest.actionsFile, mod.manifest.settingsFile, true);
 			std::string problem;
 			if (!mod.manifest.entry.empty()) problem = LoadNative(mod);
 			if (problem.empty() && !mod.manifest.dotnet.empty()) {		// C# (runtime/mod_dotnet.h)
@@ -1123,7 +1127,7 @@ namespace mirage::mods
 			std::filesystem::create_directories(folders.front(), ec);
 			g_marker = folders.front() / "starting.toml";
 			if (std::filesystem::exists(g_marker, ec)) {
-				g_safeMode = "the last start didn't reach the first level (a crash during the start, or the game was closed first)";
+				g_safeMode = "the last start didn't reach the main menu (a crash during the start, or the game was closed first)";
 				try {		// A reason written into the marker (the self-test plants one)
 					const toml::value m = toml::parse(g_marker);
 					if (m.contains("reason") && m.at("reason").is_string()) g_safeMode = m.at("reason").as_string();
@@ -1257,6 +1261,40 @@ namespace mirage::mods
 		}
 	}
 
+	namespace
+	{
+		bool SameSettingsLayout(const std::vector<SettingDecl>& before, const std::vector<SettingDecl>& after)
+		{
+			if (before.size() != after.size()) return false;
+			for (std::size_t i = 0; i < before.size(); ++i) {
+				SettingDecl old = before[i];
+				const SettingDecl& next = after[i];
+				old.boolDefault = next.boolDefault;
+				old.intDefault = next.intDefault;
+				old.floatDefault = next.floatDefault;
+				old.stringDefault = next.stringDefault;
+				old.colorDefault = next.colorDefault;
+				if (old != next) return false;
+			}
+			return true;
+		}
+
+		void UpdateDefault(ctl::Setting* setting, const SettingDecl& d)
+		{
+			using T = SettingDecl::Type;
+			switch (d.type) {
+				case T::Bool: static_cast<ctl::Checkbox*>(setting)->SetDefault(d.boolDefault); break;
+				case T::Int: static_cast<ctl::SliderInt*>(setting)->SetDefault(static_cast<int>(d.intDefault)); break;
+				case T::Float: static_cast<ctl::Slider*>(setting)->SetDefault(static_cast<float>(d.floatDefault)); break;
+				case T::String: static_cast<ctl::Text*>(setting)->SetDefault(d.stringDefault); break;
+				case T::Choice: static_cast<ctl::Combo*>(setting)->SetDefault(static_cast<int>(d.intDefault)); break;
+				case T::Key: static_cast<ctl::KeyHold*>(setting)->SetDefault(static_cast<int>(d.intDefault)); break;
+				case T::Color: static_cast<ctl::ColorPick*>(setting)->SetDefault(d.colorDefault); break;
+			}
+			setting->Owner().MarkDirty();
+		}
+	}
+
 	std::string Reload(const std::string& id)
 	{
 		const auto it = std::find_if(g_mods.begin(), g_mods.end(), [&](const auto& m) { return m->id == id; });
@@ -1270,6 +1308,51 @@ namespace mirage::mods
 		Parsed p = Load(mod.manifest.dir);
 		if (!p.manifest) return "mod.toml: " + (p.errors.empty() ? std::string("invalid") : p.errors.front());
 		if (p.manifest->id != mod.id) return "mod.toml: the id changed";
+
+		const auto& actionsFile = mod.manifest.actionsFile;
+		const auto& settingsFile = mod.manifest.settingsFile;
+		const auto& dir = mod.manifest.dir;
+		const auto fingerprint = watch::Fingerprint(dir, actionsFile, settingsFile);
+		const bool configOnly = state == State::Active && fingerprint != mod.fingerprint &&
+			watch::Fingerprint(dir, actionsFile, settingsFile, true) == mod.codeFingerprint;
+		const bool settingsChanged = mod.manifest.settings != p.manifest->settings;
+		if (state == State::Active && settingsChanged && (!settingsFile.empty() || !p.manifest->settingsFile.empty()) &&
+			(!configOnly || !SameSettingsLayout(mod.manifest.settings, p.manifest->settings)))
+			return "settings declaration layout changed or code was edited too; restart to apply the settings";
+		if (configOnly) {
+			auto apply = [id, manifest = std::move(*p.manifest), fingerprint, settingsChanged]() mutable {
+				std::lock_guard lock(g_modsLock);
+				const auto it = std::find_if(g_mods.begin(), g_mods.end(), [&](const auto& m) { return m->id == id; });
+				if (it == g_mods.end()) return;
+				MirageMod& target = **it;
+				if (target.state.load() != (settingsChanged ? State::Detached : State::Active)) return;
+				if (settingsChanged) {
+					for (const auto& d : manifest.settings) {
+						const auto setting = target.declared.find(d.key);
+						if (setting != target.declared.end()) UpdateDefault(setting->second, d);
+					}
+					target.manifest.settings = std::move(manifest.settings);
+				}
+				target.manifest.actions = std::move(manifest.actions);
+				target.fingerprint = fingerprint;
+				if (settingsChanged) target.state = State::Active;
+			};
+			if (settingsChanged) {
+				// Existing handles stay valid. Pause callbacks while the render thread updates their defaults.
+				auto active = State::Active;
+				if (!mod.state.compare_exchange_strong(active, State::Detached)) return "it stopped while reloading";
+				const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+				while (mod.inflight.load() > 0) {
+					if (std::chrono::steady_clock::now() >= deadline) {
+						mod.state = state;
+						return "a call into it didn't return";
+					}
+					Sleep(0);
+				}
+				hooks::RunOnRenderThread(std::move(apply));
+			} else apply();
+			return {};
+		}
 
 		// The old code undoes its changes, then stops
 		std::vector<ModModule*> wasOn;
@@ -1321,7 +1404,7 @@ namespace mirage::mods
 			if (mod.loadIndex < 0) continue;	// Never loaded (left out at its phase)
 			const std::wstring folder = mod.manifest.dir.filename().wstring();
 			if (!changes.scanAll && !changes.folders.contains(folder)) continue;
-			const std::uintmax_t now = watch::Fingerprint(mod.manifest.dir);
+			const std::uintmax_t now = watch::Fingerprint(mod.manifest.dir, mod.manifest.actionsFile, mod.manifest.settingsFile);
 			if (now == mod.fingerprint) continue;
 			if (now != mod.seen) {	// Still being written (an editor saving, a build): the next check decides
 				mod.seen = now;
@@ -1335,7 +1418,10 @@ namespace mirage::mods
 				mod.fingerprint = now;
 				continue;
 			}
-			Reload(mod.id);		// Sets the fingerprint again, failed or not
+			if (const auto problem = Reload(mod.id); !problem.empty()) {
+				spdlog::warn("[mod {}] hot reload: {}", mod.id, problem);
+				mod.fingerprint = now;
+			}
 		}
 	}
 
@@ -1370,9 +1456,11 @@ namespace mirage::mods
 
 	void StartupFinished()
 	{
-		if (!g_marker.empty() && std::filesystem::exists(g_marker)) spdlog::info("Mods: the start finished (the first level is in)");
+		if (!g_marker.empty() && std::filesystem::exists(g_marker)) spdlog::info("Mods: the start finished (a level with a player is up)");
 		RemoveMarker();
 	}
+
+	void ForgetStart() { RemoveMarker(); }
 
 	std::string SafeModeReason() { return g_safeMode; }
 
@@ -1438,7 +1526,7 @@ namespace mirage::mods
 		return out;
 	}
 
-	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key)
+	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key, int modifiers)
 	{
 		const auto same = [](const std::string& a, const std::string& b) {
 			return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
@@ -1450,14 +1538,28 @@ namespace mirage::mods
 		for (const auto& owned : g_mods) {
 			MirageMod& mod = *owned;
 			if (mod.state.load() != State::Active || mod.manifest.actions.empty()) continue;
-			for (const ActionDecl& a : mod.manifest.actions)
-				if (same(ActionKey(mod, a), key)) out.emplace_back(mod.id, a.name);
+			const std::size_t first = out.size();
+			int strongest = -1;
+			for (const ActionDecl& a : mod.manifest.actions) {
+				const std::string configured = ActionKey(mod, a);
+				const auto override = configured == a.key ? std::nullopt : keys::ParseChord(configured);
+				const keys::Chord& chord = override ? *override : a.chord;
+				if ((modifiers & chord.modifiers) != chord.modifiers || !same(chord.engineKey, key)) continue;
+				const int specificity = keys::Specificity(chord.modifiers);
+				if (specificity < strongest) continue;
+				if (specificity > strongest) {
+					out.resize(first);
+					strongest = specificity;
+				}
+				out.emplace_back(mod.id, a.name);
+			}
 		}
 		return out;
 	}
 
 	bool SetActionKey(const std::string& modId, const std::string& action, const std::string& key)
 	{
+		if (!key.empty() && !keys::ParseChord(key)) return false;
 		std::lock_guard modsLock(g_modsLock);
 		for (const auto& owned : g_mods) {
 			MirageMod& mod = *owned;
@@ -1505,7 +1607,8 @@ namespace mirage::mods
 			for (const ModModule* m : mod.modules)
 				if (m->Bound()) info.modules.push_back(m->Name());
 			info.warnings = mod.warnings;
-			for (const ActionDecl& a : mod.manifest.actions) info.actions.push_back({a.name, ActionKey(*owned, a), a.key, a.description});
+			for (const ActionDecl& a : mod.manifest.actions)
+				info.actions.push_back({a.name, ActionKey(*owned, a), a.key, a.description, a.label});
 			info.description = mod.manifest.description;
 			for (const auto& a : mod.manifest.authors) info.authors += (info.authors.empty() ? "" : ", ") + a;
 			const auto deps = [](const std::vector<Dependency>& list, std::vector<std::string>& to) {

@@ -92,7 +92,10 @@ def msvc_env(vs_path: Path, refresh: bool = False) -> dict[str, str]:
         raise ToolchainError(f"{vcvars} is missing: repair the Visual Studio C++ tools.")
 
     cache = CACHE_DIR / "msvc-x86-env.json"
-    key = f"{vcvars}|{vcvars.stat().st_mtime_ns}"
+    # A toolset update leaves vcvarsall.bat alone but changes the default toolset version: both are in the key
+    version_file = vcvars.parent / "Microsoft.VCToolsVersion.default.txt"
+    version = version_file.read_text(encoding="utf-8").strip() if version_file.exists() else ""
+    key = f"{vcvars}|{vcvars.stat().st_mtime_ns}|{version}"
     if not refresh and cache.exists():
         try:
             data = json.loads(cache.read_text(encoding="utf-8"))

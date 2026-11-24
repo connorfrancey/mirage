@@ -84,7 +84,7 @@ namespace mirage::mods
 		bool crashed = false;					// In crashes.toml: not loaded until allowed again
 		struct Action
 		{
-			std::string name, key, defaultKey, description;	// key: the one it is on now (the player's, or mod.toml's)
+			std::string name, key, defaultKey, description, label;
 		};
 		std::vector<Action> actions;			// Its input actions (mod.toml [actions.<name>])
 	};
@@ -108,17 +108,20 @@ namespace mirage::mods
 	std::vector<Info> List();
 
 	// ---- Safe mode and conflicts (step 10) -----------------------------------------------------------------------------
-	// Why no mod loads in this session: the last start didn't reach the first level (<mods>/starting.toml was still
+	// Why no mod loads in this session: the last start didn't reach the main menu (<mods>/starting.toml was still
 	// there), or Shift was held as the game started. "" normally.
 	std::string SafeModeReason();
-	// The start got to the first level: the marker goes (the next start is a normal one)
+	// The start got to a level with a player (the main menu is one): the marker goes (the next start is a normal one)
 	void StartupFinished();
+	// The player quit on purpose (the failsafe key): the marker goes without a word, so the next start isn't a safe
+	// mode one. Takes no locks and doesn't log: it runs while the game may be hung.
+	void ForgetStart();
 	// Where the touch sets of the mods that load overlap (runtime/touch), found before any of them loaded
 	std::vector<touch::Overlap> Overlaps();
 
 	// The loaded mods' input actions (mod.toml [actions.<name>]) on the key `key` (the engine's name, any case):
 	// {mod id, action name} each, in load order
-	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key);
+	std::vector<std::pair<std::string, std::string>> ActionsForKey(const std::string& key, int modifiers = 0);
 	// Puts one of a mod's input actions on `key` (the engine's key name), saved in the mod's config.toml; "" puts it back
 	// on mod.toml's key. False: no such mod or action, or the file couldn't be written.
 	bool SetActionKey(const std::string& modId, const std::string& action, const std::string& key);

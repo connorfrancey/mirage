@@ -1,6 +1,6 @@
 #include "runtime/changes.h"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 
 #include <algorithm>
 #include <map>
@@ -150,10 +150,21 @@ namespace mirage::changes
 		return out;
 	}
 
+	namespace detail
+	{
+		struct ListEntry	// What a mod reads: Info with its paths under "values"
+		{
+			int id;
+			std::string name;
+			std::vector<std::string> values;
+			bool reverted;
+		};
+	}
+
 	std::string ListJson(const std::string& modId)
 	{
-		nlohmann::json j = nlohmann::json::array();
-		for (const Info& i : List(modId)) j.push_back({{"id", i.id}, {"name", i.name}, {"values", i.paths}, {"reverted", i.reverted}});
-		return j.dump();
+		std::vector<detail::ListEntry> out;
+		for (Info& i : List(modId)) out.push_back({i.id, std::move(i.name), std::move(i.paths), i.reverted});
+		return jc::dump(out);
 	}
 }

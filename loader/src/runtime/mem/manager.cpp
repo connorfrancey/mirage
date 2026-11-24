@@ -8,7 +8,7 @@
 #include "runtime/mem/pool.h"
 #include "runtime/mem/profiler.h"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 #include <spdlog/spdlog.h>
 
 #include <Windows.h>
@@ -21,6 +21,7 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <mutex>
 #include <new>
@@ -125,31 +126,22 @@ namespace mirage::mem
 
 		void LoadProfiles(Predictor& p)
 		{
-			std::ifstream in(ProfilePath());
+			std::ifstream in(ProfilePath(), std::ios::binary);
 			if (!in) return;
-			const auto j = nlohmann::json::parse(in, nullptr, false);
-			if (!j.is_object()) return;
-			for (const auto& [level, v] : j.items()) {
-				LevelProfile lp;
-				lp.peakPrivate = v.value("peakPrivate", std::uint64_t{0});
-				lp.minLargestFree = v.value("minLargestFree", std::uint64_t{0});
-				lp.visits = v.value("visits", 0);
-				p.Set(level, lp);
-			}
+			std::map<std::string, LevelProfile> levels;		// LevelProfile's members are the file's keys
+			if (!jc::read(std::string{std::istreambuf_iterator<char>(in), {}}, levels)) return;
+			for (const auto& [level, lp] : levels) p.Set(level, lp);
 		}
 
 		void SaveProfiles(const Predictor& p)
 		{
-			nlohmann::json j = nlohmann::json::object();
-			for (const auto& [level, lp] : p.All())
-				j[level] = {{"peakPrivate", lp.peakPrivate}, {"minLargestFree", lp.minLargestFree}, {"visits", lp.visits}};
 			std::error_code ec;
 			std::filesystem::create_directories(ProfilePath().parent_path(), ec);
 			const auto tmp = ProfilePath().string() + ".tmp";
 			{
 				std::ofstream out(tmp, std::ios::trunc);
 				if (!out) return;
-				out << j.dump(1, '\t');
+				out << jc::dump(p.All(), true);
 			}
 			std::filesystem::rename(tmp, ProfilePath(), ec);
 		}

@@ -43,6 +43,7 @@ namespace mirage::mpaf::detail
 	std::uint64_t Add(std::uint64_t left, std::uint64_t right, std::uint64_t limit, ErrorCode code);
 	ArchiveHeader DecodeHeader(Bytes bytes, Limits limits);
 	std::array<std::byte, HeaderSize> EncodeHeader(const ArchiveHeader& header);
+	std::uint32_t UpdateCrc(std::uint32_t crc, Bytes bytes) noexcept;
 	void ReadExact(std::istream& input, std::span<std::byte> data);
 	void WriteStream(std::ostream& output, Bytes data);
 	void WriteNewFile(const std::filesystem::path& path,

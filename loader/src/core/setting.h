@@ -1,5 +1,5 @@
 #pragma once
-#include <nlohmann/json_fwd.hpp>
+#include <glaze/json/generic_fwd.hpp>
 
 #include <array>
 #include <functional>
@@ -59,8 +59,8 @@ namespace ctl {
 		virtual bool Resettable() const { return false; }
 		virtual bool IsDefault() const { return true; }
 		virtual void ResetToDefault() {}
-		virtual void Save(nlohmann::ordered_json &out) const { (void)out; }
-		virtual void Load(const nlohmann::ordered_json &in) { (void)in; }
+		virtual void Save(glz::generic_i64& out) const { (void)out; }
+		virtual void Load(const glz::generic_i64& in) { (void)in; }
 
 	protected:
 		struct Binds {          // Labels; missing ones are nullptr
@@ -87,13 +87,18 @@ namespace ctl {
 		const T& Get() const { return value_; }
 		operator const T&() const { return value_; }
 		void Set(T v) { value_ = Clamp(std::move(v)); }
+		void SetDefault(T v) {
+			const bool followDefault = IsDefault();
+			default_ = std::move(v);
+			if (followDefault) Set(default_);
+		}
 
 		bool Persistent() const override { return true; }
 		bool Resettable() const override { return true; }
 		bool IsDefault() const override { return value_ == Clamp(default_); }
 		void ResetToDefault() override { Set(default_); }
-		void Save(nlohmann::ordered_json& out) const override;
-		void Load(const nlohmann::ordered_json& in) override;
+		void Save(glz::generic_i64& out) const override;
+		void Load(const glz::generic_i64& in) override;
 
 	protected:
 		Value(Module* owner, std::string name, T value, std::string tooltip, Binds binds = {})
@@ -127,7 +132,8 @@ namespace ctl {
 	class BasicSlider final : public Value<T> {
 	public:
 		BasicSlider(Module* owner, std::string name, T value, T min, T max,
-					std::string format = std::is_integral_v<T> ? "%d" : "%.2f", T step = 0, std::string tooltip = {});
+					std::string format = std::is_integral_v<T> ? "%d" : "%.2f", T step = 0, std::string tooltip = {},
+					bool bounded = true, bool snap = false);
 
 	protected:
 		T Clamp(T v) const override;
@@ -137,6 +143,7 @@ namespace ctl {
 	private:
 		T min_, max_, step_;
 		std::string format_;
+		bool bounded_, snap_;
 	};
 	extern template class BasicSlider<float>;
 	extern template class BasicSlider<int>;

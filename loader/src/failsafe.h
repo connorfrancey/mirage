@@ -16,11 +16,13 @@ namespace failsafe {
     constexpr const char* kName = "Ctrl+Alt+Shift+F12";
     constexpr UINT kExitCode = 0xDEAD;   // Exit code of a failsafe kill (57005), recognisable in crash tools
 
+    using KillFn = void (*)();
     struct State {
         HANDLE thread = nullptr;
         HANDLE ready = nullptr;     // Set once the thread has its message queue (Stop's WM_QUIT can't get lost)
         DWORD threadId = 0;
         LogFn log = nullptr;
+        KillFn beforeKill = nullptr;    // Runs on the failsafe thread right before the kill: no locks, no waiting
     };
     inline State& S() { static State s; return s; }
 
@@ -47,6 +49,7 @@ namespace failsafe {
             HANDLE t = CreateThread(nullptr, 0, LogKill, reinterpret_cast<LPVOID>(log), 0, nullptr);
             if (t) { WaitForSingleObject(t, 300); CloseHandle(t); }
         }
+        if (KillFn f = S().beforeKill) f();
         TerminateProcess(GetCurrentProcess(), kExitCode);
         ExitProcess(kExitCode);   // Not reached
     }
@@ -88,6 +91,10 @@ namespace failsafe {
         if (s.thread && s.ready) WaitForSingleObject(s.ready, 2000);
     }
 
+    // What to do right before a kill (Mirage: forget the start in progress, so a deliberate quit isn't taken for a
+    // crash). It must not take locks a hung thread could hold.
+    inline void OnKill(KillFn f) { S().beforeKill = f; }
+
     // Before the DLL unloads: the thread's code is in this DLL.
     inline void Stop()
     {
@@ -99,5 +106,6 @@ namespace failsafe {
         if (s.ready) CloseHandle(s.ready);
         s.thread = s.ready = nullptr;
         s.log = nullptr;
+        s.beforeKill = nullptr;
     }
 }

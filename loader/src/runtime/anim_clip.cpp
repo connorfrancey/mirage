@@ -10,7 +10,7 @@
 #include "runtime/maps.h"
 #include "sdk/SDK.hpp"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -116,24 +116,24 @@ namespace mirage::anim
 		}
 
 		// A clip's keys: `n` is 1 or the frame count; every number finite
-		template <std::size_t N> bool ReadKeys(const nlohmann::json& j, int frames, std::vector<std::array<float, N>>& out, std::string& why)
+		template <std::size_t N> bool ReadKeys(const jc::json& j, int frames, std::vector<std::array<float, N>>& out, std::string& why)
 		{
 			if (!j.is_array() || (j.size() != 1 && static_cast<int>(j.size()) != frames)) {
 				why = "needs 1 key or one a frame (" + std::to_string(frames) + ")";
 				return false;
 			}
-			for (const auto& k : j) {
+			for (const jc::json& k : j.get_array()) {
 				if (!k.is_array() || k.size() != N) {
 					why = "a key isn't " + std::to_string(N) + " numbers";
 					return false;
 				}
 				std::array<float, N> v{};
 				for (std::size_t i = 0; i < N; ++i) {
-					if (!k[i].is_number() || !std::isfinite(k[i].get<double>())) {
+					if (!k[i].is_number() || !std::isfinite(k[i].as<double>())) {
 						why = "a key isn't a finite number";
 						return false;
 					}
-					v[i] = k[i].get<float>();
+					v[i] = k[i].as<float>();
 				}
 				out.push_back(v);
 			}
@@ -195,26 +195,26 @@ namespace mirage::anim
 			if (error) *error = why;
 			return false;
 		};
-		const auto j = nlohmann::json::parse(text, nullptr, false);
+		const jc::json j = jc::parse(text);
 		if (!j.is_object()) return fail("not a JSON object");
 		Clip c;
-		c.name = j.value("name", std::string());
-		c.base = j.value("base", std::string());
-		c.length = j.value("length", 0.f);
-		c.rate = j.value("rate", 1.f);
-		c.frames = j.value("frames", 0);
+		c.name = jc::value(j, "name", std::string());
+		c.base = jc::value(j, "base", std::string());
+		c.length = jc::value(j, "length", 0.f);
+		c.rate = jc::value(j, "rate", 1.f);
+		c.frames = jc::value(j, "frames", 0);
 		if (c.frames < 1 || c.frames > kMaxFrames) return fail("frames must be 1 to " + std::to_string(kMaxFrames));
 		if (!std::isfinite(c.length) || c.length < 0.f || (c.frames > 1 && c.length <= 0.f)) return fail("length must be above 0");
 		if (!std::isfinite(c.rate) || c.rate <= 0.f) return fail("rate must be above 0");
-		if (!j.contains("meshes") || !j["meshes"].is_object()) return fail("no meshes");
-		for (const auto& [mesh, bones] : j["meshes"].items()) {
+		if (!jc::member(j, "meshes").is_object()) return fail("no meshes");
+		for (const auto& [mesh, bones] : j["meshes"].get_object()) {
 			if (mesh != "Mesh1p" && mesh != "Mesh3p") return fail("meshes: '" + mesh + "' isn't Mesh1p or Mesh3p");
 			if (!bones.is_object()) return fail(mesh + " isn't an object of bones");
-			for (const auto& [bone, keys] : bones.items()) {
+			for (const auto& [bone, keys] : bones.get_object()) {
 				BoneKeys k;
 				std::string why;
-				if (!keys.is_object() || !keys.contains("rot")) return fail(mesh + "." + bone + ": needs rot");
-				if (keys.contains("pos") && !ReadKeys(keys["pos"], c.frames, k.pos, why)) return fail(mesh + "." + bone + ".pos " + why);
+				if (!jc::contains(keys, "rot")) return fail(mesh + "." + bone + ": needs rot");
+				if (jc::contains(keys, "pos") && !ReadKeys(keys["pos"], c.frames, k.pos, why)) return fail(mesh + "." + bone + ".pos " + why);
 				if (!ReadKeys(keys["rot"], c.frames, k.rot, why)) return fail(mesh + "." + bone + ".rot " + why);
 				for (auto& q : k.rot) {		// Unit rotations: a stray length scales the bone
 					const float len = std::sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
@@ -230,15 +230,23 @@ namespace mirage::anim
 
 	std::string ClipToJson(const Clip& clip)
 	{
-		nlohmann::json meshes = nlohmann::json::object();
+		const auto keys = [](const auto& list) {
+			jc::json out = jc::new_array();
+			for (const auto& key : list) {
+				jc::json& k = jc::push(out, jc::new_array());
+				for (float v : key) jc::push(k, v);
+			}
+			return out;
+		};
+		jc::json meshes = jc::new_object();
 		for (const auto& [mesh, bones] : clip.meshes)
 			for (const auto& [bone, k] : bones) {
-				meshes[mesh][bone] = {{"rot", k.rot}};
-				if (!k.pos.empty()) meshes[mesh][bone]["pos"] = k.pos;
+				meshes[mesh][bone]["rot"] = keys(k.rot);
+				if (!k.pos.empty()) meshes[mesh][bone]["pos"] = keys(k.pos);
 			}
-		nlohmann::json j = {{"name", clip.name}, {"length", clip.length}, {"rate", clip.rate}, {"frames", clip.frames}, {"meshes", meshes}};
+		jc::json j = {{"name", clip.name}, {"length", clip.length}, {"rate", clip.rate}, {"frames", clip.frames}, {"meshes", meshes}};
 		if (!clip.base.empty()) j["base"] = clip.base;
-		return j.dump(1);
+		return jc::dump(j, true);
 	}
 
 	bool Bake(Classes::AActor* actor, const std::string& sequence, int frames, Clip* out, std::string* error)

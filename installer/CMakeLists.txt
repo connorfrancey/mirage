@@ -22,7 +22,7 @@ add_executable(mirage_installer WIN32
         src/main.cpp src/install.cpp src/install.h src/resource.h
         ${CMAKE_SOURCE_DIR}/launcher/src/detect.cpp ${CMAKE_SOURCE_DIR}/launcher/src/detect.h
         ${MIRAGE_PAYLOAD_RC})
-target_include_directories(mirage_installer PRIVATE ${CMAKE_SOURCE_DIR}/launcher/src)
+target_include_directories(mirage_installer PRIVATE ${CMAKE_SOURCE_DIR}/launcher/src ${CMAKE_SOURCE_DIR}/loader/src)
 target_compile_definitions(mirage_installer PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX UNICODE _UNICODE
         MIRAGE_VERSION="${MIRAGE_VERSION}")
 target_link_libraries(mirage_installer PRIVATE comctl32 comdlg32 shell32 advapi32)

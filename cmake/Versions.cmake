@@ -1,64 +1,87 @@
-# --------------------------------------------------------------------
-# Library versions + git commits
-# --------------------------------------------------------------------
 
-# yaml-cpp - https://github.com/jbeder/yaml-cpp
-set(YAMLCPP_VERSION 0.9.0)
-set(YAMLCPP_GIT_TAG 56e3bb550c91fd7005566f19c079cb7a503223cf)
+# ==============================================================================
+# Mirage - Third-Party Dependency Versions
+# ==============================================================================
+#
+# Centralized dependency versions, tags, and commit hashes.
+# Referenced by CPMAddPackage() declarations throughout the project.
+#
+# ==============================================================================
 
-# fmt - https://github.com/fmtlib/fmt
-set(FMT_VERSION 12.2.0)   # UnrealLib's pin; spdlog uses this copy too (SPDLOG_FMT_EXTERNAL)
 
-# spdlog - https://github.com/gabime/spdlog/
-set(SPDLOG_VERSION v1.17.0)
+# ==============================================================================
+# Core Dependencies
+# ==============================================================================
 
-# TOML11 - https://github.com/ToruNiina/toml11
-set(TOML_VERSION v4.4.0)
+# YAML
+set(RAPIDYAML_VERSION v0.16.0)
 
-# UnrealLib - https://github.com/connorfrancey/UnrealLib
-set(UNREALLIB_GIT_TAG 8f1c5e9a10b3e8782a0d83a59ac1e389ae638d84)   # m4-m5-properties-reflection-bytecode: UnrealScript compiler and package writers
-set(LUA_VERSION v5.4.8)   # Mod scripting (loader/src/runtime/lua_vm.cpp): built from source, as C++
+# Serialization
+set(GLAZE_VERSION v9.1.0)
 
-# Tracy profiler client - https://github.com/wolfpld/tracy
-# (MIRAGE_TRACY). The Tracy profiler (the viewer) must be this same version.
-set(TRACY_VERSION v0.14.1)   # Matches the installed Tracy profiler (0.14.1): the protocol versions must match
+# Formatting
+set(FMT_VERSION           12.2.0)
 
-# Format.cmake - https://github.com/TheLartians/Format.cmake
-set(FORMATDOTCMAKE_VERSION 1.8.2)
+# Logging
+set(SPDLOG_VERSION        v1.17.0)
 
-# CPM Licenses - https://github.com/cpm-cmake/CPMLicenses.cmake
-set(CPM_LICENSES_VERSION 0.0.7)
+# JSON
+set(RAPIDJSON_VERSION v1.1.0)
 
-# GoogleTest + GoogleBenchmark - https://github.com/google/googletest / https://github.com/google/benchmark
-set(GOOGLETEST_VERSION v1.17.0)
-set(GOOGLEBENCH_VERSION v1.10.0)
+# TOML
+set(TOML11_VERSION        v4.4.0)
 
-# mmultiplayer (old) - https://github.com/connorfrancey/mmultiplayer
-set(MMULTIPLAYER_COMMIT 7b1eb25ddc0fc1ce498d024e7b2f9d1980b9eca3)
+# Serialization
+set(BITSERY_VERSION       v5.2.5)
 
-# ImGui-FileBrowser - https://github.com/AirGuanZ/imgui-filebrowser
+# Compression
+set(ZSTD_VERSION          v1.5.7)
 
-# imjson - https://github.com/moleium/imjson
-# TODO: Replace with custom imjson rewrite using toml11 (gh: connorfrancey/imtoml)
-set(IMJSON_COMMIT 3130d41cadf8883e082f7cad14e52a9644146005)
+# Parsing
+set(FASTFLOAT_VERSION     v8.3.3)
 
-# nlohmann/json - https://github.com/nlohmann/json
-set(NLOHMANN_JSON_VERSION 3.12.0)
 
-# zstd - https://github.com/meta/zstd
-set(ZSTD_VERSION v1.5.7)
+# ==============================================================================
+# Unreal Engine / Scripting
+# ==============================================================================
 
-# ImGui - https://github.com/ocornut/imgui
-# ImGui Addons:
-#  - ImGuiFileBrowser: https://github.com/AirGuanZ/imgui-filebrowser
-#  - ImGuiColorTextInput: https://github.com/BalazsJako/ImGuiColorTextEdit
-#  - imgui_rich_md: https://github.com/pthom/imgui_rich_md
-#  - ImGuiFileDialog: https://github.com/aiekick/ImGuiFileDialog
-#  - imguizmo: https://github.com/CedricGuillemet/ImGuizmo
-#  - implot:
-#  - imcurve: https://github.com/jsoulier/imcurve
-set(IMGUI_VERSION v1.92.9b-docking)   # The docking branch (its tags carry -docking)
-set(IMGUIFILEBROWSER_GIT_COMMIT 47a1884524d6a3df5d99f70ecc82e1ed0ccd26cf)
+# UnrealLib
+# Branch: m4-m5-properties-reflection-bytecode
+# Includes the UnrealScript compiler and package writers.
+set(UNREALLIB_GIT_TAG     8f1c5e9a10b3e8782a0d83a59ac1e389ae638d84)
+
+# Lua scripting runtime
+set(LUA_VERSION           v5.4.8)
+set(SOL2_VERSION v3.3.0)
+
+
+# ==============================================================================
+# Mirage Framework
+# ==============================================================================
+
+# MirageHook - Mirage's native x86 hooking library
+# All game hooks are routed through this library.
+set(MIRAGEHOOK_GIT_COMMIT 64d8d303375fede272210cd1db24b5dd9a9ac499)
+
+# mmultiplayer (legacy)
+set(MMULTIPLAYER_GIT_TAG  7b1eb25ddc0fc1ce498d024e7b2f9d1980b9eca3)
+
+
+# ==============================================================================
+# ImGui
+# ==============================================================================
+
+# Core
+set(IMGUI_VERSION         v1.92.9b-docking)
+
+# File browser
+set(IMGUIFILEBROWSER_GIT_COMMIT
+        47a1884524d6a3df5d99f70ecc82e1ed0ccd26cf)
+
+# File dialog
+set(IMGUIFILEDIALOG_VERSION v0.6.8)
+
+# Code editor
 set(IMGUICOLORTEXTINPUT_GIT_COMMIT a07eb7fa4d1c097e202950d75a41e583f5a28d2b)   # goossens' fork, 2026-11-04
 
 # Icons: IconFontCppHeaders names the codepoints of Font Awesome 6, whose solid font is embedded (cmake/Fonts.cmake)
@@ -68,45 +91,141 @@ set(FONTAWESOME_SOLID_SHA256 af19d135d3a935b3ebfbd80320716ffe1202052c5f68dc2c5f1
 
 # Models: assimp, in the offline model tool only (tools/model: `mirage model`), never in Mirage.dll
 set(ASSIMP_VERSION v6.0.5)
-set(IMGUI_MARKDOWN_GIT_COMMIT 68fb679b1ab314940589445b36934682cd3e8027)      # https://github.com/enkisoftware/imgui_markdown
-set(IMGUI_FLAMEGRAPH_GIT_COMMIT aae0bd9665d1379c511d0b8a64d3752301a327a2)    # https://github.com/bwrsandman/imgui-flame-graph
-set(IMGUI_CLUB_GIT_COMMIT b083116866e05e0d4bccb2c7f28d94a76ee4965e)          # https://github.com/ocornut/imgui_club
-set(IMGUI_RICHMD_VERSION v1.0.0)
+
+# Reflection: ImGui inputs drawn for a struct (Sven-vh/ImReflect: no releases, a commit)
+set(IMREFLECT_GIT_COMMIT  c4a07dba3badc78285a5cfdf324ab3f8412c3d50)
+
+# Markdown
+set(IMGUI_MARKDOWN_GIT_COMMIT
+        68fb679b1ab314940589445b36934682cd3e8027)
+
+set(IMGUI_RICHMD_VERSION  v1.0.0)
+
+# Node editor
 set(IMGUI_NODEEDITOR_VERSION v0.9.4)
-set(IMPLOT_VERSION v1.1)
-set(IMGUIZMO_VERSION 1.10)
-set(IMGUIFILEDIALOG_VERSION v0.6.8)
-set(IMCURVE_GIT_COMMIT 8cc8dc3a971593c6ce5aa8f418776545b2dbc3bb)     # https://github.com/jsoulier/imcurve/commit/8cc8dc3a971593c6ce5aa8f418776545b2dbc3bb
 
-# MirageHook - https://github.com/connorfrancey/miragehook (Mirage's own x86 hooking library, every hook goes through it; no tags yet)
-set(MIRAGEHOOK_GIT_COMMIT 64d8d303375fede272210cd1db24b5dd9a9ac499)
+# Gizmos
+set(IMGUIZMO_VERSION     1.10)
 
-# unordered_dense - https://github.com/martinus/unordered_dense
+# Plotting
+set(IMPLOT_VERSION       v1.1)
+
+# Curves
+set(IMCURVE_GIT_COMMIT   8cc8dc3a971593c6ce5aa8f418776545b2dbc3bb)
+
+# Flame graph
+set(IMGUI_FLAMEGRAPH_GIT_COMMIT
+        aae0bd9665d1379c511d0b8a64d3752301a327a2)
+
+# ImGui Club
+set(IMGUI_CLUB_GIT_COMMIT
+        b083116866e05e0d4bccb2c7f28d94a76ee4965e)
+
+
+# ==============================================================================
+# Containers / Data Structures
+# ==============================================================================
+
 set(UNORDERED_DENSE_VERSION v5.3.3)
+set(ATOMICQUEUE_VERSION     v1.9.4)
 
-# magic_enum - https://github.com/Neargye/magic_enum
-set(MAGICENUM_VERSION v0.9.8)
 
-# nameof - https://github.com/Neargye/nameof
-set(NAMEOF_VERSION v0.11.0)
+# ==============================================================================
+# Reflection / Type Utilities
+# ==============================================================================
 
-# mimalloc - https://github.com/microsoft/mimalloc
-set(MIMALLOC_VERSION v3.6.1)
+set(MAGICENUM_VERSION      v0.9.8)
+set(NAMEOF_VERSION         v0.11.0)
 
-set(ATOMICQUEUE_VERSION v1.9.4)
 
-# stb (stb_image, stb_dxt) - https://github.com/nothings/stb (no tags: a commit)
-set(STB_COMMIT 4e9b368bfc071e97206ea5c6adba68dd0cbf8897)
+# ==============================================================================
+# Memory Management
+# ==============================================================================
 
-# fast_float - https://github.com/fastfloat/fast_float
-set(FASTFLOAT_VERSION v8.3.3)
+set(MIMALLOC_VERSION       v3.6.1)
 
-# Utility libraries
-set(READERWRITERQUEUE_VERSION v1.0.6)   # https://github.com/cameron314/readerwriterqueue (MirageHook's pin: one copy)
-set(SIMDUTF_VERSION v9.3.3)             # https://github.com/simdutf/simdutf
-set(LIBUV_VERSION v1.53.0)              # https://github.com/libuv/libuv
-set(CPPTRACE_VERSION v1.0.4)            # https://github.com/jeremy-rifkin/cpptrace
-set(GHC_FILESYSTEM_VERSION v1.5.16)     # https://github.com/gulrak/filesystem
-set(DIRECTXMATH_VERSION jun2026)        # https://github.com/microsoft/DirectXMath
-set(BITSERY_VERSION v5.2.5)             # https://github.com/fraillt/bitsery
-set(SPAN_LITE_VERSION v0.11.0)          # https://github.com/martinmoene/span-lite
+
+# ==============================================================================
+# Concurrency
+# ==============================================================================
+
+# MirageHook's pinned copy; share this dependency where possible.
+set(READERWRITERQUEUE_VERSION v1.0.6)
+
+
+# ==============================================================================
+# System / Platform Utilities
+# ==============================================================================
+
+set(LIBUV_VERSION          v1.53.0)
+set(GHC_FILESYSTEM_VERSION v1.5.16)
+set(SPAN_LITE_VERSION      v0.11.0)
+
+
+# ==============================================================================
+# Unicode / Text Processing
+# ==============================================================================
+
+set(SIMDUTF_VERSION        v9.3.3)
+
+
+# ==============================================================================
+# Graphics / Mathematics
+# ==============================================================================
+
+set(DIRECTXMATH_VERSION    jun2026)
+
+
+# ==============================================================================
+# Diagnostics / Profiling
+# ==============================================================================
+
+set(CPPTRACE_VERSION       v1.0.4)
+
+# Tracy client and profiler must use matching versions.
+set(TRACY_VERSION          v0.14.1)
+
+
+# ==============================================================================
+# Testing / Benchmarking
+# ==============================================================================
+
+set(GOOGLETEST_VERSION     v1.17.0)
+set(GOOGLEBENCH_VERSION   v1.10.0)
+
+
+# ==============================================================================
+# Build Tools
+# ==============================================================================
+
+set(FORMATDOTCMAKE_VERSION 1.8.2)
+set(CPM_LICENSES_VERSION   0.0.7)
+
+
+# ==============================================================================
+# Single-Header / Vendored Dependencies
+# ==============================================================================
+
+# stb (stb_image, stb_dxt)
+set(STB_GIT_COMMIT         4e9b368bfc071e97206ea5c6adba68dd0cbf8897)
+
+
+# ==============================================================================
+# Legacy / Transitional Dependencies
+# ==============================================================================
+
+
+
+# ==============================================================================
+# Dependency Notes
+# ==============================================================================
+
+# fmt:
+#   UnrealLib's pinned version. spdlog should use this copy through
+#   SPDLOG_FMT_EXTERNAL.
+
+# Tracy:
+#   The Tracy profiler GUI must match the client version.
+
+# ReaderWriterQueue:
+#   MirageHook already pins this dependency. Avoid duplicate copies.

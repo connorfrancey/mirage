@@ -21,6 +21,8 @@ namespace mirage::mpaf
 	inline constexpr std::size_t EntrySize = 64;
 	inline constexpr std::size_t MaxPathSize = 4096;
 	inline constexpr std::string_view ManifestPath = "manifest.yaml";
+	inline constexpr std::string_view TomlManifestPath = "mod.toml";
+	constexpr bool IsManifestPath(std::string_view path) { return path == TomlManifestPath || path == ManifestPath; }
 
 	enum class EntryType : std::uint16_t { File, Manifest, Directory };
 	enum class ErrorCode { Format, Version, Limit, Path, Duplicate, Missing, Checksum, Io, Destination };
@@ -96,7 +98,7 @@ namespace mirage::mpaf
 		[[nodiscard]] const ArchiveEntry* Find(std::string_view path) const noexcept;
 		/// Return a verified zero-copy view of the file bytes. Directory paths are rejected.
 		[[nodiscard]] Bytes Read(std::string_view path) const;
-		[[nodiscard]] Bytes Manifest() const { return Read(ManifestPath); }
+		[[nodiscard]] Bytes Manifest() const { return Read(Find(TomlManifestPath) ? TomlManifestPath : ManifestPath); }
 		void Verify() const;
 		void Extract(std::string_view path, std::ostream& output) const;
 		/// Write a new file under a trusted destination parent. Existing paths are rejected.

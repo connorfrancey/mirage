@@ -51,9 +51,11 @@ struct MirageMod
 	std::vector<std::unique_ptr<Module>> pending;		// Registered by the current load, not in the menu yet
 	std::map<std::string, ctl::Setting*> declared;		// Its mod.toml settings that were made, by key
 	std::mutex configLock;
-	toml::value config;
+	// TODO: Replace nlohmann/json with glaze
+	toml::value config;	
 	bool configRead = false;
 	std::uintmax_t fingerprint = 0;						// Of its files, at the last load (hot reload)
+	std::uintmax_t codeFingerprint = 0;					// Excludes external declarations
 	std::uintmax_t seen = 0;							// At the last check: a reload waits until they stop changing
 	bool warnedNoReload = false;
 	int loadIndex = -1, reloads = 0;

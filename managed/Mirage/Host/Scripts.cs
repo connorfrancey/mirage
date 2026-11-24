@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -45,6 +46,112 @@ namespace Mirage
             public List<string> Errors = new();      // "main.cs(12,5): error CS1002: ; expected"
             public List<string> Warnings = new();
             public double Milliseconds;
+            public string? CacheKey;                 // Taken from the script cache (its entry), else null
+        }
+
+        // ---- The script cache -------------------------------------------------------------------------------------
+        // A compiled script is kept in <mirage>\cache\scripts\ by what it was compiled from: its files (their paths and
+        // bytes), the assembly's name, this Mirage.dll's build (its module id: the API scripts compile against), Roslyn's
+        // and .NET's versions. The same sources load the kept assembly instead of compiling (a script mod's start goes
+        // from a second or two to milliseconds); any change is another key, compiled and kept. Only what compiled is
+        // kept, with its warnings; the newest MaxEntries stay. A broken entry is deleted and compiled again (Forget).
+
+        private const string CacheVersion = "mirage-script-cache 1";
+        private const int MaxEntries = 64;
+
+        // <mirage>\cache\scripts (Mirage.dll is in <mirage>\dotnet\mirage); null when that isn't known
+        private static string? CacheDir()
+        {
+            string location = typeof(Bridge).Assembly.Location;
+            if (string.IsNullOrEmpty(location)) return null;
+            string? mirage = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(location)));
+            return mirage == null ? null : Path.Combine(mirage, "cache", "scripts");
+        }
+
+        private static string CacheKey(string name, IEnumerable<string> files)
+        {
+            using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            void Add(string text) => hash.AppendData(Encoding.UTF8.GetBytes(text + "\0"));
+            Add(CacheVersion);
+            Add(name);
+            Add(typeof(Bridge).Assembly.ManifestModule.ModuleVersionId.ToString());
+            Add(typeof(CSharpCompilation).Assembly.GetName().Version?.ToString() ?? "");
+            Add(Environment.Version.ToString());
+            foreach (var file in files) {
+                Add(Path.GetFullPath(file));
+                hash.AppendData(File.ReadAllBytes(file));
+                Add("");
+            }
+            return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+        }
+
+        /// <summary>Compile, through the script cache: the kept assembly when the same sources were compiled before,
+        /// else compiled now (and kept when it compiled).</summary>
+        public static Result CompileCached(string name, IReadOnlyList<string> files)
+        {
+            var started = DateTime.UtcNow;
+            string? dir = CacheDir();
+            string? key = null;
+            try {
+                if (dir != null) key = CacheKey(name, files);
+            } catch (IOException) {
+                key = null;             // A file it can't read now: compiling says which
+            }
+            if (dir != null && key != null) {
+                string dll = Path.Combine(dir, key + ".dll");
+                try {
+                    if (File.Exists(dll)) {
+                        var hit = new Result { Assembly = File.ReadAllBytes(dll), CacheKey = key };
+                        string pdb = Path.Combine(dir, key + ".pdb"), warnings = Path.Combine(dir, key + ".warnings.txt");
+                        if (File.Exists(pdb)) hit.Pdb = File.ReadAllBytes(pdb);
+                        if (File.Exists(warnings)) hit.Warnings.AddRange(File.ReadAllLines(warnings));
+                        File.SetLastWriteTimeUtc(dll, DateTime.UtcNow);     // In use: the newest are what stays
+                        hit.Milliseconds = (DateTime.UtcNow - started).TotalMilliseconds;
+                        return hit;
+                    }
+                } catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) {
+                    Forget(key);
+                }
+            }
+            var result = Compile(name, files);
+            if (result.Assembly != null && dir != null && key != null) {
+                try {
+                    Directory.CreateDirectory(dir);
+                    // The assembly last: an entry is whole once its .dll is there
+                    if (result.Pdb != null) Write(Path.Combine(dir, key + ".pdb"), result.Pdb);
+                    File.WriteAllLines(Path.Combine(dir, key + ".warnings.txt"), result.Warnings);
+                    Write(Path.Combine(dir, key + ".dll"), result.Assembly);
+                    Trim(dir);
+                } catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) {
+                    // Not kept: compiled again next time
+                }
+            }
+            return result;
+        }
+
+        /// <summary>The entry is broken (its assembly didn't load): gone, so the next compile replaces it.</summary>
+        public static void Forget(string key)
+        {
+            string? dir = CacheDir();
+            if (dir == null) return;
+            foreach (var ext in new[] { ".dll", ".pdb", ".warnings.txt" }) {
+                try { File.Delete(Path.Combine(dir, key + ext)); }
+                catch (Exception e) when (e is IOException || e is UnauthorizedAccessException) { }
+            }
+        }
+
+        private static void Write(string path, byte[] bytes)
+        {
+            string temp = path + ".tmp";
+            File.WriteAllBytes(temp, bytes);
+            File.Move(temp, path, overwrite: true);
+        }
+
+        // The newest MaxEntries entries stay
+        private static void Trim(string dir)
+        {
+            var old = new DirectoryInfo(dir).GetFiles("*.dll").OrderByDescending(f => f.LastWriteTimeUtc).Skip(MaxEntries).ToList();
+            foreach (var f in old) Forget(Path.GetFileNameWithoutExtension(f.Name));
         }
 
         public static IEnumerable<string> SourcesIn(string folder) =>

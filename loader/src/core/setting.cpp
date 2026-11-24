@@ -3,10 +3,10 @@
 #include "core/keys.h"
 #include "core/module.h"
 #include "core/notify.h"
+#include "util/glz_compat.h"
 
 #include <Windows.h>
 #include <imgui.h>
-#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -16,7 +16,7 @@ namespace ctl {
 
 namespace {
 
-using json = nlohmann::ordered_json;
+using jc::json;
 
 // "%" in user-provided names would be eaten by the slider format string.
 std::string Esc(const std::string& s)
@@ -33,9 +33,32 @@ template <class T> json ToJson(const T& v) { return v; }
 json ToJson(float v) { return Round(v); }
 json ToJson(const std::array<float, 4>& v)
 {
-    json out = json::array();
-    for (float c : v) out.push_back(Round(c));
+    json out = jc::new_array();
+    for (float c : v) jc::push(out, Round(c));
     return out;
+}
+
+// The file's value as T; false (keep the current value) when its type is wrong
+template <class T> bool FromJson(const json& in, T& out)
+{
+    if constexpr (std::is_same_v<T, bool>) {
+        if (!in.is_boolean()) return false;
+    } else if constexpr (std::is_arithmetic_v<T>) {
+        if (!in.is_number()) return false;
+    } else if constexpr (std::is_same_v<T, std::string>) {
+        if (!in.is_string()) return false;
+    }
+    out = jc::as<T>(in);
+    return true;
+}
+bool FromJson(const json& in, std::array<float, 4>& out)
+{
+    if (!in.is_array() || in.size() != 4) return false;
+    for (std::size_t i = 0; i < 4; ++i) {
+        if (!in[i].is_number()) return false;
+        out[i] = in[i].as<float>();
+    }
+    return true;
 }
 
 struct PopupStyle {   // popups use the global WindowPadding (0): give them some air
@@ -140,11 +163,8 @@ void Value<T>::Save(json& out) const { out = ToJson(value_); }
 template <class T>
 void Value<T>::Load(const json& in)
 {
-    try {
-        Set(in.get<T>());
-    } catch (const json::exception&) {
-        // wrong type in the file: keep the current value
-    }
+    T v{};
+    if (FromJson(in, v)) Set(std::move(v));   // A wrong type in the file keeps the current value
 }
 
 template class Value<bool>;
@@ -183,12 +203,12 @@ std::string Checkbox::Fire(int)
 // ---- Slider / SliderInt ------------------------------------------------------------------------------------------------
 template <class T>
 BasicSlider<T>::BasicSlider(Module* owner, std::string name, T value, T min, T max, std::string format, T step,
-                            std::string tooltip)
+                            std::string tooltip, bool bounded, bool snap)
     : Value<T>(owner, std::move(name), value, std::move(tooltip), {"Increase", "Decrease"}),
-      min_(min), max_(max), format_(std::move(format))
+      min_(min), max_(max), format_(std::move(format)), bounded_(bounded), snap_(snap)
 {
     if constexpr (std::is_integral_v<T>) step_ = std::max<T>(1, step);
-    else                                 step_ = step > 0 ? step : (max - min) / 20;
+    else                                 step_ = step > 0 ? step : bounded_ ? (max - min) / 20 : 1;
     this->Set(value);
 }
 
@@ -199,9 +219,21 @@ template <class T>
 void BasicSlider<T>::Draw(float width)
 {
     constexpr ImGuiDataType type = std::is_integral_v<T> ? ImGuiDataType_S32 : ImGuiDataType_Float;
+    if (!bounded_) {
+        ImGui::TextUnformatted(this->Name().c_str());
+        ImGui::SetNextItemWidth(width);
+        T value = this->value_;
+        if (ImGui::InputScalar("##v", type, &value, &step_, nullptr, format_.c_str())) this->Set(value);
+        return;
+    }
     const std::string fmt = Esc(this->Name()) + ": " + format_;
     ImGui::SetNextItemWidth(width);
-    ImGui::SliderScalar("##v", type, &this->value_, &min_, &max_, fmt.c_str());
+    if (ImGui::SliderScalar("##v", type, &this->value_, &min_, &max_, fmt.c_str()) && snap_ &&
+        this->value_ != max_) {
+        const double offset = static_cast<double>(this->value_) - min_;
+        const double snapped = min_ + std::round(offset / step_) * step_;
+        this->Set(static_cast<T>(std::clamp(snapped, static_cast<double>(min_), static_cast<double>(max_))));
+    }
 }
 
 template <class T>

@@ -198,6 +198,9 @@ namespace Mirage.Native
         public delegate* unmanaged[Cdecl]<void*, int, byte*, uint, uint> postfx_error;
         public delegate* unmanaged[Cdecl]<void*, byte*, float, float, float, float, int> menu_slider;
         public delegate* unmanaged[Cdecl]<void*, int, void*, int> menu_slider_value;
+        public delegate* unmanaged[Cdecl]<void*, void*, uint, void> world_draw_lines;
+        public delegate* unmanaged[Cdecl]<void*, byte*, void*, void*> model_mesh;
+        public delegate* unmanaged[Cdecl]<byte*, void*> portal_class;
     }
 
     [StructLayout(LayoutKind.Sequential)]

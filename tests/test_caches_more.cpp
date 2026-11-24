@@ -1,4 +1,4 @@
-// The adaptive (ARC) and weak caches, xxHash's wrapper, and the buddy / small / stack allocators.
+// The adaptive (ARC) and weak caches, the hash wrapper, and the buddy / small / stack allocators.
 #include "core/adaptive_cache.h"
 #include "core/hash.h"
 #include "core/weak_cache.h"
@@ -99,13 +99,9 @@ TEST(WeakCache, SweepsDeadEntries)
 }
 
 // ---- hash ------------------------------------------------------------------------------------------------------------------
-TEST(Hash, StreamEqualsOneGo)
+TEST(Hash, SeedsAndOrderMatter)
 {
-    std::string data(100000, '\0');
-    for (std::size_t i = 0; i < data.size(); ++i) data[i] = static_cast<char>(i * 31 + 7);
-    hash::Stream s;
-    for (std::size_t i = 0; i < data.size(); i += 4096) s.Add(data.data() + i, std::min<std::size_t>(4096, data.size() - i));
-    EXPECT_EQ(s.Digest(), hash::Bytes(data.data(), data.size()));
+    EXPECT_EQ(hash::Text("abc"), hash::Bytes("abc", 3));
     EXPECT_NE(hash::Text("a"), hash::Text("b"));
     EXPECT_NE(hash::Text("a", 1), hash::Text("a", 2));
     EXPECT_NE(hash::Combine(1, 2), hash::Combine(2, 1));

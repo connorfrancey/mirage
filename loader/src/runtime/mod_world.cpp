@@ -7,7 +7,9 @@
 #include "runtime/mod_internal.h"
 
 #include <atomic>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace mirage::mods::world
@@ -17,6 +19,20 @@ namespace mirage::mods::world
 		std::atomic<MirageMod*> g_owner{nullptr};		// The mod that switched the drawing on
 		std::atomic<bool> g_active{false};
 		std::atomic<bool> g_cameraWanted{false};		// A mod asked for the camera: it is followed from then on
+		std::atomic<bool> g_modsDrawing{false};		// Some mod has lines of its own (world_draw_lines)
+
+		// The renderer's moving layer is world_draw_set's MIRAGE_WORLD_MOVING plus every mod's own lines, merged: a mod
+		// clearing its lines leaves the others' alone
+		std::mutex g_movingLock;
+		rmesh::MeshData g_moving;
+		std::map<MirageMod*, std::vector<rmesh::Vertex>> g_modLines;
+
+		void PublishMoving()	// g_movingLock held
+		{
+			rmesh::MeshData m = g_moving;
+			for (const auto& [mod, lines] : g_modLines) m.lines.insert(m.lines.end(), lines.begin(), lines.end());
+			debugrender::SetDynamic(std::move(m));
+		}
 
 		void Append(std::vector<rmesh::Vertex>& out, const MirageWorldVertex* v, uint32_t n)
 		{
@@ -28,28 +44,55 @@ namespace mirage::mods::world
 		// Game thread, every tick while on: the renderer follows the game's camera
 		void Follow(float)
 		{
-			if (!g_active.load(std::memory_order_relaxed)) return;
+			if (!g_active.load(std::memory_order_relaxed) && !g_modsDrawing.load(std::memory_order_relaxed)) return;
 			debugrender::SetCamera(game::GetCamera());
 			debugrender::SetEngineNear(game::EngineNear());
 		}
 	}
 
-	void MIRAGE_CALL DrawActive(MirageMod* mod, int32_t on)
+	// The renderer on while the drawing's owner has it on or any mod has lines, and following the camera then
+	void UpdateActive()
 	{
 		static const bool registered = [] {
 			game::OnTick(&Follow);
 			return true;
 		}();
 		(void)registered;
+		const bool drawing = g_active.load() || g_modsDrawing.load();
+		debugrender::SetActive(drawing);
+		game::SetCameraTracking(drawing || g_cameraWanted.load());
+	}
+
+	void MIRAGE_CALL DrawActive(MirageMod* mod, int32_t on)
+	{
 		g_active = on != 0;
 		g_owner = on ? mod : nullptr;
-		debugrender::SetActive(on != 0);
-		game::SetCameraTracking(on != 0 || g_cameraWanted.load());
 		if (!on) {
 			debugrender::SetScene(nullptr);
-			debugrender::SetDynamic({});
 			debugrender::SetStatic(nullptr);
+			std::lock_guard lock(g_movingLock);
+			g_moving = {};
+			PublishMoving();		// The mods' own lines stay
 		}
+		UpdateActive();
+	}
+
+	void MIRAGE_CALL DrawLines(MirageMod* mod, const MirageWorldVertex* lines, uint32_t count)
+	{
+		if (!mod) return;
+		{
+			std::lock_guard lock(g_movingLock);
+			if (lines && count >= 2) {
+				std::vector<rmesh::Vertex>& mine = g_modLines[mod];
+				mine.clear();
+				Append(mine, lines, count - count % 2);
+			} else if (!g_modLines.erase(mod)) {
+				return;		// Had none: nothing changes (a mod clearing every tick costs nothing)
+			}
+			PublishMoving();
+			g_modsDrawing = !g_modLines.empty();
+		}
+		UpdateActive();
 	}
 
 	void MIRAGE_CALL DrawSet(int32_t layer, const MirageWorldMesh* mesh)
@@ -75,12 +118,13 @@ namespace mirage::mods::world
 				return;
 			}
 			case MIRAGE_WORLD_MOVING: {
-				rmesh::MeshData m;
+				std::lock_guard lock(g_movingLock);
+				g_moving = {};
 				if (any) {
-					Append(m.tris, mesh->triangles, mesh->triangle_vertices);
-					Append(m.lines, mesh->lines, mesh->line_vertices);
+					Append(g_moving.tris, mesh->triangles, mesh->triangle_vertices);
+					Append(g_moving.lines, mesh->lines, mesh->line_vertices);
 				}
-				debugrender::SetDynamic(std::move(m));
+				PublishMoving();
 				return;
 			}
 			case MIRAGE_WORLD_STATIC: {
@@ -149,5 +193,6 @@ namespace mirage::mods::world
 	void Unloading(MirageMod* mod)
 	{
 		if (mod && g_owner.load() == mod) DrawActive(nullptr, 0);
+		DrawLines(mod, nullptr, 0);
 	}
 }

@@ -11,10 +11,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
-#include <map>
 #include <mutex>
 
-#include <imgui_internal.h>
 #include <string>
 #include <imgui.h>
 
@@ -60,14 +58,9 @@ namespace
         dl->ChannelsMerge();
     }
 
-    Module* g_reveal = nullptr;     // A search result was clicked: its column opens its settings and scrolls there
-    std::map<const Module*, float> g_resultHover;   // Search results animate their own hover
-
-    // `highlight`: the row matches the search (its name is drawn bright). `result`: drawn in the search column, where a
-    // click on the name opens the settings in the module's own column instead of here.
-    void DrawModule(Module& m, float dt, bool highlight = false, bool result = false)
+    void DrawModule(Module& m, float dt)
     {
-        float& hover = result ? g_resultHover[&m] : m.hover;
+        float& hover = m.hover;
         const theme::MenuColors& tc = theme::Menu();
 
         ImGui::PushID(&m);
@@ -79,21 +72,15 @@ namespace
         // The title opens the settings (right click closes them); the switch on the right turns the module on and off,
         // or runs it for an action.
         const float switchW = m.IsAction() ? 36.f : 30.f, switchH = 16.f;
-        const float titleW = w - switchW - 16.f;
+        const float titleW = std::max(1.f, w - switchW - 16.f);
 
         ImGui::InvisibleButton("##title", {titleW, h}, ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
         bool hovered = ImGui::IsItemHovered();
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
-        {
-            m.expanded = true;
-            if (result) g_reveal = &m;
-        }
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !result) m.expanded = false;
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) m.expanded = !m.expanded;
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) m.expanded = false;
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
-            const std::string how = result ? "In " + m.Tab() + ". Click: show its settings there"
-                                           : std::string("Click: settings | Right click: close");
-            ImGui::SetTooltip("%s%s%s", m.Description().c_str(), m.Description().empty() ? "" : "\n", how.c_str());
+            ImGui::SetTooltip("%s%s%s", m.Name().c_str(), m.Description().empty() ? "" : "\n", m.Description().c_str());
         }
 
         ImGui::SameLine(0.f, 0.f);
@@ -108,7 +95,7 @@ namespace
         if (switchHovered && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             ImGui::SetTooltip(m.IsAction() ? "Run" : m.Enabled() ? "Turn off" : "Turn on");
 
-        if (!result) Approach(m.anim, (!m.IsAction() && m.Enabled()) ? 1.f : 0.f, dt);   // Once a frame: in the column
+        Approach(m.anim, (!m.IsAction() && m.Enabled()) ? 1.f : 0.f, dt);
         Approach(hover, hovered ? 1.f : 0.f, dt);
 
         ImVec4 bg = Mix(tc.rowBg, tc.rowHover, hover);
@@ -118,7 +105,9 @@ namespace
 
         const ImVec4 txt = Mix(tc.text, tc.textActive, std::max(m.anim, hover * 0.6f));
         const float ty = p.y + (h - ImGui::GetFontSize()) * 0.5f;
-        dl->AddText({p.x + 10.f, ty}, U32(highlight ? tc.textActive : txt), m.Name().c_str());
+        dl->PushClipRect(p, {p.x + std::max(1.f, titleW - 8.f), p.y + h}, true);
+        dl->AddText({p.x + 10.f, ty}, U32(txt), m.Name().c_str());
+        dl->PopClipRect();
         const float nameEnd = p.x + 10.f + ImGui::CalcTextSize(m.Name().c_str()).x;
 
         // Switch: a pill whose knob slides right (accent) when on. Actions get a small "Run" pill instead.
@@ -127,7 +116,7 @@ namespace
         // Left of the switch: a chevron (settings open or closed), and the module's key when it has one
         const ImU32 dim = U32(Mix(tc.textDim, tc.text, hover * 0.5f));
         const float cx = s0.x - 10.f, cy = p.y + h * 0.5f, c = 3.5f;
-        if (m.expanded && !result) dl->AddTriangleFilled({cx - c, cy - c * 0.6f}, {cx + c, cy - c * 0.6f}, {cx, cy + c * 0.8f}, dim);
+        if (m.expanded) dl->AddTriangleFilled({cx - c, cy - c * 0.6f}, {cx + c, cy - c * 0.6f}, {cx, cy + c * 0.8f}, dim);
         else dl->AddTriangleFilled({cx - c * 0.6f, cy - c}, {cx - c * 0.6f, cy + c}, {cx + c * 0.8f, cy}, dim);
         if (m.key) {
             const std::string k = keys::Name(m.key);
@@ -151,7 +140,7 @@ namespace
             dl->AddCircleFilled({kx, s0.y + r}, r - 2.5f, U32(Mix(tc.textDim, tc.textActive, m.anim)));
         }
 
-        if (m.expanded && !result) DrawSettings(m, w);
+        if (m.expanded) DrawSettings(m, w);
         ImGui::PopID();
     }
 }
@@ -160,7 +149,6 @@ namespace
 {
     char g_search[64] = "";
     bool g_focusSearch = false;
-    std::map<std::string, ImVec2> g_columnPos;      // Where each column was last frame (for its height limit)
 
     std::string Lower(std::string s)
     {
@@ -179,119 +167,108 @@ namespace
 
     std::mutex g_testColumnLock;
     std::string g_testColumn;       // gui::OpenColumnForTest
-    std::map<std::string, bool> g_testCollapsed;    // Columns the test opened: collapsed before? Put back when cleared
+    std::string g_category;         // The user's selection, independent of the category requested by a self-test.
+    const modules::Tab* g_shownCategory = nullptr;
 
-    // A column never grows past the bottom of the screen: taller content scrolls with the mouse wheel.
-    bool BeginColumn(const std::string& name, float width, ImVec2 defaultPos, ImGuiWindowFlags flags)
+    bool HasVisibleModules(const modules::Tab& tab)
     {
-        const ImVec2 display = ImGui::GetIO().DisplaySize;
-        const auto it = g_columnPos.find(name);
-        const float top = it != g_columnPos.end() ? it->second.y : defaultPos.y;
-        const float maxH = display.y > 0.f ? std::max(120.f, display.y - top - 8.f) : FLT_MAX;
-        ImGui::SetNextWindowPos(defaultPos, ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSizeConstraints({width, 0.f}, {width, maxH});
-        {
-            std::lock_guard lock(g_testColumnLock);
-            if (!g_testColumn.empty() && g_testColumn == name) {
-                if (!g_testCollapsed.count(name)) {
-                    const ImGuiWindow* w = ImGui::FindWindowByName(name.c_str());
-                    g_testCollapsed[name] = w && w->Collapsed;
-                }
-                ImGui::SetNextWindowCollapsed(false, ImGuiCond_Always);
-            } else if (const auto was = g_testCollapsed.find(name); was != g_testCollapsed.end()) {
-                ImGui::SetNextWindowCollapsed(was->second, ImGuiCond_Always);   // As the player left it
-                g_testCollapsed.erase(was);
-            }
-        }
-        return ImGui::Begin(name.c_str(), nullptr, flags);   // EndColumn either way
+        return std::any_of(tab.modules.begin(), tab.modules.end(), [](const Module* m) { return !m->Hidden(); });
     }
 
-    // Its title bar stays on the screen (a resolution change, or dragged off), and the column shows where it scrolls.
-    void EndColumn(const std::string& name)
-    {
-        const theme::MenuColors& tc = theme::Menu();
-        const ImVec2 display = ImGui::GetIO().DisplaySize;
-        ImVec2 pos = ImGui::GetWindowPos();
-        const ImVec2 size = ImGui::GetWindowSize();
-        if (display.x > 0.f && display.y > 0.f)
-        {
-            const ImVec2 clamped{std::clamp(pos.x, 40.f - size.x, std::max(0.f, display.x - 40.f)),
-                                 std::clamp(pos.y, 0.f, std::max(0.f, display.y - ImGui::GetFrameHeight()))};
-            if (clamped.x != pos.x || clamped.y != pos.y)
-            {
-                ImGui::SetWindowPos(clamped);
-                pos = clamped;
-            }
-        }
-        g_columnPos[name] = pos;
-
-        const float maxScroll = ImGui::GetScrollMaxY();
-        if (maxScroll > 0.5f && !ImGui::IsWindowCollapsed())
-        {
-            // A thin accent bar on the right edge
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            const float top = pos.y + ImGui::GetFrameHeight(), bottom = pos.y + size.y;
-            dl->PushClipRect(pos, {pos.x + size.x, bottom}, false);
-            const float track = bottom - top;
-            const float thumb = std::max(16.f, track * track / (track + maxScroll));
-            const float y = top + (track - thumb) * (ImGui::GetScrollY() / maxScroll);
-            ImVec4 bar = tc.accent;
-            bar.w *= 0.8f;
-            dl->AddRectFilled({pos.x + size.x - 3.f, y}, {pos.x + size.x - 1.f, y + thumb}, U32(bar), 1.f);
-            dl->PopClipRect();
-        }
-        ImGui::End();
-    }
-
-    // The search column: a box (Ctrl+F) and every module that matches, by tab. A result's switch works right there;
-    // clicking its name opens its settings in its own column.
     void DrawSearch(float dt, const std::string& query)
     {
-        const theme::MenuColors& tc = theme::Menu();
-        const float w = ImGui::GetContentRegionAvail().x;
-        ImGui::Dummy({0.f, 4.f});
-        ImGui::Indent(8.f);
-        ImGui::SetNextItemWidth(w - 16.f);
+        bool any = false;
+        for (const auto& tab : modules::Tabs())
+        {
+            bool heading = false;
+            for (Module* m : tab->modules)
+            {
+                if (m->Hidden() || !Matches(*m, query)) continue;
+                if (!heading)
+                {
+                    ImGui::SeparatorText(tab->name.c_str());
+                    heading = true;
+                }
+                DrawModule(*m, dt);
+                any = true;
+            }
+        }
+        if (!any) ImGui::TextDisabled("No matching modules.");
+    }
+
+    void DrawBrowser(float dt)
+    {
+        const modules::Tab* active = nullptr;
+        const modules::Tab* first = nullptr;
+        const modules::Tab* test = nullptr;
+        std::string testCategory;
+        {
+            std::lock_guard lock(g_testColumnLock);
+            testCategory = g_testColumn;
+        }
+        for (const auto& tab : modules::Tabs())
+        {
+            if (!HasVisibleModules(*tab)) continue;
+            if (!first) first = tab.get();
+            if (tab->name == g_category) active = tab.get();
+            if (tab->name == testCategory) test = tab.get();
+        }
+        if (!first)
+        {
+            ImGui::TextDisabled("No modules available.");
+            return;
+        }
+        if (!active)
+        {
+            active = first;
+            g_category = first->name;
+        }
+
+        ImGui::SetNextItemWidth(-FLT_MIN);
         if (g_focusSearch)
         {
             ImGui::SetKeyboardFocusHere();
             g_focusSearch = false;
         }
-        ImGui::InputTextWithHint("##search", "Search (Ctrl+F)", g_search, sizeof g_search, ImGuiInputTextFlags_EscapeClearsAll);
-        ImGui::SetItemTooltip("Modules and settings by name or description. Esc clears");
-        ImGui::Unindent(8.f);
-        ImGui::Dummy({0.f, 2.f});
-        if (query.empty()) return;
+        const bool searchChanged = ImGui::InputTextWithHint("##search", "Search modules and settings (Ctrl+F)",
+            g_search, sizeof g_search, ImGuiInputTextFlags_EscapeClearsAll);
 
-        bool any = false;
-        for (auto& tab : modules::Tabs())
+        const float sidebar = std::clamp(ImGui::GetContentRegionAvail().x * 0.26f, 88.f, 160.f);
+        if (ImGui::BeginChild("##categories", {sidebar, 0.f}, ImGuiChildFlags_Borders))
         {
-            bool header = false;
-            for (Module* m : tab->modules)
+            for (const auto& tab : modules::Tabs())
             {
-                if (m->Hidden() || !Matches(*m, query)) continue;
-                if (!header)
+                if (!HasVisibleModules(*tab)) continue;
+                ImGui::PushID(tab.get());
+                const bool selected = test ? tab.get() == test : !g_search[0] && tab.get() == active;
+                if (ImGui::Selectable(tab->name.c_str(), selected))
                 {
-                    ImGui::Indent(8.f);
-                    ImGui::PushStyleColor(ImGuiCol_Text, tc.textDim);
-                    ImGui::TextUnformatted(tab->name.c_str());
-                    ImGui::PopStyleColor();
-                    ImGui::Unindent(8.f);
-                    header = true;
+                    g_category = tab->name;
+                    active = tab.get();
+                    g_search[0] = '\0';
                 }
-                DrawModule(*m, dt, false, true);
-                any = true;
+                ImGui::PopID();
             }
         }
-        if (!any)
+        ImGui::EndChild();
+        ImGui::SameLine();
+
+        const modules::Tab* shown = test ? test : g_search[0] ? nullptr : active;
+        if (searchChanged || shown != g_shownCategory) ImGui::SetNextWindowScroll({0.f, 0.f});
+        g_shownCategory = shown;
+        if (ImGui::BeginChild("##module-list", {0.f, 0.f}, ImGuiChildFlags_Borders))
         {
-            ImGui::Indent(8.f);
-            ImGui::PushStyleColor(ImGuiCol_Text, tc.textDim);
-            ImGui::TextUnformatted("Nothing found");
-            ImGui::PopStyleColor();
-            ImGui::Unindent(8.f);
+            if (shown)
+            {
+                for (Module* m : shown->modules)
+                    if (!m->Hidden()) DrawModule(*m, dt);
+            }
+            else
+            {
+                DrawSearch(dt, Lower(g_search));
+            }
         }
-        ImGui::Dummy({0.f, 4.f});
+        ImGui::EndChild();
     }
 }
 
@@ -328,56 +305,33 @@ void gui::Render()
         return;
     }
 
-    theme::Begin(); // pushes the theme onto ImGui's style stack
-    const float dt = ImGui::GetIO().DeltaTime;
-    // Auto sized, never past the bottom of the screen: a long panel (TAS) scrolls with the mouse wheel instead
-    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoScrollbar;
-
-    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) g_focusSearch = true;
-    const std::string query = Lower(g_search);
-    Module* const reveal = g_reveal;
-    g_reveal = nullptr;
-
-    float x = 24.f;
-    bool anyTab = false;
-    for (auto& tab : modules::Tabs())
+    theme::Begin();
+    const bool shortcut = ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F);
+    if (shortcut)
     {
-        if (tab->modules.empty()) continue;
-        anyTab = true;
+        g_focusSearch = true;
+        ImGui::SetNextWindowFocus();
+    }
+    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImVec2 room{std::max(1.f, viewport->WorkSize.x - 16.f), std::max(1.f, viewport->WorkSize.y - 16.f)};
+    ImGui::SetNextWindowPos({viewport->WorkPos.x + 24.f, viewport->WorkPos.y + 24.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize({std::min(610.f, room.x), std::min(540.f, room.y)}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints({std::min(360.f, room.x), std::min(240.f, room.y)}, room);
 
-        if (BeginColumn(tab->name, tab->width, {x, 24.f}, kFlags))
-        {
-            for (Module* m : tab->modules)
-            {
-                if (m->Hidden()) continue;
-                if (m == reveal)    // From the search: bring this column forward and scroll to the module
-                {
-                    ImGui::SetWindowFocus();
-                    ImGui::SetScrollHereY(0.f);
-                }
-                DrawModule(*m, dt, !query.empty() && Matches(*m, query));
-            }
-        }
-        EndColumn(tab->name);
-        x += tab->width + 12.f;
-    }
-    if (anyTab)
+    if (ImGui::Begin("Mirage", nullptr, ImGuiWindowFlags_NoCollapse))
     {
-        // First time: the top right corner (the columns already reach past the right edge of smaller screens)
-        const float right = ImGui::GetIO().DisplaySize.x - 220.f - 24.f;
-        if (BeginColumn("Search", 220.f, {right > 24.f ? std::min(x, right) : x, 24.f}, kFlags)) DrawSearch(dt, query);
-        EndColumn("Search");
+        const ImVec2 pos = ImGui::GetWindowPos();
+        const ImVec2 size = ImGui::GetWindowSize();
+        const ImVec2 clamped{
+            std::clamp(pos.x, viewport->WorkPos.x, viewport->WorkPos.x + std::max(0.f, viewport->WorkSize.x - size.x)),
+            std::clamp(pos.y, viewport->WorkPos.y, viewport->WorkPos.y + std::max(0.f, viewport->WorkSize.y - size.y))
+        };
+        if (clamped.x != pos.x || clamped.y != pos.y) ImGui::SetWindowPos(clamped);
+        DrawBrowser(ImGui::GetIO().DeltaTime);
     }
+    ImGui::End();
+    theme::End();
 
-    // Built with every feature off (MIRAGE_FEATURES=OFF): still show that the menu is loaded
-    if (!anyTab)
-    {
-        ImGui::SetNextWindowPos({x, 24.f}, ImGuiCond_FirstUseEver);
-        if (ImGui::Begin("Mirage", nullptr, kFlags))
-            ImGui::TextDisabled("Built without features");
-        ImGui::End();
-    }
-    theme::End(); // must be popped before ImGui::EndFrame()
 
     keybinds::EndFrame(); // clicking anywhere except a bind button cancels a pending binding
 }

@@ -2,6 +2,7 @@
 #include "resource.h"
 
 #include "detect.h"
+#include "util/pe_laa.h"
 
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -23,6 +24,7 @@ namespace install
         constexpr const wchar_t* kGameExe = L"MirrorsEdge.exe";
         constexpr const wchar_t* kLoader = L"dinput8.dll";
         constexpr const wchar_t* kBackup = L"dinput8.dll.mirage-backup";
+        constexpr const wchar_t* kExeBackup = L"MirrorsEdge.exe.mirage-backup";     // The exe before the LAA flag
         constexpr const wchar_t* kMenuDir = L"mirage";
         constexpr const wchar_t* kMenuDll = L"Mirage.dll";
         constexpr char kMarker[] = "mirage-loader:";
@@ -224,6 +226,72 @@ namespace install
         return std::nullopt;
     }
 
+    namespace
+    {
+        std::vector<std::uint8_t> ReadBytes(const fs::path& file)
+        {
+            std::ifstream in(file, std::ios::binary);
+            return {std::istreambuf_iterator<char>(in), {}};
+        }
+
+        // Written next to the file and swapped in: a failure never leaves half an exe
+        bool ReplaceBytes(const fs::path& file, const std::vector<std::uint8_t>& bytes, std::wstring& error)
+        {
+            const fs::path tmp = fs::path(file) += L".mirage-tmp";
+            {
+                std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+                out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+                if (!out) { error = L"cannot write " + tmp.wstring(); return false; }
+            }
+            if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                error = ErrorText(GetLastError());
+                std::error_code ec;
+                fs::remove(tmp, ec);
+                return false;
+            }
+            return true;
+        }
+
+        // MirrorsEdge.exe made Large Address Aware (util/pe_laa.h: 4 GB of address space instead of 2 on 64-bit
+        // Windows), the original kept as kExeBackup. Not being able to is no reason to fail the install: the note
+        // says so.
+        std::wstring PatchLargeAddressAware(const fs::path& gameDir)
+        {
+            const fs::path exe = gameDir / kGameExe;
+            std::vector<std::uint8_t> bytes = ReadBytes(exe);
+            if (pe_laa::IsLargeAddressAware(bytes)) return {};      // Already (by us, or by another 4GB patch)
+            if (!pe_laa::SetLargeAddressAware(bytes, true))
+                return L"\n\n(MirrorsEdge.exe doesn't look like a Windows program: the game keeps its 2 GB of memory.)";
+            std::error_code ec;
+            const fs::path backup = gameDir / kExeBackup;
+            if (!fs::exists(backup, ec)) {
+                fs::copy_file(exe, backup, ec);
+                if (ec) return L"\n\n(MirrorsEdge.exe couldn't be backed up, so it was left alone: " + Widen(ec.message()) + L")";
+            }
+            std::wstring error;
+            if (!ReplaceBytes(exe, bytes, error))
+                return L"\n\n(MirrorsEdge.exe couldn't be given 4 GB of memory: " + error + L")";
+            return L"\n\nMirrorsEdge.exe can now use 4 GB of memory instead of 2 (more room for mods). The original is "
+                   L"kept as " + std::wstring(kExeBackup) + L" and comes back when you uninstall.";
+        }
+
+        // The exe as it was before the install: only when it is still the patched backup (a game update since
+        // brought its own exe, which stays). The backup goes either way.
+        void RestoreExe(const fs::path& gameDir)
+        {
+            std::error_code ec;
+            const fs::path exe = gameDir / kGameExe, backup = gameDir / kExeBackup;
+            if (!fs::exists(backup, ec)) return;
+            std::vector<std::uint8_t> now = ReadBytes(exe);
+            const std::vector<std::uint8_t> original = ReadBytes(backup);
+            if (pe_laa::SetLargeAddressAware(now, pe_laa::IsLargeAddressAware(original)) && now == original) {
+                std::wstring error;
+                if (!ReplaceBytes(exe, original, error)) return;     // Kept: tried again on the next uninstall
+            }
+            fs::remove(backup, ec);
+        }
+    }
+
     Status Inspect(const fs::path& gameDir)
     {
         Status s;
@@ -271,6 +339,7 @@ namespace install
             message = L"Install failed: " + error;
             return false;
         }
+        note += PatchLargeAddressAware(gameDir);
         // Listed in Windows' installed apps. Not being able to is no reason to undo the install: say so instead.
         std::wstring appNote;
         if (g_registerApp && !RegisterApp(gameDir, error))
@@ -307,6 +376,7 @@ namespace install
             if (ec) { message = L"Cannot remove " + loader.wstring() + L": " + Widen(ec.message()); return false; }
         }
         if (fs::exists(gameDir / kBackup, ec) && !fs::exists(loader, ec)) fs::rename(gameDir / kBackup, loader, ec);
+        RestoreExe(gameDir);
 
         const fs::path menuDir = gameDir / kMenuDir;
         const fs::path uninstaller = menuDir / kUninstaller;

@@ -2,6 +2,7 @@
 // that is just a file, and stand-in DLLs embedded like the real ones (payload.rc). Never touches Windows' list of
 // installed apps (SetAppRegistration(false)) or a real game folder.
 #include "install.h"
+#include "util/pe_laa.h"
 
 #include <gtest/gtest.h>
 
@@ -9,7 +10,10 @@
 
 #include <filesystem>
 #include <fstream>
+#include <cstdlib>
+#include <iterator>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -135,4 +139,46 @@ TEST_F(FakeGame, RefusesWithoutAGame)
     EXPECT_FALSE(install::Install(root_ / "elsewhere", message));
     EXPECT_NE(message.find(L"MirrorsEdge.exe"), std::wstring::npos);
     EXPECT_FALSE(fs::exists(root_ / "elsewhere" / "dinput8.dll"));
+}
+
+// MirrorsEdge.exe made Large Address Aware on install (util/pe_laa.h), the original back on uninstall. A real image
+// stands in for the game's exe.
+TEST_F(FakeGame, GivesTheGame4GbAndPutsTheExeBack)
+{
+    const char* windir = std::getenv("WINDIR");
+    const fs::path image = fs::path(windir ? windir : "C:\Windows") / "SysWOW64" / "kernel32.dll";
+    const auto read = [](const fs::path& p) {
+        std::ifstream in(p, std::ios::binary);
+        return std::vector<std::uint8_t>(std::istreambuf_iterator<char>(in), {});
+    };
+    auto original = read(image);
+    ASSERT_GT(original.size(), 4096u);
+    pe_laa::SetLargeAddressAware(original, false);      // The game ships without the flag
+    {
+        std::ofstream out(bin_ / "MirrorsEdge.exe", std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(original.data()), static_cast<std::streamsize>(original.size()));
+    }
+
+    std::wstring message;
+    ASSERT_TRUE(install::Install(bin_, message));
+    EXPECT_TRUE(pe_laa::IsLargeAddressAware(read(bin_ / "MirrorsEdge.exe")));
+    EXPECT_EQ(read(bin_ / "MirrorsEdge.exe.mirage-backup"), original);
+    EXPECT_NE(message.find(L"4 GB"), std::wstring::npos);
+
+    ASSERT_TRUE(install::Install(bin_, message));       // Again (an update): already patched, the backup unchanged
+    EXPECT_EQ(read(bin_ / "MirrorsEdge.exe.mirage-backup"), original);
+
+    ASSERT_TRUE(install::Uninstall(bin_, true, message));
+    EXPECT_EQ(read(bin_ / "MirrorsEdge.exe"), original);
+    EXPECT_FALSE(fs::exists(bin_ / "MirrorsEdge.exe.mirage-backup"));
+}
+
+// The fake exe that isn't a program: the install still works, the exe is left alone
+TEST_F(FakeGame, LeavesAnExeItCantReadAlone)
+{
+    std::wstring message;
+    ASSERT_TRUE(install::Install(bin_, message));
+    EXPECT_FALSE(fs::exists(bin_ / "MirrorsEdge.exe.mirage-backup"));
+    std::ifstream in(bin_ / "MirrorsEdge.exe");
+    EXPECT_EQ(std::string(std::istreambuf_iterator<char>(in), {}), "not really the game");
 }

@@ -9,17 +9,6 @@
 namespace mirage::mods
 {
 
-	LuaFunctions::LuaFunctions(const char* t, std::initializer_list<luaL_Reg> list) : table(t), fns(list)
-	{
-		fns.push_back({nullptr, nullptr});
-		All().push_back(this);
-	}
-	std::vector<const LuaFunctions*>& LuaFunctions::All()
-	{
-		static std::vector<const LuaFunctions*> all;
-		return all;
-	}
-
 	void LuaModDeleter::operator()(LuaMod* m) const { delete m; }
 
 	std::size_t LuaMemory(const LuaMod& m) { return m.Memory(); }

@@ -18,12 +18,24 @@
 #include <cwchar>
 #include <filesystem>
 #include <fstream>
-#include <nlohmann/json.hpp>
+#include <glaze/glaze.hpp>
+#include <iterator>
 #include <optional>
 #include <string>
 
 namespace fs = std::filesystem;
-using json = nlohmann::json;
+// launcher.json as glaze reads and writes it; every key optional (left out when not set). Named namespace: glaze's
+// reflection needs external linkage with MSVC.
+namespace launcher_file
+{
+    struct File
+    {
+        std::optional<std::string> process, dll, game;
+        std::optional<unsigned> steam_app_id;
+        std::optional<int> delay_ms, timeout_s;
+        std::optional<bool> auto_start;
+    };
+}
 
 namespace
 {
@@ -79,47 +91,46 @@ namespace
     //   "steam_app_id": 17410, "delay_ms": 2000, "timeout_s": 120, "auto_start": true }   (all keys optional)
     void LoadConfig(Options& o, const fs::path& file, const fs::path& base)
     {
-        std::ifstream in(file);
+        std::ifstream in(file, std::ios::binary);
         if (!in) return;
-        try
+        const std::string text{std::istreambuf_iterator<char>(in), {}};
+        launcher_file::File f;
+        if (const auto ec = glz::read<glz::opts{.comments = true, .error_on_unknown_keys = false}>(f, text))
         {
-            const json j = json::parse(in, nullptr, true, /*ignore_comments*/ true);
-            const auto path = [&](const char* key, fs::path& out)
-            {
-                if (j.contains(key) && j[key].is_string() && !j[key].get<std::string>().empty())
-                {
-                    fs::path p(Widen(j[key].get<std::string>()));
-                    out = p.is_absolute() ? p : base / p;   // Relative paths in the file are relative to the launcher
-                }
-            };
-            if (j.contains("process") && j["process"].is_string()) o.process = Widen(j["process"].get<std::string>());
-            path("dll", o.dll);
-            path("game", o.game);
-            if (j.contains("steam_app_id") && j["steam_app_id"].is_number_unsigned()) o.steamAppId = j["steam_app_id"].get<unsigned>();
-            if (j.contains("delay_ms")  && j["delay_ms"].is_number_integer())  o.delayMs    = j["delay_ms"].get<int>();
-            if (j.contains("timeout_s") && j["timeout_s"].is_number_integer()) o.timeoutSec = j["timeout_s"].get<int>();
-            if (j.contains("auto_start") && j["auto_start"].is_boolean())      o.autoStart  = j["auto_start"].get<bool>();
+            std::fprintf(stderr, "Ignoring %s: %s\n", file.string().c_str(), glz::format_error(ec, text).c_str());
+            return;
         }
-        catch (const std::exception& e)
+        const auto path = [&](const std::optional<std::string>& value, fs::path& out)
         {
-            std::fprintf(stderr, "Ignoring %s: %s\n", file.string().c_str(), e.what());
-        }
+            if (!value || value->empty()) return;
+            fs::path p(Widen(*value));
+            out = p.is_absolute() ? p : base / p;   // Relative paths in the file are relative to the launcher
+        };
+        if (f.process) o.process = Widen(*f.process);
+        path(f.dll, o.dll);
+        path(f.game, o.game);
+        if (f.steam_app_id) o.steamAppId = *f.steam_app_id;
+        if (f.delay_ms) o.delayMs = *f.delay_ms;
+        if (f.timeout_s) o.timeoutSec = *f.timeout_s;
+        if (f.auto_start) o.autoStart = *f.auto_start;
     }
 
 
     bool SaveConfig(const Options& o, const fs::path& file)
     {
-        json j = json::object();
-        j["process"] = Narrow(o.process);
-        j["dll"] = Narrow(o.dll.wstring());
-        if (!o.game.empty()) j["game"] = Narrow(o.game.wstring());
-        if (o.steamAppId)    j["steam_app_id"] = *o.steamAppId;
-        j["delay_ms"] = o.delayMs;
-        j["timeout_s"] = o.timeoutSec;
-        j["auto_start"] = o.autoStart;
-        std::ofstream out(file);
+        launcher_file::File f;
+        f.process = Narrow(o.process);
+        f.dll = Narrow(o.dll.wstring());
+        if (!o.game.empty()) f.game = Narrow(o.game.wstring());
+        f.steam_app_id = o.steamAppId;
+        f.delay_ms = o.delayMs;
+        f.timeout_s = o.timeoutSec;
+        f.auto_start = o.autoStart;
+        std::string text;
+        if (glz::write<glz::opts{.prettify = true}>(f, text)) return false;
+        std::ofstream out(file, std::ios::binary);
         if (!out) return false;
-        out << j.dump(2) << '\n';
+        out << text << '\n';
         return out.good();
     }
 

@@ -30,7 +30,7 @@ my-mod/
   .gitignore
 ```
 
-Its code makes one module: a switch in the menu's Mods column, with a setting from `mod.toml`, one made in code, and a
+Its code makes one module: a switch in the menu's **Mods** category, with a setting from `mod.toml`, one made in code, and a
 tick that reads the player. A mod made before this layout (main.lua or main.cs at the top of its folder) still loads.
 
 ## 2. Install it
@@ -42,8 +42,9 @@ uv run mirage mod install my-mod
 It is checked the way the runtime reads it (`mirage mod check` on its own), built when it is native, and copied into
 the game's `Binaries\mirage\mods\my-mod`. Settings the game saved there (`config.toml`) are kept across installs.
 
-Start the game, press INSERT for the menu, and switch your module on in the Mods column. The mod manager (Misc > Mod
-Manager) lists it with its version, what it registered and its log lines.
+Start the game and press **Insert** to open Mirage. Select **Mods** in the sidebar and turn on your module, or press
+**Ctrl+F** to find it by name. **Misc → Mod Manager** lists installed mods by name, including their version,
+registered modules and log entries. Newly published modules appear in their declared category automatically.
 
 ## 3. Change it
 
@@ -83,7 +84,7 @@ it works the same.
   start until you allow it again there. A crash of the game shows the crash window: what happened, where, the likely
   cause, both call stacks; "Copy the report" gives it all.
 - `mirage mod check` says what the runtime would refuse in `mod.toml` before you start the game.
-- **Safe mode**: a start that crashes before the first level has loaded (in a way no mod's crash record explains)
+- **Safe mode**: a start that crashes before the main menu is up (in a way no mod's crash record explains)
   makes the next start load no mods, and the mod manager says why; holding Shift as the game starts does the same on
   purpose. The start after that is a normal one.
 - **Conflicts**: before any mod loads, the runtime reads what each one touches (the properties `defaults.toml` writes,

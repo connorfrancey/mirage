@@ -18,7 +18,6 @@ from pathlib import Path
 
 GAME_EXE = "MirrorsEdge.exe"
 
-
 # ---- the game process ----------------------------------------------------------------------------------------------
 def game_pids() -> list[int]:
     """Process ids of running MirrorsEdge.exe (tasklist sees elevated processes too; on Linux: Proton/Wine processes)."""

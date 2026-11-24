@@ -9,7 +9,7 @@
 #include "debug_world.h"
 #include "static_world.h"
 
-#include <nlohmann/json.hpp>
+#include <glaze/glaze.hpp>
 
 #include <algorithm>
 #include <array>
@@ -19,6 +19,39 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+
+// What the mod shares for the self-test, as glaze writes it (by member names). Named namespace: glaze's reflection
+// needs external linkage with MSVC.
+namespace collision_share {
+struct Near {
+    std::string name;
+    float distance, x, y, z;
+};
+struct Behind {
+    std::string name;
+    float at;
+};
+struct Look {
+    bool valid;
+    std::string name;
+    float distance;
+    std::vector<Behind> behind;
+};
+struct Inspect {
+    std::vector<Near> nearby;
+    std::vector<std::string> live;
+    Look look;
+};
+struct Static {
+    std::string map;
+    bool scanning;
+    std::size_t meshes, vertices;
+    double build_ms;
+    bool budget_hit;
+    double tick_ms, tick_max_ms;
+    std::vector<std::size_t> found, drawn;
+};
+} // namespace collision_share
 
 namespace {
 
@@ -264,28 +297,20 @@ private:
     void ShareForTest()
     {
         if (shareTick_++ % 30 != 0) return;
-        using nlohmann::json;
+        namespace cs = collision_share;
         const auto info = debugworld::GetInfo();
-        json near = json::array();
-        for (const auto& n : info.nearby) near.push_back({{"name", n.name}, {"distance", n.distance}, {"x", n.x}, {"y", n.y}, {"z", n.z}});
-        json behind = json::array();
-        for (const auto& [name, at] : info.look.behind) behind.push_back({{"name", name}, {"at", at}});
-        json live = json::array();
-        for (const auto& name : debugworld::LiveOwners(64)) live.push_back(name);
-        const json inspect = {{"nearby", near}, {"live", live},
-                              {"look", {{"valid", info.look.valid}, {"name", info.look.name}, {"distance", info.look.distance},
-                                        {"behind", behind}}}};
-        mirage::Api().share_set(mirage::Mod(), "inspect", inspect.dump().c_str());
+        cs::Inspect inspect{{}, debugworld::LiveOwners(64), {info.look.valid, info.look.name, info.look.distance, {}}};
+        for (const auto& n : info.nearby) inspect.nearby.push_back({n.name, n.distance, n.x, n.y, n.z});
+        for (const auto& [name, at] : info.look.behind) inspect.look.behind.push_back({name, at});
+        std::string text;
+        (void)glz::write_json(inspect, text);
+        mirage::Api().share_set(mirage::Mod(), "inspect", text.c_str());
         const auto st = staticworld::GetInfo();
-        json found = json::array(), drawn = json::array();
-        for (int c = 0; c < rstatic::kCategoryCount; ++c) {
-            found.push_back(st.found[static_cast<std::size_t>(c)]);
-            drawn.push_back(st.drawn[static_cast<std::size_t>(c)]);
-        }
-        const json stat = {{"map", st.map}, {"scanning", st.scanning}, {"meshes", st.meshes}, {"vertices", st.vertices},
-                           {"build_ms", st.buildMs}, {"budget_hit", st.budgetHit}, {"tick_ms", st.tickAvgMs},
-                           {"tick_max_ms", st.tickMaxMs}, {"found", found}, {"drawn", drawn}};
-        mirage::Api().share_set(mirage::Mod(), "static", stat.dump().c_str());
+        const cs::Static stat{st.map, st.scanning, st.meshes, st.vertices, st.buildMs, st.budgetHit, st.tickAvgMs, st.tickMaxMs,
+                              {st.found.begin(), st.found.end()}, {st.drawn.begin(), st.drawn.end()}};
+        text.clear();
+        (void)glz::write_json(stat, text);
+        mirage::Api().share_set(mirage::Mod(), "static", text.c_str());
     }
 
     // ---- On screen ---------------------------------------------------------------------------------------------------

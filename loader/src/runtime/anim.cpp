@@ -4,7 +4,7 @@
 #include "runtime/call.h"
 #include "sdk/SDK.hpp"
 
-#include <nlohmann/json.hpp>
+#include "util/glz_compat.h"
 
 #include <algorithm>
 #include <cctype>
@@ -114,10 +114,40 @@ namespace mirage::anim
 		return s;
 	}
 
+	namespace detail	// SetsJson's shape: glaze writes these by their member names
+	{
+		struct Notify
+		{
+			float time;
+			std::string notify, comment;
+		};
+		struct Sequence
+		{
+			std::string name;
+			float length;
+			int frames;
+			float rate;
+			bool custom;
+			std::vector<Notify> notifies;
+		};
+		struct Set
+		{
+			std::size_t slot;
+			std::string name, path;
+			std::vector<Sequence> sequences;
+		};
+		struct Mesh
+		{
+			std::string mesh;
+			std::vector<Set> sets;
+		};
+	}
+
 	std::string SetsJson(Classes::AActor* actor)
 	{
-		nlohmann::json out = nlohmann::json::array();
-		if (!actor) return out.dump();
+		using namespace detail;
+		std::vector<Mesh> out;
+		if (!actor) return jc::dump(out);
 		std::vector<std::pair<const char*, Classes::USkeletalMeshComponent*>> meshes;
 		if (Classes::ATdPawn* pawn = TdPawnOf(actor)) {
 			meshes.emplace_back("Mesh1p", pawn->Mesh1p);
@@ -128,27 +158,26 @@ namespace mirage::anim
 		}
 		for (const auto& [label, mesh] : meshes) {
 			if (!mesh) continue;
-			nlohmann::json sets = nlohmann::json::array();
+			std::vector<Set> sets;
 			for (std::size_t i = 0; i < mesh->AnimSets.Num(); ++i) {
 				Classes::UAnimSet* set = mesh->AnimSets[i];
 				if (!set) continue;		// An empty slot (no weapon: slots 1 and 2)
-				nlohmann::json seqs = nlohmann::json::array();
+				std::vector<Sequence> seqs;
 				for (std::size_t k = 0; k < set->Sequences.Num(); ++k) {
 					Classes::UAnimSequence* q = set->Sequences[k];
 					if (!q) continue;
-					nlohmann::json notifies = nlohmann::json::array();
+					std::vector<Notify> notifies;
 					for (std::size_t j = 0; j < q->Notifies.Num(); ++j) {
 						const auto& e = q->Notifies[j];
-						notifies.push_back({{"time", e.Time}, {"notify", e.Notify && e.Notify->Class ? e.Notify->Class->GetName() : ""},
-											{"comment", e.Comment.GetName()}});
+						notifies.push_back({e.Time, e.Notify && e.Notify->Class ? e.Notify->Class->GetName() : "", e.Comment.GetName()});
 					}
-					seqs.push_back({{"name", q->SequenceName.GetName()}, {"length", q->SequenceLength}, {"frames", q->NumFrames},
-									{"rate", q->RateScale}, {"custom", IsCustom(q)}, {"notifies", std::move(notifies)}});
+					seqs.push_back({q->SequenceName.GetName(), q->SequenceLength, q->NumFrames, q->RateScale, IsCustom(q),
+									std::move(notifies)});
 				}
-				sets.push_back({{"slot", i}, {"name", set->GetName()}, {"path", set->GetPathName()}, {"sequences", std::move(seqs)}});
+				sets.push_back({i, set->GetName(), set->GetPathName(), std::move(seqs)});
 			}
-			out.push_back({{"mesh", label}, {"sets", std::move(sets)}});
+			out.push_back({label, std::move(sets)});
 		}
-		return out.dump();
+		return jc::dump(out);
 	}
 }

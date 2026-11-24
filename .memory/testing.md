@@ -10,4 +10,6 @@
 
 Get authorization for the game install before launching the self-test and announce the visible game window. The harness deploys test mods, opens the game non-elevated, and closes it. Left Alt plus Right Alt minimizes it to the taskbar, and clicking restores it. Use `--minimized` if requested. Read `Binaries/mirage/logs/mirage.log` and step results for verification. [Harness](../tools/mirage_tools/gametest.py)
 
+On Windows x86, optimized MSVC builds of `mirage_tests` keep frame pointers, matching the loader so the allocation sampler can capture and assert on stack frames. Set `PYTHONIOENCODING=utf-8` before running tests in a redirected Windows shell so it can print test diagnostics. [Test target](../tests/CMakeLists.txt)
+
 Wait for state transitions with `WaitFor` and `WaitPlayerReady`. Avoid deliberate stalls and assertions that time or gravity alone could satisfy. Test packages copied by [example_mods.py](../tools/mirage_tools/example_mods.py) come from the player's installation. Keep shipped game data outside commits.

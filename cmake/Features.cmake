@@ -162,6 +162,7 @@ mirage_feature(kismet_editor     misc GAME STAGE 9 FILES features/misc/kismet_ed
 mirage_feature(script_editor     misc GAME STAGE 9 FILES features/misc/script_editor.cpp)
 mirage_feature(level_editor      misc GAME STAGE 9 FILES features/misc/level_editor.cpp)
 mirage_feature(animation_browser misc GAME STAGE 9 FILES features/misc/animation_browser.cpp)
+mirage_feature(object_inspector  misc GAME STAGE 9 FILES features/misc/object_inspector.cpp)
 
 # -------------------------------------------------------------------------------------------------
 # The game integration layer, only when something uses it

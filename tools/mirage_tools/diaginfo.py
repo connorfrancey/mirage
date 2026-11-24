@@ -23,10 +23,7 @@ from .devtest import crashes_since, game_pids
 from .game import LAUNCHER, detected_installs, is_elevated, project_version
 from .toolchain import ROOT
 
-TAIL_LINES = 120            # Last lines of each current log
-ARCHIVE_TAIL_LINES = 60     # Last lines of each archived log
-ARCHIVES_PER_FOLDER = 2     # Newest archived logs per logs/ folder
-MAX_PROBLEM_LINES = 80      # warning/error/critical lines kept from anywhere in a log
+from .config import diagnostics_config as cfg
 
 
 # ---- zstd: Python 3.14 has it built in, older versions use the zstandard package -----------------------------------
@@ -120,7 +117,7 @@ def _describe_log(name: str, text: str, tail: int) -> str:
     out += header
     problems = [line for line in body if _PROBLEM.search(line)]
     if problems:
-        shown = problems[-MAX_PROBLEM_LINES:]
+        shown = problems[-cfg.MAX_PROBLEM_LINES:]
         out.append(f"-- warnings/errors ({len(problems)}, last {len(shown)}):")
         out += shown
     out.append(f"-- last {min(tail, len(body))} lines:")
@@ -241,14 +238,14 @@ def collect() -> str:
             if log.exists():
                 found = True
                 parts.append(_describe_log(f"{log} (written {_when(log)})",
-                                           log.read_text(encoding="utf-8-sig", errors="replace"), TAIL_LINES))
+                                           log.read_text(encoding="utf-8-sig", errors="replace"), cfg.TAIL_LINES))
         old = logs / ".old"
-        archived = sorted(old.glob("*.log.zst"))[-ARCHIVES_PER_FOLDER:] if old.is_dir() else []
+        archived = sorted(old.glob("*.log.zst"))[-cfg.ARCHIVES_PER_FOLDER:] if old.is_dir() else []
         for arc in reversed(archived):
             found = True
             try:
                 text = zstd_decompress(arc.read_bytes()).decode("utf-8-sig", errors="replace")
-                parts.append(_describe_log(f"{arc} (archived)", text, ARCHIVE_TAIL_LINES))
+                parts.append(_describe_log(f"{arc} (archived)", text, cfg.ARCHIVE_TAIL_LINES))
             except Exception as e:   # noqa: BLE001 - a broken archive must not stop the report
                 parts.append(f"### {arc}\n(cannot decompress: {e})")
     if not found:

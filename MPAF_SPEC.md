@@ -1,6 +1,6 @@
 # Mirage Payload Archive Format 1.0
 
-MPAF is the uncompressed file archive inside a Mirage `.miragemod` package. The outer MUMS layer owns the 64-byte envelope header, LZ4 compression, and optional 32-byte footer. Its decoder passes only the decompressed payload bytes to MPAF. Its encoder compresses the complete MPAF output and writes the envelope. This specification defines the payload independently of the MUMS wire format.
+MPAF is the uncompressed file archive inside a Mirage `.miragemod` package. The outer MUMS layer owns the 64-byte envelope header, LZ4 compression, and optional 32-byte footer. Its decoder passes only the decompressed payload bytes to MPAF. Its encoder compresses the complete MPAF output and writes the [MUMS envelope](MUMS_SPEC.md). This specification defines the payload independently of the MUMS wire format.
 
 ## Binary layout
 
@@ -47,7 +47,7 @@ File and manifest data
 
 Each type-0 or type-1 entry stores its bytes verbatim. CRC-32/ISO-HDLC uses the reflected polynomial `0xedb88320`, initial state `0xffffffff`, and final XOR `0xffffffff`. The XXH3 value is serialized as a little-endian integer. An empty file has CRC `00000000` and XXH3 `2d06800538d394c2`. A directory has zero sizes and zero hashes. Both empty files and directories store the current data cursor as their offset and leave it unchanged.
 
-Exactly one entry has type 1 and path `manifest.yaml`. That exact path is reserved for the manifest. The archive layer treats its contents as opaque bytes. Manifest syntax, schema, and validation belong to the package application.
+Exactly one entry has type 1 and path `manifest.yaml` or `mod.toml`. Both exact paths are reserved for the manifest. New Mirage packages use `mod.toml`. The archive layer treats its contents as opaque bytes. Manifest syntax, schema, and validation belong to the package application.
 
 ## Paths and canonical serialization
 

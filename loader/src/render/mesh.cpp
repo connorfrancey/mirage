@@ -222,4 +222,56 @@ namespace rmesh
             }
         Mesh(v, idx);
     }
+
+    void Builder::Tube(const std::vector<Vec3>& points, float radius, int sides)
+    {
+        if (points.size() < 2) return;
+        ++shapes_;
+        sides = std::clamp(sides, 3, 32);
+        const int count = static_cast<int>(points.size());
+
+        // One ring of `sides` points around each point, perpendicular to the tube there
+        std::vector<Vec3> rings, normals;
+        rings.reserve(points.size() * static_cast<std::size_t>(sides));
+        normals.reserve(rings.capacity());
+        for (int i = 0; i < count; ++i) {
+            const Vec3 next = points[static_cast<std::size_t>(std::min(i + 1, count - 1))];
+            const Vec3 prev = points[static_cast<std::size_t>(std::max(i - 1, 0))];
+            Vec3 tangent = rmath::Normalize(next - prev);
+            if (rmath::Length(tangent) < 0.5f) tangent = {1.f, 0.f, 0.f};      // Points on top of each other
+            Vec3 side = rmath::Cross(tangent, {0.f, 0.f, 1.f});
+            if (rmath::Length(side) < 1e-3f) side = rmath::Cross(tangent, {0.f, 1.f, 0.f});   // A vertical stretch
+            side = rmath::Normalize(side);
+            const Vec3 up = rmath::Cross(side, tangent);
+            for (int k = 0; k < sides; ++k) {
+                const float angle = 2.f * rmath::kPi * static_cast<float>(k) / static_cast<float>(sides);
+                const Vec3 n = side * std::cos(angle) + up * std::sin(angle);
+                rings.push_back(points[static_cast<std::size_t>(i)] + n * radius);
+                normals.push_back(n);
+            }
+        }
+
+        // Flat colors, lit from above: 60% of the color underneath, all of it on top (alpha kept)
+        const auto shade = [&](Vec3 n) {
+            const float light = 0.8f + 0.2f * std::clamp(n.z, -1.f, 1.f);
+            const std::uint32_t c = style_.color;
+            const auto channel = [&](int shift) {
+                return static_cast<std::uint32_t>(static_cast<float>((c >> shift) & 0xFF) * light + 0.5f) & 0xFF;
+            };
+            return (c & 0xFF000000u) | (channel(16) << 16) | (channel(8) << 8) | channel(0);
+        };
+        std::vector<Vertex>& faces = out_.tris;
+        faces.reserve(faces.size() + static_cast<std::size_t>((count - 1) * sides * 6));
+        const auto put = [&](int index) {
+            const Vec3& p = rings[static_cast<std::size_t>(index)];
+            faces.push_back({p.x, p.y, p.z, shade(normals[static_cast<std::size_t>(index)])});
+        };
+        for (int i = 0; i + 1 < count; ++i)
+            for (int k = 0; k < sides; ++k) {
+                const int k2 = (k + 1) % sides;
+                const int a0 = i * sides + k, a1 = i * sides + k2, b0 = (i + 1) * sides + k, b1 = (i + 1) * sides + k2;
+                put(a0), put(b0), put(a1);
+                put(a1), put(b0), put(b1);
+            }
+    }
 }

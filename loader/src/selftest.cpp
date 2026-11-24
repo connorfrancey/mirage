@@ -8,6 +8,7 @@
 #include "core/scheduler.h"
 #include "core/cache.h"
 #include "core/setting.h"
+#include "core/keys.h"
 #include "gui.h"
 #include "hooks.h"
 #include "log.h"
@@ -96,7 +97,6 @@
 #endif
 
 #include <Windows.h>
-#include <nlohmann/json.hpp>
 #include "game/object_ref.h"
 #include "util/float_util.h"
 #include "runtime/world_events.h"
@@ -104,6 +104,7 @@
 #include "runtime/actions.h"
 #include "runtime/moves.h"
 #include "runtime/anim.h"
+#include "util/glz_compat.h"
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -127,7 +128,7 @@
 namespace selftest {
 namespace {
 
-using json = nlohmann::ordered_json;
+using jc::json;
 
 struct Options {
     std::vector<std::string> modTests;   // "Mod tests": only these mods' tests (all when empty): `mirage mod test`
@@ -223,22 +224,27 @@ void WriteResult(bool finished)
     root["passed"] = finished && passed;
     root["current"] = g_current;
     root["seconds"] = static_cast<double>(GetTickCount64() - g_started) / 1000.0;
-    json steps = json::array();
+    const auto strings = [](const std::vector<std::string>& list) {
+        json out = jc::new_array();
+        for (const std::string& v : list) jc::push(out, v);
+        return out;
+    };
+    json steps = jc::new_array();
     for (const Step& s : g_steps) {
         json j;
         j["name"] = s.name;
         j["ok"] = s.ok;
         j["seconds"] = s.seconds;
-        j["problems"] = s.problems;
-        j["notes"] = s.notes;
-        steps.push_back(std::move(j));
+        j["problems"] = strings(s.problems);
+        j["notes"] = strings(s.notes);
+        jc::push(steps, std::move(j));
     }
     root["steps"] = std::move(steps);
     const auto path = ResultPath();
     const auto tmp = path.string() + ".tmp";
     {
         std::ofstream out(tmp, std::ios::trunc);
-        out << root.dump(2);
+        out << jc::dump(root, true);
     }
     // `mirage game-test` reads the file several times a second: a replace while it is open fails, so try again (the
     // last write, finished = true, once got lost that way and the run waited for nothing)
@@ -587,13 +593,14 @@ Expectation ExpectationFor(Module& m)
                     char map[64]{};
                     mirage::mods::game_api::ShareGet("mirage-menu", "map", map, sizeof map);
                     const auto file = folder / (std::string(map) + ".json");
-                    std::ifstream in(file);
+                    std::ifstream in(file, std::ios::binary);
                     if (!in) return "no file was written";
-                    const auto j = nlohmann::json::parse(in, nullptr, false);
-                    if (j.is_discarded() || !j.contains("states") || j["states"].empty()) return "the file has no states";
+                    const json j = jc::parse(std::string{std::istreambuf_iterator<char>(in), {}});
+                    const auto& states = jc::items(j, "states");
+                    if (states.empty() || !jc::contains(states[0], "state")) return "the file has no states";
                     p->Location.X += 2000.f;
                     p->Velocity = Classes::FVector{};
-                    if (!player_state::Apply(j["states"][0]["state"])) return std::string("putting the stored state back failed");
+                    if (!player_state::Apply(states[0]["state"])) return std::string("putting the stored state back failed");
                     const float d = Distance(p->Location, g_savedAt);
                     if (d >= 150.f) return "the player is " + std::to_string(static_cast<int>(d)) +
                                            " units from the stored position after loading it";
@@ -1388,13 +1395,13 @@ std::filesystem::path TdInputIni()
 }
 
 // Collision View is a native first-party mod (mods/mirage-collision): what it sees comes from what it shares (JSON).
-nlohmann::json CollisionShared(const char* key)
+json CollisionShared(const char* key)
 {
     std::string v(1 << 16, '\0');
     const uint32_t n = mirage::mods::game_api::ShareGet("mirage-collision", key, v.data(), static_cast<uint32_t>(v.size()));
     v.resize(std::min<std::size_t>(n, v.size() - 1));
-    const auto j = nlohmann::json::parse(v, nullptr, false);
-    return j.is_discarded() ? nlohmann::json::object() : j;
+    const json j = jc::parse(v);
+    return j.is_object() ? j : jc::new_object();
 }
 
 // Turns the player's view toward a point (what the panel's Nearby click does)
@@ -1445,27 +1452,27 @@ void TestCollisionInspect()
         if (!view->Enabled()) view->SetEnabled(true);
     });
 
-    nlohmann::json nearby = nlohmann::json::array();
-    WaitFor(10.0, [&] { nearby = CollisionShared("inspect").value("nearby", nlohmann::json::array()); return !nearby.empty(); });
+    json nearby = jc::new_array();
+    WaitFor(10.0, [&] { nearby = jc::value(CollisionShared("inspect"), "nearby", jc::new_array()); return !nearby.empty(); });
     if (nearby.empty()) p.Problem("no volumes listed near the player");
     int tried = 0, matched = 0;
-    for (const auto& n : nearby) {
+    for (const auto& n : jc::items(nearby)) {
         if (tried >= 5 || g_aborted) break;
-        const std::string name = n.value("name", std::string());
-        const float distance = n.value("distance", 0.f);
+        const std::string name = jc::value(n, "name", std::string());
+        const float distance = jc::value(n, "distance", 0.f);
         if (distance <= 0.f || name.empty()) continue;      // Inside it: the view ray starts in it
         ++tried;
-        FaceTowards(n.value("x", 0.f), n.value("y", 0.f), n.value("z", 0.f));
+        FaceTowards(jc::value(n, "x", 0.f), jc::value(n, "y", 0.f), jc::value(n, "z", 0.f));
         WaitTicks(45);          // The mod shares twice a second
-        const auto look = CollisionShared("inspect").value("look", nlohmann::json::object());
-        const bool valid = look.value("valid", false);
-        const std::string lookName = look.value("name", std::string());
+        const json look = jc::value(CollisionShared("inspect"), "look", jc::new_object());
+        const bool valid = jc::value(look, "valid", false);
+        const std::string lookName = jc::value(look, "name", std::string());
         bool behindIt = false;
         std::string behind;
-        for (const auto& b : look.value("behind", nlohmann::json::array())) {
-            const std::string bn = b.value("name", std::string());
+        for (const auto& b : jc::items(look, "behind")) {
+            const std::string bn = jc::value(b, "name", std::string());
             behindIt |= valid && bn == name;
-            behind += " " + bn + "@" + std::to_string(static_cast<int>(b.value("at", 0.f)));
+            behind += " " + bn + "@" + std::to_string(static_cast<int>(jc::value(b, "at", 0.f)));
         }
         const bool front = valid && lookName == name;
         const bool ok = front || behindIt;
@@ -1474,7 +1481,7 @@ void TestCollisionInspect()
                                  : valid ? "looked at " + lookName : "looked at nothing";
         char note[200];
         std::snprintf(note, sizeof note, "faced %s (center %.0f away): %s, hit %.0f away", name.c_str(), distance,
-                      what.c_str(), look.value("distance", 0.f));
+                      what.c_str(), jc::value(look, "distance", 0.f));
         s.notes.push_back(note);
         if (!behind.empty()) s.notes.push_back("  also on the line:" + behind);
         if (ok) break;
@@ -1517,34 +1524,34 @@ void TestCollisionStatic()
         if (!view->Enabled()) view->SetEnabled(true);
     });
 
-    nlohmann::json info;
+    json info;
     const bool read = WaitFor(30.0, [&] {
         info = CollisionShared("static");
-        return !info.value("map", std::string()).empty() && !info.value("scanning", true) && info.value("meshes", 0) > 0;
+        return !jc::value(info, "map", std::string()).empty() && !jc::value(info, "scanning", true) && jc::value(info, "meshes", 0) > 0;
     });
-    WaitFor(5.0, [&] { info = CollisionShared("static"); return info.value("vertices", 0) > 0; });
+    WaitFor(5.0, [&] { info = CollisionShared("static"); return jc::value(info, "vertices", 0) > 0; });
     WaitTicks(120);                 // The steady state: the level read, the drawing kept up to date
     info = CollisionShared("static");
     std::size_t found = 0, drawn = 0;
     std::string per;
-    const auto foundList = info.value("found", nlohmann::json::array()), drawnList = info.value("drawn", nlohmann::json::array());
+    const json foundList = jc::value(info, "found", jc::new_array()), drawnList = jc::value(info, "drawn", jc::new_array());
     for (std::size_t c = 0; c < foundList.size() && c < drawnList.size(); ++c) {
-        found += foundList[c].get<std::size_t>();
-        drawn += drawnList[c].get<std::size_t>();
-        per += std::string(per.empty() ? "" : ", ") + std::to_string(drawnList[c].get<std::size_t>()) + "/" +
-               std::to_string(foundList[c].get<std::size_t>());
+        found += foundList[c].as<std::size_t>();
+        drawn += drawnList[c].as<std::size_t>();
+        per += std::string(per.empty() ? "" : ", ") + std::to_string(drawnList[c].as<std::size_t>()) + "/" +
+               std::to_string(foundList[c].as<std::size_t>());
     }
-    const double tickMax = info.value("tick_max_ms", 0.0), tickAvg = info.value("tick_ms", 0.0);
+    const double tickMax = jc::value(info, "tick_max_ms", 0.0), tickAvg = jc::value(info, "tick_ms", 0.0);
     char note[240];
     std::snprintf(note, sizeof note, "%s: %d meshes with simple collision, %zu placed; drawn/found per kind: %s",
-                  info.value("map", std::string()).c_str(), info.value("meshes", 0), found, per.c_str());
+                  jc::value(info, "map", std::string()).c_str(), jc::value(info, "meshes", 0), found, per.c_str());
     s.notes.push_back(note);
     std::snprintf(note, sizeof note, "%d k vertices built in %.1f ms (worker); game thread %.3f ms a tick on average, "
-                  "slowest %.1f ms%s", info.value("vertices", 0) / 1000, info.value("build_ms", 0.0), tickAvg, tickMax,
-                  info.value("budget_hit", false) ? "; vertex limit hit" : "");
+                  "slowest %.1f ms%s", jc::value(info, "vertices", 0) / 1000, jc::value(info, "build_ms", 0.0), tickAvg, tickMax,
+                  jc::value(info, "budget_hit", false) ? "; vertex limit hit" : "");
     s.notes.push_back(note);
     if (!read) p.Problem("the level was never read");
-    else if (info.value("meshes", 0) == 0) p.Problem("no mesh had simple collision we could read (only bounding boxes)");
+    else if (jc::value(info, "meshes", 0) == 0) p.Problem("no mesh had simple collision we could read (only bounding boxes)");
     if (read && drawn == 0) p.Problem("nothing drawn near the player");
     if (tickMax > 4.0) p.Problem("a game thread tick took " + std::to_string(tickMax) + " ms");
     if (tickAvg > 0.5) p.Problem("the game thread spends " + std::to_string(tickAvg) + " ms a tick on it");
@@ -1596,7 +1603,7 @@ std::map<Module*, Saved> SaveAll()
 {
     std::map<Module*, Saved> out;
     modules::ForEach([&](modules::Tab&, Module& m) {
-        Saved sv{m.Enabled(), m.key, json::object(), {}};
+        Saved sv{m.Enabled(), m.key, jc::new_object(), {}};
         for (ctl::Setting* st : m.Settings()) {
             sv.keys.emplace_back(st->key, st->keyAlt);
             if (!st->Persistent()) continue;
@@ -1707,7 +1714,7 @@ void TestMirageMods()
 
         // Settings save and load like the menu's own (the config writes each with Save, reads it with Load)
         {
-            nlohmann::ordered_json saved;
+            json saved;
             const std::string before = greeting->Get();
             greeting->Set("saved greeting");
             greeting->Save(saved["Greeting"]);
@@ -1919,6 +1926,67 @@ void TestModTests()
     }
     if (!g_options.modTests.empty() && results.empty()) p.Problem("the mod under test registered no tests");
     for (Module* m : switched) OnRenderThread([m] { m->SetEnabled(false); });
+    p.Check(1, true);
+    End(s);
+}
+
+void TestDeclarationReload()
+{
+    Step& s = Begin("Mirage declaration reload");
+    Probe p(s);
+    namespace mm = mirage::mods;
+    const auto lookup = [] {
+        for (const auto& info : mm::List())
+            if (info.id == "tech-demo") return info;
+        return mm::Info{};
+    };
+    const auto say = [](const char* lua) {
+        mm::EvalResult result;
+        OnGameThread([&] { result = mm::Eval("tech-demo", lua); });
+        return result.ok && result.value == "true";
+    };
+    const auto lab = lookup();
+    if (!lab.loaded || lab.dir.parent_path().filename() != "selftest-mods") {
+        p.Problem("the Field Lab self-test copy is unavailable");
+    } else {
+        const auto actions = lab.dir / "config/actions.toml";
+        const auto settings = lab.dir / "config/settings.toml";
+        const auto read = [](const auto& path) {
+            std::ifstream in(path, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(in), {});
+        };
+        const auto write = [](const auto& path, const std::string& text) {
+            std::ofstream out(path, std::ios::binary | std::ios::trunc);
+            return bool(out << text);
+        };
+        const auto originalActions = read(actions), originalSettings = read(settings);
+        std::string changedSettings = originalSettings;
+        const auto volume = changedSettings.find("default = 0.2");
+        if (volume == std::string::npos || originalActions.empty()) {
+            p.Problem("the declaration fixtures are missing");
+        } else {
+            if (!say("mirage_declaration_probe = true; mirage.setting('volume'):set(0.2); "
+                     "mirage.setting('launch_speed'):set(420); return true"))
+                p.Problem("could not seed the Field Lab settings");
+            if (!write(actions, "clear = \"Shift+F7\"\n" + originalActions.substr(originalActions.find('\n') + 1)) ||
+                !WaitFor(5.0, [&] {
+                    const auto current = lookup();
+                    return std::ranges::any_of(current.actions, [](const auto& a) {
+                        return a.name == "clear" && a.defaultKey == "Shift+F7";
+                    });
+                }))
+                p.Problem("editing the action file did not publish the new binding");
+
+            changedSettings.replace(volume, std::strlen("default = 0.2"), "default = 0.35");
+            if (!write(settings, changedSettings) || !WaitFor(5.0, [&] {
+                return say("return mirage_declaration_probe and math.abs(mirage.setting('volume'):get() - 0.35) < 0.001 "
+                           "and mirage.setting('launch_speed'):get() == 420");
+            })) p.Problem("editing the settings file did not apply the new default and preserve the user's value and Lua state");
+            if (lookup().reloads != lab.reloads) p.Problem("declaration edits reloaded the Field Lab code");
+            if (!write(actions, originalActions) || !write(settings, originalSettings))
+                p.Problem("could not restore the self-test fixture files");
+        }
+    }
     p.Check(1, true);
     End(s);
 }
@@ -2443,10 +2511,11 @@ void TestKismetLayer()
         traceUs = mirage::kismet_trace::Get().lastTickUs;
         std::string text(mirage::kismet_trace::Read("selftest", nullptr, 0) + 1, '\0');
         text.resize(mirage::kismet_trace::Read("selftest", text.data(), static_cast<std::uint32_t>(text.size())));
-        for (const auto& h : nlohmann::json::parse(text, nullptr, false)) {
+        const json hits = jc::parse(text);
+        for (const auto& h : jc::items(hits)) {
             if (!h.is_object()) continue;
-            if (h.value("op", "") == event->path) traced += h.value("times", 0);
-            if (h.value("op", "") == to) tracedLog += h.value("times", 0);
+            if (jc::value(h, "op", "") == event->path) traced += jc::value(h, "times", 0);
+            if (jc::value(h, "op", "") == to) tracedLog += jc::value(h, "times", 0);
         }
         mirage::kismet_trace::Enable("selftest", false);
     });
@@ -2963,8 +3032,9 @@ void TestPieces()
         WaitFor(5.0, [&] {
             live.clear();
             listed = 0;
-            for (const auto& n : CollisionShared("inspect").value("live", nlohmann::json::array())) {
-                const std::string name = n.get<std::string>();
+            const json inspect = CollisionShared("inspect");
+            for (const auto& n : jc::items(inspect, "live")) {
+                const std::string name = jc::as<std::string>(n);
                 live += " " + name;
                 for (const auto& e : placed) listed += e.actor && e.actor->GetName() == name ? 1 : 0;
             }
@@ -3272,8 +3342,8 @@ void TestCustomMove()
 
     // The action on another key (the mod manager's rebinding, saved in the mod's config.toml): SpaceBar no longer reaches
     // it, F does the double jump; put back on mod.toml's key
-    const auto onKey = [](const char* key) {
-        for (const auto& [mod, action] : mirage::mods::ActionsForKey(key))
+    const auto onKey = [](const char* key, int modifiers = 0) {
+        for (const auto& [mod, action] : mirage::mods::ActionsForKey(key, modifiers))
             if (mod == "double-jump" && action == "double_jump") return true;
         return false;
     };
@@ -3281,6 +3351,9 @@ void TestCustomMove()
     const bool spaceOff = !onKey("spacebar"), fOn = onKey("f");
     const JumpRun onF = JumpThenPress(jumpKey, "F");
     const bool fJumped = std::find(onF.states.begin(), onF.states.end(), slot) != onF.states.end();
+    const bool chord = mirage::mods::SetActionKey("double-jump", "double_jump", "Ctrl+F") &&
+        !onKey("f") && onKey("f", keys::kCtrl);
+    if (!chord) p.Problem("the action did not require its Ctrl modifier");
     mirage::mods::SetActionKey("double-jump", "double_jump", "");
     const bool back = onKey("spacebar") && !onKey("f");
     s.notes.push_back(fmt::format("rebound to F: saved {}, SpaceBar off it {}, F on it {}; F at the top: {:.0f} high (moves {}); put back on "
@@ -3320,13 +3393,13 @@ void TestAnimation()
     WaitPlayerReady(10.0);
     WaitGrounded();
     MirageObject* pawn = nullptr;
-    nlohmann::json sets;
+    json sets;
     OnGameThread([&] {
         pawn = reinterpret_cast<MirageObject*>(game::Pawn());
         if (!pawn) return;
         std::string text(ga::AnimSets(pawn, nullptr, 0) + 1, '\0');
         text.resize(ga::AnimSets(pawn, text.data(), static_cast<uint32_t>(text.size())));
-        sets = nlohmann::json::parse(text, nullptr, false);
+        sets = jc::parse(text);
     });
     if (!pawn || !sets.is_array()) {
         p.Problem("no player, or anim_sets gave no JSON");
@@ -3337,37 +3410,37 @@ void TestAnimation()
     std::string summary, pick;
     float pickLength = 0.f;
     int total = 0;
-    for (const auto& m : sets) {
+    for (const auto& m : jc::items(sets)) {
         int seqs = 0;
         std::string names;
-        for (const auto& set : m["sets"]) {
-            seqs += static_cast<int>(set["sequences"].size());
-            names += (names.empty() ? "" : ", ") + set.value("name", std::string()) + " (" + std::to_string(set["sequences"].size()) + ")";
-            for (const auto& q : set["sequences"]) {
-                const std::string n = q.value("name", std::string());
-                if (n == "SpringBoardLeftLeg" || (pick.empty() && q.value("length", 0.f) > 0.3f)) {
+        for (const auto& set : jc::items(m, "sets")) {
+            seqs += static_cast<int>(jc::items(set, "sequences").size());
+            names += (names.empty() ? "" : ", ") + jc::value(set, "name", std::string()) + " (" + std::to_string(jc::items(set, "sequences").size()) + ")";
+            for (const auto& q : jc::items(set, "sequences")) {
+                const std::string n = jc::value(q, "name", std::string());
+                if (n == "SpringBoardLeftLeg" || (pick.empty() && jc::value(q, "length", 0.f) > 0.3f)) {
                     if (pick != "SpringBoardLeftLeg") {
                         pick = n;
-                        pickLength = q.value("length", 0.f);
+                        pickLength = jc::value(q, "length", 0.f);
                     }
                 }
             }
         }
         total += seqs;
-        summary += fmt::format("{}{}: {} sets, {} sequences [{}]", summary.empty() ? "" : "; ", m.value("mesh", std::string()),
-                               m["sets"].size(), seqs, names);
+        summary += fmt::format("{}{}: {} sets, {} sequences [{}]", summary.empty() ? "" : "; ", jc::value(m, "mesh", std::string()),
+                               jc::items(m, "sets").size(), seqs, names);
     }
     s.notes.push_back(summary);
     // Each set's sequences against its package file, read with UnrealLib (here, off the game thread)
     std::string offline;
-    for (const auto& m : sets)
-        for (const auto& set : m["sets"]) {
-            const std::string setPath = set.value("path", std::string());
+    for (const auto& m : jc::items(sets))
+        for (const auto& set : jc::items(m, "sets")) {
+            const std::string setPath = jc::value(set, "path", std::string());
             std::string why;
             const int fromFile = mirage::anim::ReadSetSequences(setPath, &why);
             // Mods' animations (runtime/anim.h Install) are in the game's set but not in its file
-            const int live = static_cast<int>(std::count_if(set["sequences"].begin(), set["sequences"].end(),
-                                                            [](const auto& q) { return !q.value("custom", false); }));
+            const int live = static_cast<int>(std::count_if(jc::items(set, "sequences").begin(), jc::items(set, "sequences").end(),
+                                                            [](const auto& q) { return !jc::value(q, "custom", false); }));
             offline += fmt::format("{}{}: {} in the game, {}", offline.empty() ? "" : "; ", setPath, live,
                                    fromFile >= 0 ? std::to_string(fromFile) + " in the file" : "file: " + why);
             if (fromFile >= 0 && fromFile != live) p.Problem(fmt::format("{} has {} sequences in the game but {} in its file", setPath, live, fromFile));
@@ -3736,16 +3809,15 @@ void TestMovementTuning()
         std::string text(mirage::mods::game_api::MovementTransitions(nullptr, 0) + 1, '\0');
         text.resize(std::min<std::size_t>(mirage::mods::game_api::MovementTransitions(text.data(), static_cast<std::uint32_t>(text.size())),
                                           text.size() - 1));
-        const auto list = nlohmann::json::parse(text, nullptr, false);
+        const json list = jc::parse(text);
         int jumps = 0, named = 0;
         std::string sample;
-        if (list.is_array())
-            for (const auto& t : list) {
-                const std::string to = t.value("to_name", "");
+        for (const auto& t : jc::items(list)) {
+                const std::string to = jc::value(t, "to_name", "");
                 named += !to.empty();
                 if (to == "MOVE_Jump") {
                     ++jumps;
-                    if (sample.empty()) sample = t.value("from_name", "") + " -> " + to + fmt::format(" (tick {})", t.value("tick", 0ull));
+                    if (sample.empty()) sample = jc::value(t, "from_name", "") + " -> " + to + fmt::format(" (tick {})", jc::value(t, "tick", 0ull));
                 }
             }
         const std::size_t total = list.is_array() ? list.size() : 0;
@@ -4364,6 +4436,22 @@ void TestCSharpMods()
             WaitTicks(20);
             if (intOf(sm, "Ticks") <= t0) p.Problem("the C# script's module doesn't tick");
         }
+        // The script cache (managed Scripts.CompileCached): loaded again, the same sources are the kept assembly, not
+        // compiled again
+        std::vector<logging::Entry> none, since;
+        const auto mark = logging::CopySince(0, none);
+        std::string why;
+        OnGameThread([&] { why = mm::Reload("hello-script"); });
+        logging::CopySince(mark, since);
+        std::string how;
+        for (const auto& e : since)
+            if (e.text.find("[mod hello-script] ") != std::string::npos &&
+                (e.text.find("script cache") != std::string::npos || e.text.find("compiled in") != std::string::npos))
+                how = e.text.substr(e.text.find("[mod hello-script] ") + 19);
+        s.notes.push_back("hello-script reloaded: " + (why.empty() ? how : why));
+        if (!why.empty()) p.Problem("hello-script didn't reload: " + why);
+        else if (how.find("loaded from the script cache") == std::string::npos)
+            p.Problem("hello-script reloaded with the same sources wasn't taken from the script cache: " + how);
         const auto clean = mirage::dotnet::CheckScripts(script->dir, {}, {});
         if (clean.errors != 0) p.Problem("checking hello-script found " + std::to_string(clean.errors) + " error(s): " + clean.output);
         const auto dirty = mirage::dotnet::CheckScripts(script->dir, script->dir / "main.cs", "public sealed class X : Mod { int y = ; }");
@@ -8678,6 +8766,7 @@ const Named* FeatureList()
         {"Mirage change log", &TestChangeLog, false},
         {"Engine script events", &TestEngineScriptEvents, false},
         {"Engine console", &TestEngineConsole, false},
+        {"Mirage declaration reload", &TestDeclarationReload, true},
         {"Mod tests", &TestModTests, false},                // After the loader's own steps: a mod's tests may change the game
         {"Engine death hook", &TestEngineDeath, false},     // Last: it restarts the checkpoint
         {nullptr, nullptr, false},
@@ -8893,6 +8982,10 @@ bool Start(RunOptions o)
 
     g_worker = std::thread([] {
         config::SetAutoSave(false);     // The test switches settings: never into the player's config (put back after)
+        // The crash reporter and hang detector on for the run, whatever the player's config says: a crash or a hang
+        // mid-test is reported with where it happened, and the "Crash reporter" step tests the module it needs
+        if (Module* reporter = modules::Find("Crash Reporter"); reporter && !reporter->Enabled())
+            OnRenderThread([reporter] { reporter->SetEnabled(true); });
         RunTests(true);
         WriteResult(true);              // selftest-result.json, like `mirage game-test`
         int failed = 0;

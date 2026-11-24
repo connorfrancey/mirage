@@ -11,6 +11,28 @@
 namespace fs = std::filesystem;
 using namespace mirage::mpaf;
 
+TEST(Mpaf, PreservesTomlManifestAndDeclarationFiles)
+{
+	ArchiveWriter writer;
+	const std::string manifest = "id = \"cryptigo.field-lab\"\nversion = \"1.0.0\"\n"
+		"actions = \"config/actions.toml\"\nsettings = \"config/settings.toml\"\n";
+	const std::string actions = "deploy = \"F6\"\n";
+	const std::string settings = "hud = true\n";
+	const auto bytes = [](const std::string& text) { return std::as_bytes(std::span(text.data(), text.size())); };
+	writer.Add(TomlManifestPath, bytes(manifest));
+	writer.Add("config/actions.toml", bytes(actions));
+	writer.Add("config/settings.toml", bytes(settings));
+	const auto serialized = writer.Serialize();
+	const auto reader = ArchiveReader::Open(serialized);
+	ASSERT_NE(reader.Find(TomlManifestPath), nullptr);
+	EXPECT_EQ(reader.Find(TomlManifestPath)->type, EntryType::Manifest);
+	EXPECT_TRUE(std::ranges::equal(reader.Manifest(), bytes(manifest)));
+	EXPECT_TRUE(std::ranges::equal(reader.Read("config/actions.toml"), bytes(actions)));
+	EXPECT_TRUE(std::ranges::equal(reader.Read("config/settings.toml"), bytes(settings)));
+	writer.Add(ManifestPath, {});
+	EXPECT_THROW((void)writer.Serialize(), ArchiveError);
+}
+
 namespace
 {
 	Bytes View(std::string_view text)

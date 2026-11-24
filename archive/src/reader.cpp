@@ -45,8 +45,8 @@ namespace mirage::mpaf
 			default:
 				Fail(ErrorCode::Format, "Unknown MPAF entry type");
 			}
-			if ((type == EntryType::Manifest) != (path == ManifestPath))
-				Fail(ErrorCode::Format, "MPAF manifest type is reserved for manifest.yaml");
+			if ((type == EntryType::Manifest) != IsManifestPath(path))
+				Fail(ErrorCode::Format, "Invalid MPAF manifest entry");
 			dataCursor = Add(dataCursor, size, archiveSize, ErrorCode::Format);
 			return {path, offset, size, type, hash};
 		}
@@ -100,8 +100,11 @@ namespace mirage::mpaf
 		}
 		if (pathCursor != strings.size() || dataCursor != header.archiveSize)
 			Fail(ErrorCode::Format, "Unreferenced data in MPAF payload");
-		if (!reader.Find(ManifestPath))
-			Fail(ErrorCode::Missing, "MPAF requires manifest.yaml");
+		const bool toml = reader.Find(TomlManifestPath) != nullptr, legacy = reader.Find(ManifestPath) != nullptr;
+		if (!toml && !legacy)
+			Fail(ErrorCode::Missing, "MPAF requires a manifest");
+		if (toml && legacy)
+			Fail(ErrorCode::Duplicate, "MPAF contains two manifests");
 
 		std::string prefix;
 		for (auto it = reader.entries_.begin(); it != reader.entries_.end(); ++it)

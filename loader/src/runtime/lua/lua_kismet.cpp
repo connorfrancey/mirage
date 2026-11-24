@@ -13,7 +13,7 @@ namespace mirage::mods
 		const char* level = luaL_optstring(L, 1, "");
 		std::string text(self.api_->kismet_read(level, nullptr, 0) + 1, '\0');
 		text.resize(self.api_->kismet_read(level, text.data(), static_cast<uint32_t>(text.size())));
-		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		PushJson(L, jc::parse(text));
 		return 1;
 	}
 
@@ -85,7 +85,7 @@ namespace mirage::mods
 				break;
 			}
 		}
-		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		PushJson(L, jc::parse(text));
 		return 1;
 	}
 
@@ -97,7 +97,7 @@ namespace mirage::mods
 		if (!MIRAGE_API_HAS(self.api_, movement_transitions)) return luaL_error(L, "mirage.transitions: this runtime has no transition record");
 		std::string text(self.api_->movement_transitions(nullptr, 0) + 1, '\0');
 		text.resize((std::min)(static_cast<std::size_t>(self.api_->movement_transitions(text.data(), static_cast<uint32_t>(text.size()))), text.size() - 1));
-		PushJson(L, nlohmann::json::parse(text, nullptr, false));
+		PushJson(L, jc::parse(text));
 		return 1;
 	}
 
